@@ -240,9 +240,7 @@ def load_overrides(path: Path | None = None) -> OverrideCatalog:
     shows = raw.get("shows", [])
     if not _is_plain_int(schema_version):
         raise ValueError("override schema_version must be an integer")
-    if not isinstance(shows, list) or not all(
-        isinstance(show, dict) for show in shows
-    ):
+    if not isinstance(shows, list) or not all(isinstance(show, dict) for show in shows):
         raise ValueError("override shows must be an array of tables")
 
     return OverrideCatalog(
