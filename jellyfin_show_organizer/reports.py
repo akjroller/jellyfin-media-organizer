@@ -17,6 +17,7 @@ from .models import (
     TerminalStatus,
 )
 from .preflight import PreflightResult, summarize_preflight
+from .review import stable_review_ref
 from .schema import (
     canonical_companions,
     canonical_manifest_bytes,
@@ -26,6 +27,7 @@ from .schema import (
 
 CSV_HEADER = (
     "source",
+    "review_ref",
     "status",
     "destination",
     "show_title",
@@ -94,6 +96,7 @@ def _record_row(record: PlanRecord) -> dict[str, str]:
     evidence = record.evidence
     return {
         "source": record.source.relative_path,
+        "review_ref": stable_review_ref(record.source.relative_path),
         "status": record.status.value,
         "destination": record.destination or "",
         "show_title": show.title if show is not None else "",
