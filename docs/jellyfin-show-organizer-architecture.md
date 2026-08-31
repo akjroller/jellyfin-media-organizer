@@ -5,10 +5,10 @@
 This fork is based on upstream `jkwill87/mnamer` `main` at commit
 `4703dfea2d851ef55c4a62af0a1e1b80581fdc0c` ("Adds v3 dev note").
 
-Production evidence that motivated the organizer work came from mnamer 2.7.2
-plus local patches. Those local patches are evidence only: useful behavior must
-be reimplemented in repository-owned code with regression tests rather than
-copied blindly or treated as authoritative mappings.
+Private local validation and historical patches helped motivate the organizer
+work. Those materials are evidence only: useful behavior must be reimplemented
+in repository-owned code with regression tests rather than copied blindly or
+treated as authoritative mappings.
 
 The upstream MIT license and Git history remain intact.
 
@@ -33,15 +33,24 @@ Future organizer code must keep planning separate from mutation:
 
 No apply command exists at this stage.
 
-## Safety boundary
+## Privacy and safety boundary
 
-Repository code and tests must never access `D:\\Jellyfin` or any other real
-media library. Tests use temporary directories and synthetic zero-byte files
-only. Movies are out of scope for this subsystem.
+Repository code, tests, documentation, issues, pull requests, fixtures, and
+examples must not contain or access real user environment details. This includes
+real absolute media paths, usernames, machine or host names, network addresses,
+share names, directory inventories, account identifiers, private filenames,
+production logs, or other data copied from a contributor's system.
+
+Tests use temporary directories and synthetic zero-byte files only. Examples
+must use obviously fabricated paths such as `X:/ExampleMedia/Shows` or
+`/example/media/shows`; those examples must never be copied from a real system.
+Movies are out of scope for this subsystem.
 
 Real inventory exports, audit CSVs/logs, provider caches, manifests, generated
 plan files, copied library roots, and common video files are ignored by Git so
-local evidence cannot be committed accidentally.
+local evidence cannot be committed accidentally. Any bug discovered from a
+private library must be reduced to the smallest synthetic reproduction before it
+is added to the repository.
 
 ## Publishing safety
 
@@ -49,9 +58,8 @@ The inherited PyPI and Docker publishing workflows remain in the repository
 for upstream provenance, but their publishing jobs are owner-guarded to
 `jkwill87/mnamer`. The caller jobs in `push.yml` carry the same guard.
 
-Therefore the `akjroller/mnamer` fork can run lint and tests while inherited
-publishing jobs are skipped, including manual dispatch of the reusable
-publishing workflows.
+The fork can therefore run lint and tests while inherited publishing jobs are
+skipped, including manual dispatch of the reusable publishing workflows.
 
 ## Development commands
 
