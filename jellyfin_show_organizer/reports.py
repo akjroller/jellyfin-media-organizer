@@ -31,6 +31,8 @@ CSV_HEADER = (
     "status",
     "destination",
     "show_title",
+    "provider",
+    "provider_id",
     "tvmaze_id",
     "numbering_mode",
     "season",
@@ -100,7 +102,11 @@ def _record_row(record: PlanRecord) -> dict[str, str]:
         "status": record.status.value,
         "destination": record.destination or "",
         "show_title": show.title if show is not None else "",
-        "tvmaze_id": str(show.tvmaze_id) if show is not None else "",
+        "provider": show.provider if show is not None else "",
+        "provider_id": show.provider_id if show is not None else "",
+        "tvmaze_id": (
+            show.provider_id if show is not None and show.provider == "tvmaze" else ""
+        ),
         "numbering_mode": show.numbering_mode.value if show is not None else "",
         "season": str(parse.season)
         if parse is not None and parse.season is not None
@@ -128,7 +134,7 @@ def _record_row(record: PlanRecord) -> dict[str, str]:
         ),
         "operation_group_id": record.operation_group_id or "",
         "provider_episode_ids": "|".join(
-            str(episode.tvmaze_episode_id) for episode in record.provider_episodes
+            episode.provider_id for episode in record.provider_episodes
         ),
         "reason": record.reason or "",
     }
