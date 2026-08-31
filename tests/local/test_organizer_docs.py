@@ -29,13 +29,13 @@ def test_runbook_separates_operational_stages_and_has_no_apply_command():
     text = RUNBOOK.read_text(encoding="utf-8")
 
     for heading in (
-        "### 1. Scan",
-        "### 2. Plan",
-        "### 3. Audit",
-        "### 4. Approval",
-        "### 5. Apply",
-        "### 6. Verification",
-        "### 7. Recovery",
+        "### 1. Install and configure",
+        "### 2. Scan and plan",
+        "### 3. Review unresolved and apply local overrides",
+        "### 4. Audit and preflight",
+        "### 5. Approval",
+        "### 6. Apply",
+        "### 7. Verification and recovery",
     ):
         assert heading in text
 
@@ -52,6 +52,36 @@ def test_scaffold_plan_is_documented_as_nonzero_and_non_producing():
         assert "destination directory" in text
 
 
+def test_runbook_documents_current_non_mutating_surfaces():
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+
+    assert "jmo --version" in runbook
+    assert "jmo overrides validate local-overrides.toml" in runbook
+    assert "does not load local overrides implicitly" in runbook
+    assert "Subtitle sidecars are a companion planning layer" in runbook
+    assert ".idx` + `.sub` pairs" in runbook
+    assert "performs no media writes" in runbook
+
+
+def test_runbook_documents_current_numbering_and_release_boundaries():
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+
+    for mode in (
+        "`aired`",
+        "`absolute`",
+        "`parenthesized-absolute`",
+        "`segment-title`",
+        "`special`",
+        "`date`",
+    ):
+        assert mode in runbook
+
+    assert "Mixed numbering families" in runbook
+    assert "read-only repository permissions" in runbook
+    assert "does not contain package-registry publishing credentials" in runbook
+    assert "docs/releasing.md" in runbook
+
+
 def test_docs_keep_privacy_and_data_driven_extension_rules_explicit():
     runbook = RUNBOOK.read_text(encoding="utf-8")
     architecture = ARCHITECTURE.read_text(encoding="utf-8")
@@ -59,7 +89,7 @@ def test_docs_keep_privacy_and_data_driven_extension_rules_explicit():
     assert "Public repository privacy rules" in runbook
     assert "synthetic paths beneath `tmp_path`" in runbook
     assert "overrides-v1.toml" in runbook
-    assert "persistent cache layer" in runbook
+    assert "cache/provider boundary" in runbook
     assert "standalone Python package" in architecture
     assert "There is currently no `apply` command" in architecture
     assert "private library should be reduced" in architecture
