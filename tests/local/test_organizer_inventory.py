@@ -43,7 +43,9 @@ def test_scan_is_video_only_case_insensitive_and_accounts_for_samples(tmp_path: 
     assert all(record.fingerprint is not None for record in records)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="case-only siblings cannot coexist on Windows")
+@pytest.mark.skipif(
+    os.name == "nt", reason="case-only siblings cannot coexist on Windows"
+)
 def test_scan_uses_stable_case_insensitive_windows_ordering(tmp_path: Path):
     shows = tmp_path / "Shows"
     for name in ("beta.mkv", "alpha.mkv", "Alpha.mkv", "ALPHA 2.mkv"):
