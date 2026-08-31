@@ -181,8 +181,7 @@ def test_companion_destination_follows_chosen_video_destination(tmp_path: Path):
         "Example Series (2024)/Season 01/Example Series - S01E01 - Pilot.mkv",
         group,
     ) == (
-        "Example Series (2024)/Season 01/"
-        "Example Series - S01E01 - Pilot.en.forced.srt",
+        "Example Series (2024)/Season 01/Example Series - S01E01 - Pilot.en.forced.srt",
     )
 
 
