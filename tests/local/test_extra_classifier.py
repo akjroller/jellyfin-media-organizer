@@ -99,9 +99,7 @@ def test_conflicting_extra_markers_fail_closed():
 
 
 def test_ambiguous_extra_word_without_episode_evidence_is_unresolved():
-    result = classify_extra(
-        "synthetic/Old Harbor/Old.Harbor.Bonus.Production.Reel.mkv"
-    )
+    result = classify_extra("synthetic/Old Harbor/Old.Harbor.Bonus.Production.Reel.mkv")
 
     assert result.disposition is ExtraDisposition.UNRESOLVED
     assert result.decision is None
