@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT_FILE = ROOT / "pyproject.toml"
 REPOSITORY_URL = "https://github.com/akjroller/jellyfin-media-organizer"
