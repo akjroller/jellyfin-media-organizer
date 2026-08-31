@@ -8,7 +8,11 @@ from jellyfin_show_organizer.episode_assignment import (
     SourceEpisodeInput,
     assign_episode_group,
 )
-from jellyfin_show_organizer.models import CanonicalShow, NumberingMode, ParseResult
+from jellyfin_show_organizer.models import (
+    CanonicalShow,
+    NumberingMode,
+    ParseResult,
+)
 from jellyfin_show_organizer.tvmaze_cache import TvmazeCatalogCache
 
 
