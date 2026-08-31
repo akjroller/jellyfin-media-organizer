@@ -21,6 +21,8 @@ The `jmo plan` command is still a scaffold while the complete planning pipeline 
 ## Requirements
 
 - Python 3.12+
+- CI tests Linux on Python 3.12 and 3.14, plus Windows on Python 3.12.
+- Project metadata advertises Python 3.12, 3.13, and 3.14 support.
 
 The runtime package currently has no third-party dependencies.
 
@@ -34,12 +36,14 @@ Maintained project metadata points to this repository and its issue tracker. Pac
 
 ```bash
 python -m pip install .
+jmo --version
 jmo plan --help
 ```
 
 The historical `organizer` command remains available as a compatibility alias:
 
 ```bash
+organizer --version
 organizer plan --help
 ```
 
@@ -55,6 +59,7 @@ python -m ruff format --check jellyfin_show_organizer tests
 You can also run the package directly:
 
 ```bash
+python -m jellyfin_show_organizer --version
 python -m jellyfin_show_organizer plan --help
 ```
 
@@ -68,6 +73,7 @@ Repository examples and tests use synthetic paths and zero-byte fixtures. Real l
 
 - [Architecture](docs/jellyfin-show-organizer-architecture.md)
 - [Windows and operational runbook](docs/jellyfin-show-organizer-runbook.md)
+- [Release and versioning policy](docs/releasing.md)
 - [Upstream acknowledgments](ACKNOWLEDGMENTS.md)
 
 ## Project layout
@@ -80,6 +86,12 @@ tests/
   local/                   offline test suite
 docs/                      architecture and operating guidance
 ```
+
+## Releases
+
+JMO uses Semantic Versioning. Pull-request CI builds and verifies both wheel and source-distribution installs in isolated environments. Release artifacts are produced only by an explicit release workflow or a matching version tag; the repository does not automatically publish packages to a package registry.
+
+Current releases are **plan-only**. See the [release policy](docs/releasing.md) for the version source of truth, supported runtime matrix, tag rules, artifact verification process, and privacy boundary.
 
 ## Project history and credit
 

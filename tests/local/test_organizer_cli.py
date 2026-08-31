@@ -3,10 +3,19 @@ from pathlib import Path
 
 import pytest
 
+from jellyfin_show_organizer import __version__
 from jellyfin_show_organizer.cli import PLAN_NOT_IMPLEMENTED_EXIT, main
 
 pytestmark = pytest.mark.local
 ROOT = Path(__file__).parents[2]
+
+
+def test_organizer_version(capsys: pytest.CaptureFixture[str]):
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--version"])
+
+    assert exc_info.value.code == 0
+    assert capsys.readouterr().out.strip() == f"Jellyfin Media Organizer {__version__}"
 
 
 def test_organizer_plan_help(capsys: pytest.CaptureFixture[str]):
