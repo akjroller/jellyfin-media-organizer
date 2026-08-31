@@ -7,7 +7,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from enum import StrEnum
-from typing import Any, cast
 
 from .models import (
     CandidateEvidence,
@@ -15,9 +14,11 @@ from .models import (
     MatchEvidence,
     NumberingMode,
     ParseResult,
+    ProviderIdentity,
     TitlePreference,
 )
 from .overrides import OverrideCatalog, ShowOverride
+from .providers import MetadataProvider, ProviderShow, TvmazeProviderAdapter
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
 _MATCH_THRESHOLD = 0.90
@@ -36,13 +37,6 @@ class ShowResolution:
     status: ResolutionStatus
     show: CanonicalShow | None
     evidence: MatchEvidence
-
-
-@dataclass(frozen=True, slots=True)
-class _ProviderCandidate:
-    tvmaze_id: int
-    title: str
-    year: int | None
 
 
 def normalize_show_identity(value: str) -> str:
@@ -108,18 +102,16 @@ def _matching_overrides(
     return tuple(sorted(matches, key=lambda show: show.key.casefold()))
 
 
-def _explicit_ids(
+def _explicit_identities(
     parses: Iterable[ParseResult],
     override: ShowOverride | None,
-) -> tuple[int, ...]:
-    values = {
-        parse.embedded_tvmaze_id
-        for parse in parses
-        if parse.embedded_tvmaze_id is not None
-    }
-    if override is not None and override.tvmaze_id is not None:
-        values.add(override.tvmaze_id)
-    return tuple(sorted(values))
+) -> tuple[ProviderIdentity, ...]:
+    values: set[ProviderIdentity] = set()
+    for parse in parses:
+        values.update(parse.provider_identities)
+    if override is not None and override.provider_identity is not None:
+        values.add(override.provider_identity)
+    return tuple(sorted(values, key=lambda identity: identity.key))
 
 
 def _preferred_title(
@@ -152,56 +144,8 @@ def _unresolved(method: str, *reasons: str) -> ShowResolution:
     )
 
 
-def _provider_candidates(response: object) -> tuple[_ProviderCandidate, ...]:
-    if not isinstance(response, list):
-        return ()
-
-    candidates: list[_ProviderCandidate] = []
-    for item in response:
-        if not isinstance(item, dict):
-            continue
-        raw_item = cast(dict[str, Any], item)
-        show = raw_item.get("show")
-        if not isinstance(show, dict):
-            continue
-        raw_show = cast(dict[str, Any], show)
-        tvmaze_id = raw_show.get("id")
-        title = raw_show.get("name")
-        premiered = raw_show.get("premiered")
-        if not isinstance(tvmaze_id, int) or tvmaze_id <= 0:
-            continue
-        if not isinstance(title, str) or not title.strip():
-            continue
-
-        year = None
-        if isinstance(premiered, str):
-            match = re.match(r"^(\d{4})-", premiered)
-            if match is not None:
-                year = int(match.group(1))
-        candidates.append(
-            _ProviderCandidate(
-                tvmaze_id=tvmaze_id,
-                title=title.strip(),
-                year=year,
-            )
-        )
-
-    unique = {
-        (candidate.tvmaze_id, candidate.title): candidate for candidate in candidates
-    }
-    return tuple(
-        sorted(
-            unique.values(),
-            key=lambda candidate: (
-                normalize_show_identity(candidate.title),
-                candidate.tvmaze_id,
-            ),
-        )
-    )
-
-
 def _score_candidate(
-    candidate: _ProviderCandidate,
+    candidate: ProviderShow,
     identities: tuple[str, ...],
     year_hint: int | None,
 ) -> CandidateEvidence:
@@ -233,21 +177,31 @@ def _score_candidate(
             reasons.append("year-mismatch")
 
     return CandidateEvidence(
-        tvmaze_id=candidate.tvmaze_id,
+        provider_identity=candidate.identity,
         title=candidate.title,
         score=round(score, 6),
         reasons=tuple(reasons),
     )
 
 
-def resolve_show_group(
+def _explicit_conflict_reasons(
+    identities: tuple[ProviderIdentity, ...],
+) -> tuple[str, ...]:
+    if identities and all(identity.provider == "tvmaze" for identity in identities):
+        return (
+            "conflicting-explicit-tvmaze-ids",
+            "conflicting-explicit-provider-identities",
+        )
+    return ("conflicting-explicit-provider-identities",)
+
+
+def resolve_show_group_with_provider(
     source_key: str,
     parses: Iterable[ParseResult],
     overrides: OverrideCatalog,
-    cache: TvmazeCatalogCache,
-    getter: JsonGetter,
+    provider: MetadataProvider,
 ) -> ShowResolution:
-    """Resolve one source-show group to at most one canonical TVMaze series."""
+    """Resolve one source-show group through normalized provider metadata."""
 
     parse_group = tuple(parses)
     titles = _source_titles(parse_group)
@@ -266,45 +220,63 @@ def resolve_show_group(
             return _unresolved("override", "override-year-conflicts-with-source")
         year_hint = override.year
 
-    explicit_ids = _explicit_ids(parse_group, override)
-    if len(explicit_ids) > 1:
-        return _unresolved("explicit-tvmaze-id", "conflicting-explicit-tvmaze-ids")
-    if explicit_ids:
+    explicit_identities = _explicit_identities(parse_group, override)
+    if len(explicit_identities) > 1:
+        return _unresolved(
+            "explicit-provider-id",
+            *_explicit_conflict_reasons(explicit_identities),
+        )
+    if explicit_identities:
+        identity = explicit_identities[0]
         title = _preferred_title(override, source_title, None)
         if title is None:
-            return _unresolved("explicit-tvmaze-id", "missing-canonical-title")
+            return _unresolved("explicit-provider-id", "missing-canonical-title")
+        method = (
+            "explicit-tvmaze-id"
+            if identity.provider == "tvmaze"
+            else "explicit-provider-id"
+        )
         return ShowResolution(
             status=ResolutionStatus.MATCHED,
             show=CanonicalShow(
                 source_key=source_key,
-                tvmaze_id=explicit_ids[0],
+                provider_identity=identity,
                 title=title,
                 year=year_hint,
                 numbering_mode=_numbering_mode(override),
             ),
             evidence=MatchEvidence(
-                method="explicit-tvmaze-id",
+                method=method,
                 confidence=1.0,
-                reasons=("single-explicit-provider-identity",),
+                reasons=(
+                    "single-explicit-provider-identity",
+                    f"provider-identity:{identity.key}",
+                ),
             ),
         )
 
     search_title = source_title
     if override is not None and override.preferred_title:
         search_title = override.preferred_title
+    provider_method = f"{provider.provider_name}-search"
     if search_title is None:
-        return _unresolved("tvmaze-search", "missing-source-title")
+        return _unresolved(provider_method, "missing-source-title")
 
-    cache_record = cache.search_show(search_title, getter)
-    if not cache_record.resolved:
+    snapshot = provider.search_shows(search_title)
+    if not snapshot.resolved:
         return _unresolved(
-            "tvmaze-search",
-            cache_record.unresolved_reason or "provider-search-unresolved",
+            provider_method,
+            snapshot.unresolved_reason or "provider-search-unresolved",
+            f"provider-snapshot:{snapshot.snapshot_identity}",
         )
 
-    provider_candidates = _provider_candidates(cache_record.response)
+    provider_candidates = snapshot.shows
     if not provider_candidates:
-        return _unresolved("tvmaze-search", "no-valid-provider-candidates")
+        return _unresolved(
+            provider_method,
+            "no-valid-provider-candidates",
+            f"provider-snapshot:{snapshot.snapshot_identity}",
+        )
 
     identities = {normalize_show_identity(title) for title in titles}
     identities.add(normalize_show_identity(source_key))
@@ -315,17 +287,17 @@ def resolve_show_group(
             identities.add(normalize_show_identity(override.preferred_title))
     identity_tuple = tuple(sorted(identity for identity in identities if identity))
 
-    evidence_by_id = {
-        candidate.tvmaze_id: _score_candidate(candidate, identity_tuple, year_hint)
+    evidence_by_identity = {
+        candidate.identity: _score_candidate(candidate, identity_tuple, year_hint)
         for candidate in provider_candidates
     }
     ranked = tuple(
         sorted(
-            evidence_by_id.values(),
+            evidence_by_identity.values(),
             key=lambda candidate: (
                 -candidate.score,
                 normalize_show_identity(candidate.title),
-                candidate.tvmaze_id,
+                candidate.provider_identity.key,
             ),
         )
     )
@@ -336,26 +308,31 @@ def resolve_show_group(
     if top.score >= _MATCH_THRESHOLD and (
         len(ranked) == 1 or gap >= _MINIMUM_MATCH_GAP
     ):
-        provider = next(
+        provider_show = next(
             candidate
             for candidate in provider_candidates
-            if candidate.tvmaze_id == top.tvmaze_id
+            if candidate.identity == top.provider_identity
         )
-        title = _preferred_title(override, source_title, provider.title)
+        title = _preferred_title(override, source_title, provider_show.title)
         assert title is not None
         return ShowResolution(
             status=ResolutionStatus.MATCHED,
             show=CanonicalShow(
                 source_key=source_key,
-                tvmaze_id=provider.tvmaze_id,
+                provider_identity=provider_show.identity,
                 title=title,
-                year=provider.year if provider.year is not None else year_hint,
+                year=(
+                    provider_show.year if provider_show.year is not None else year_hint
+                ),
                 numbering_mode=_numbering_mode(override),
             ),
             evidence=MatchEvidence(
-                method="tvmaze-search",
+                method=provider_method,
                 confidence=top.score,
-                reasons=(f"candidate-gap:{gap:.3f}",),
+                reasons=(
+                    f"candidate-gap:{gap:.3f}",
+                    f"provider-snapshot:{snapshot.snapshot_identity}",
+                ),
                 candidates=ranked,
             ),
         )
@@ -374,9 +351,30 @@ def resolve_show_group(
         status=status,
         show=None,
         evidence=MatchEvidence(
-            method="tvmaze-search",
+            method=provider_method,
             confidence=top.score,
-            reasons=(reason, f"candidate-gap:{gap:.3f}"),
+            reasons=(
+                reason,
+                f"candidate-gap:{gap:.3f}",
+                f"provider-snapshot:{snapshot.snapshot_identity}",
+            ),
             candidates=ranked,
         ),
+    )
+
+
+def resolve_show_group(
+    source_key: str,
+    parses: Iterable[ParseResult],
+    overrides: OverrideCatalog,
+    cache: TvmazeCatalogCache,
+    getter: JsonGetter,
+) -> ShowResolution:
+    """Compatibility wrapper using the initial TVMaze provider adapter."""
+
+    return resolve_show_group_with_provider(
+        source_key,
+        parses,
+        overrides,
+        TvmazeProviderAdapter(cache, getter),
     )
