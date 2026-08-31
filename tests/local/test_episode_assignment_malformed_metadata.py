@@ -71,10 +71,7 @@ def test_aired_assignment_uses_row_with_malformed_irrelevant_airdate(
     assert result.status is AssignmentStatus.MATCHED
     assert assignment.episodes[0].tvmaze_episode_id == 1002
     assert assignment.episodes[0].airdate is None
-    assert (
-        "catalog-diagnostic:invalid-catalog-airdate:1"
-        in assignment.evidence.reasons
-    )
+    assert "catalog-diagnostic:invalid-catalog-airdate:1" in assignment.evidence.reasons
 
 
 def test_absolute_assignment_is_not_blocked_by_malformed_airdate(
@@ -90,10 +87,7 @@ def test_absolute_assignment_is_not_blocked_by_malformed_airdate(
     assignment = result.assignments[0]
     assert result.status is AssignmentStatus.MATCHED
     assert assignment.episodes[0].tvmaze_episode_id == 1002
-    assert (
-        "catalog-diagnostic:invalid-catalog-airdate:1"
-        in assignment.evidence.reasons
-    )
+    assert "catalog-diagnostic:invalid-catalog-airdate:1" in assignment.evidence.reasons
 
 
 def test_date_assignment_can_use_valid_date_despite_unrelated_bad_airdate(
@@ -102,10 +96,7 @@ def test_date_assignment_can_use_valid_date_despite_unrelated_bad_airdate(
     result = assign_episode_group(
         _show(NumberingMode.DATE),
         (
-            SourceEpisodeInput(
-                "dated.mkv",
-                ParseResult(episode_date="2024-01-01"),
-            ),
+            SourceEpisodeInput("dated.mkv", ParseResult(episode_date="2024-01-01")),
         ),
         TvmazeCatalogCache(tmp_path / "cache"),
         StaticGetter(_catalog_with_bad_optional_metadata()),
@@ -114,10 +105,7 @@ def test_date_assignment_can_use_valid_date_despite_unrelated_bad_airdate(
     assignment = result.assignments[0]
     assert result.status is AssignmentStatus.MATCHED
     assert assignment.episodes[0].tvmaze_episode_id == 1001
-    assert (
-        "catalog-diagnostic:invalid-catalog-airdate:1"
-        in assignment.evidence.reasons
-    )
+    assert "catalog-diagnostic:invalid-catalog-airdate:1" in assignment.evidence.reasons
 
 
 def test_date_assignment_fails_closed_when_required_date_is_unavailable(
@@ -126,10 +114,7 @@ def test_date_assignment_fails_closed_when_required_date_is_unavailable(
     result = assign_episode_group(
         _show(NumberingMode.DATE),
         (
-            SourceEpisodeInput(
-                "dated.mkv",
-                ParseResult(episode_date="2024-01-02"),
-            ),
+            SourceEpisodeInput("dated.mkv", ParseResult(episode_date="2024-01-02")),
         ),
         TvmazeCatalogCache(tmp_path / "cache"),
         StaticGetter(_catalog_with_bad_optional_metadata()),
@@ -139,10 +124,7 @@ def test_date_assignment_fails_closed_when_required_date_is_unavailable(
     assert result.status is AssignmentStatus.UNRESOLVED
     assert assignment.episodes == ()
     assert "missing-date-catalog-entry:2024-01-02" in assignment.evidence.reasons
-    assert (
-        "catalog-diagnostic:invalid-catalog-airdate:1"
-        in assignment.evidence.reasons
-    )
+    assert "catalog-diagnostic:invalid-catalog-airdate:1" in assignment.evidence.reasons
 
 
 def test_special_assignment_uses_season_zero_when_type_is_malformed(
