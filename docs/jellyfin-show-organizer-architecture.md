@@ -79,3 +79,21 @@ The organizer command can also be run directly from repository code:
 ```bash
 uv run python -m jellyfin_show_organizer plan --help
 ```
+
+## Versioned organizer contracts
+
+The organizer's cross-stage data contract lives in `jellyfin_show_organizer/models.py`
+and `jellyfin_show_organizer/data/plan-schema-v1.json`. Plans are serialized with
+stable key ordering and compact JSON before SHA-256 hashing; timestamps or other
+run-local metadata are deliberately excluded from the plan model so equivalent
+inputs can produce the same plan hash.
+
+Show-specific aliases and numbering decisions are represented by the versioned
+override format in `jellyfin_show_organizer/data/overrides-v1.toml`. The checked-in
+catalog contains synthetic examples only so the public repository does not encode
+any contributor's private library. Real deployments should use local, untracked
+override data.
+
+Supported numbering modes are `aired`, `absolute`, `parenthesized-absolute`, and
+`segment-title`. Parser code must consume these policies rather than embedding
+show names or one-off decisions.
