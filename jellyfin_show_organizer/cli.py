@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report that the planning workflow is not implemented yet.",
         description=(
             "The organizer plan command is currently a scaffold. "
-            "It does not produce a plan until the end-to-end planner is implemented."
+            "Planning is not implemented yet, so this command does not produce a plan."
         ),
     )
     plan_parser.set_defaults(handler=_run_plan)
