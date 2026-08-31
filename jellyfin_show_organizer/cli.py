@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 
+from . import __version__
 from .overrides import load_overrides
 
 CommandHandler = Callable[[argparse.Namespace], int]
@@ -20,6 +21,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Plan-only Jellyfin show organization tooling. "
             "Media mutation is intentionally unavailable."
         ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"Jellyfin Media Organizer {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
