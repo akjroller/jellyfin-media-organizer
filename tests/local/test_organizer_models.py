@@ -14,6 +14,8 @@ def test_numbering_modes_are_explicit_and_versionable():
         "absolute",
         "parenthesized-absolute",
         "segment-title",
+        "special",
+        "date",
     }
 
 

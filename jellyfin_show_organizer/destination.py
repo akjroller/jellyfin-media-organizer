@@ -404,6 +404,7 @@ def build_episode_destination(
 
     reasons = [
         "jellyfin-series-season-episode-layout",
+        f"numbering-mode:{show.numbering_mode.value}",
         f"canonical-tvmaze-id:{show.tvmaze_id}",
         f"episode-token:{token}",
     ]
