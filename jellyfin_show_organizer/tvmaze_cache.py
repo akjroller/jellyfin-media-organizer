@@ -256,7 +256,10 @@ class TvmazeCatalogCache:
                 return cached
             if not self.refresh:
                 return cached
-            if cached.state is CacheState.OK and cached.freshness is CacheFreshness.FRESH:
+            if (
+                cached.state is CacheState.OK
+                and cached.freshness is CacheFreshness.FRESH
+            ):
                 return cached
 
         if self.offline:
