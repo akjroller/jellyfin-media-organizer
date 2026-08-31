@@ -51,9 +51,7 @@ def _tracked_paths() -> tuple[Path, ...]:
         capture_output=True,
     )
     return tuple(
-        Path(item.decode("utf-8"))
-        for item in result.stdout.split(b"\0")
-        if item
+        Path(item.decode("utf-8")) for item in result.stdout.split(b"\0") if item
     )
 
 
