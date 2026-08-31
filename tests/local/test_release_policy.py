@@ -45,6 +45,7 @@ def test_release_policy_keeps_plan_only_and_private_data_boundaries_explicit():
     text = RELEASE_DOC.read_text(encoding="utf-8")
 
     assert "Semantic Versioning" in text
-    assert "Current releases are **plan-only**" in text
+    assert "No JMO release or version tag has been created yet by design" in text
+    assert "must be described as **plan-only**" in text
     assert "There is currently no automatic PyPI" in text
     assert "Real media, inventories, reports, provider caches, manifests" in text
