@@ -134,6 +134,18 @@ def _normalized_subtitle_suffix(raw_suffix: str) -> str | None:
     return "." + ".".join(normalized)
 
 
+def _casefold_prefix_end(value: str, folded_prefix: str) -> int | None:
+    """Return the raw prefix boundary whose casefold equals folded_prefix."""
+
+    for end in range(1, len(value) + 1):
+        folded_candidate = value[:end].casefold()
+        if folded_candidate == folded_prefix:
+            return end
+        if len(folded_candidate) > len(folded_prefix):
+            return None
+    return None
+
+
 def _subtitle_candidates(
     sidecar_stem: str,
     videos: tuple[SourceFile, ...],
@@ -147,10 +159,11 @@ def _subtitle_candidates(
         if folded_sidecar == folded_video:
             candidates.append((video, ""))
             continue
-        prefix = folded_video + "."
-        if not folded_sidecar.startswith(prefix):
+
+        prefix_end = _casefold_prefix_end(sidecar_stem, folded_video)
+        if prefix_end is None:
             continue
-        raw_suffix = sidecar_stem[len(video_stem) :]
+        raw_suffix = sidecar_stem[prefix_end:]
         suffix = _normalized_subtitle_suffix(raw_suffix)
         if suffix is not None:
             candidates.append((video, suffix))
