@@ -1,10 +1,12 @@
 from pathlib import Path
+import tomllib
 
 import pytest
 
 from jellyfin_show_organizer.cli import PLAN_NOT_IMPLEMENTED_EXIT, main
 
 pytestmark = pytest.mark.local
+ROOT = Path(__file__).parents[2]
 
 
 def test_organizer_plan_help(capsys: pytest.CaptureFixture[str]):
@@ -44,3 +46,11 @@ def test_organizer_plan_scaffold_fails_without_creating_output(
         in captured.err
     )
     assert list(tmp_path.iterdir()) == []
+
+
+def test_jmo_and_organizer_commands_share_the_same_scaffold_entrypoint():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    scripts = project["project"]["scripts"]
+
+    assert scripts["jmo"] == "jellyfin_show_organizer.cli:main"
+    assert scripts["organizer"] == scripts["jmo"]
