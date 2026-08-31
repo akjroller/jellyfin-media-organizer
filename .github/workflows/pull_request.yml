@@ -37,3 +37,31 @@ jobs:
           network: false
           e2e: true
           coverage: false
+
+  organizer-offline-windows:
+    name: Organizer offline safety (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      API_KEY_OMDB: ""
+      API_KEY_TMDB: ""
+      API_KEY_TVDB: ""
+      API_KEY_TVMAZE: ""
+      MNAMER_ORGANIZER_OFFLINE: "1"
+      PYTHONHASHSEED: "0"
+      TZ: UTC
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/init
+        with:
+          save-cache: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+
+      - name: Run offline organizer safety tests
+        shell: pwsh
+        run: >-
+          uv run pytest
+          tests/local/organizer
+          -m "organizer and not network"
+          --strict-markers
+          --maxfail=1

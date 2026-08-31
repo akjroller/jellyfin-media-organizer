@@ -19,6 +19,17 @@ Development and CI must use synthetic files under pytest temporary directories
 and checked-in, anonymized metadata snapshots. Tests must never access
 `D:\Jellyfin`.
 
+Organizer regressions belong under `tests/local/organizer`. Tests in that tree
+are automatically marked `organizer` and run in a required Windows PR job with
+provider credentials removed. Its autouse guard rejects live HTTP/socket calls,
+any access to the real media root, and every filesystem mutation outside that
+test's pytest `tmp_path`. Provider behavior must therefore be exercised through
+checked-in snapshots. Run the same gate locally with:
+
+```console
+uv run pytest tests/local/organizer -m "organizer and not network" --strict-markers
+```
+
 The initial workflow is:
 
 1. Inventory video files without mutation.
