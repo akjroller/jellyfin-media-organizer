@@ -4,7 +4,7 @@ import re
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from enum import StrEnum
 from typing import Any, cast
@@ -15,9 +15,11 @@ from .models import (
     MatchEvidence,
     NumberingMode,
     ParseResult,
+    ProviderIdentity,
     TitlePreference,
 )
 from .overrides import OverrideCatalog, ShowOverride
+from .providers import TvmazeProviderAdapter
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
 _MATCH_THRESHOLD = 0.90
@@ -240,6 +242,135 @@ def _score_candidate(
     )
 
 
+def _observed_aired_coordinates(
+    parses: tuple[ParseResult, ...],
+    numbering_mode: NumberingMode,
+) -> tuple[tuple[int, int], ...]:
+    if numbering_mode is not NumberingMode.AIRED:
+        return ()
+
+    coordinates: set[tuple[int, int]] = set()
+    for parse in parses:
+        if any(
+            (
+                parse.absolute_episode is not None,
+                parse.special_kind is not None,
+                parse.episode_date is not None,
+                parse.segment_hint is not None,
+            )
+        ):
+            return ()
+        if parse.season is None:
+            if parse.episodes:
+                return ()
+            continue
+        coordinates.update((parse.season, episode) for episode in parse.episodes)
+    return tuple(sorted(coordinates))
+
+
+def _aired_coordinate_label(coordinate: tuple[int, int]) -> str:
+    season, episode = coordinate
+    return f"S{season:02d}E{episode:02d}"
+
+
+def _catalog_tiebreak(
+    contenders: tuple[CandidateEvidence, ...],
+    ranked: tuple[CandidateEvidence, ...],
+    observed: tuple[tuple[int, int], ...],
+    cache: TvmazeCatalogCache,
+    getter: JsonGetter,
+) -> tuple[int | None, tuple[CandidateEvidence, ...], tuple[str, ...]]:
+    adapter = TvmazeProviderAdapter(cache, getter)
+    annotated: dict[int, CandidateEvidence] = {}
+    compatible_ids: list[int] = []
+    incomplete_reasons: list[str] = []
+
+    for candidate in contenders:
+        catalog = adapter.episode_catalog(ProviderIdentity.tvmaze(candidate.tvmaze_id))
+        candidate_reasons = list(candidate.reasons)
+        if not catalog.resolved:
+            detail = catalog.unresolved_reason or "provider-catalog-unresolved"
+            candidate_reasons.append(f"catalog-unresolved:{detail}")
+            incomplete_reasons.append(
+                f"catalog-unresolved:tvmaze:{candidate.tvmaze_id}:{detail}"
+            )
+        elif catalog.errors:
+            detail = "|".join(catalog.errors)
+            candidate_reasons.append(f"catalog-invalid:{detail}")
+            incomplete_reasons.append(
+                f"catalog-invalid:tvmaze:{candidate.tvmaze_id}:{detail}"
+            )
+        elif not catalog.episodes:
+            candidate_reasons.append("catalog-empty")
+            incomplete_reasons.append(f"catalog-empty:tvmaze:{candidate.tvmaze_id}")
+        else:
+            available = {
+                (episode.season, episode.number)
+                for episode in catalog.episodes
+                if episode.number is not None
+            }
+            matched = tuple(coordinate for coordinate in observed if coordinate in available)
+            missing = tuple(coordinate for coordinate in observed if coordinate not in available)
+            candidate_reasons.append(
+                f"catalog-aired-match:{len(matched)}/{len(observed)}"
+            )
+            candidate_reasons.extend(
+                f"catalog-missing:{_aired_coordinate_label(coordinate)}"
+                for coordinate in missing
+            )
+            if not missing:
+                compatible_ids.append(candidate.tvmaze_id)
+
+        annotated[candidate.tvmaze_id] = replace(
+            candidate,
+            reasons=tuple(candidate_reasons),
+        )
+
+    updated = tuple(
+        annotated.get(candidate.tvmaze_id, candidate) for candidate in ranked
+    )
+    observed_reason = f"observed-aired-coordinates:{len(observed)}"
+    if incomplete_reasons:
+        return (
+            None,
+            updated,
+            (
+                "catalog-tiebreak:incomplete-candidate-catalogs",
+                observed_reason,
+                *incomplete_reasons,
+            ),
+        )
+    if len(compatible_ids) != 1:
+        return (
+            None,
+            updated,
+            (
+                "catalog-tiebreak:no-unique-aired-coordinate-match",
+                observed_reason,
+            ),
+        )
+
+    winner_id = compatible_ids[0]
+    updated = tuple(
+        replace(
+            candidate,
+            reasons=(*candidate.reasons, "catalog-tiebreak-winner"),
+        )
+        if candidate.tvmaze_id == winner_id
+        else candidate
+        for candidate in updated
+    )
+    return (
+        winner_id,
+        updated,
+        (
+            "catalog-tiebreak:unique-aired-coordinate-match",
+            f"catalog-winner:tvmaze:{winner_id}",
+            observed_reason,
+        ),
+    )
+
+
 def resolve_show_group(
     source_key: str,
     parses: Iterable[ParseResult],
@@ -360,6 +491,51 @@ def resolve_show_group(
             ),
         )
 
+    numbering_mode = _numbering_mode(override)
+    observed = _observed_aired_coordinates(parse_group, numbering_mode)
+    contenders = tuple(
+        candidate
+        for candidate in ranked
+        if candidate.score >= _MATCH_THRESHOLD
+        and top.score - candidate.score < _MINIMUM_MATCH_GAP
+    )
+    catalog_reasons: tuple[str, ...] = ()
+    if len(contenders) > 1 and observed:
+        winner_id, ranked, catalog_reasons = _catalog_tiebreak(
+            contenders,
+            ranked,
+            observed,
+            cache,
+            getter,
+        )
+        if winner_id is not None:
+            provider = next(
+                candidate
+                for candidate in provider_candidates
+                if candidate.tvmaze_id == winner_id
+            )
+            winner_evidence = next(
+                candidate for candidate in ranked if candidate.tvmaze_id == winner_id
+            )
+            title = _preferred_title(override, source_title, provider.title)
+            assert title is not None
+            return ShowResolution(
+                status=ResolutionStatus.MATCHED,
+                show=CanonicalShow(
+                    source_key=source_key,
+                    tvmaze_id=provider.tvmaze_id,
+                    title=title,
+                    year=provider.year if provider.year is not None else year_hint,
+                    numbering_mode=numbering_mode,
+                ),
+                evidence=MatchEvidence(
+                    method="tvmaze-search+episode-catalog",
+                    confidence=winner_evidence.score,
+                    reasons=(f"candidate-gap:{gap:.3f}", *catalog_reasons),
+                    candidates=ranked,
+                ),
+            )
+
     status = (
         ResolutionStatus.SUSPICIOUS
         if top.score >= _SUSPICIOUS_THRESHOLD
@@ -370,13 +546,14 @@ def resolve_show_group(
         if status is ResolutionStatus.SUSPICIOUS
         else "provider-evidence-below-threshold"
     )
+    method = "tvmaze-search+episode-catalog" if catalog_reasons else "tvmaze-search"
     return ShowResolution(
         status=status,
         show=None,
         evidence=MatchEvidence(
-            method="tvmaze-search",
+            method=method,
             confidence=top.score,
-            reasons=(reason, f"candidate-gap:{gap:.3f}"),
+            reasons=(reason, f"candidate-gap:{gap:.3f}", *catalog_reasons),
             candidates=ranked,
         ),
     )
