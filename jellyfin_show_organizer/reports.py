@@ -58,7 +58,9 @@ def _record_row(record: PlanRecord) -> dict[str, str]:
         "show_title": show.title if show is not None else "",
         "tvmaze_id": str(show.tvmaze_id) if show is not None else "",
         "numbering_mode": show.numbering_mode.value if show is not None else "",
-        "season": str(parse.season) if parse is not None and parse.season is not None else "",
+        "season": str(parse.season)
+        if parse is not None and parse.season is not None
+        else "",
         "episodes": (
             "|".join(str(episode) for episode in parse.episodes)
             if parse is not None
