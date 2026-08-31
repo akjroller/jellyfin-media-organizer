@@ -13,6 +13,7 @@ organizer = "jellyfin_show_organizer.cli:main"
 
 [project.optional-dependencies]
 dev = [
+    "mypy>=2.1,<3",
     "pytest>=8.3,<10",
     "ruff>=0.15,<1",
 ]

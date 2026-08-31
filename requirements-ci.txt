@@ -1,0 +1,8 @@
+# Deliberate CI constraints for reproducible direct tool selection.
+# Keep this file synchronized with pyproject.toml via tools/check_ci_constraints.py.
+build==1.5.0
+mypy==2.1.0
+pytest==9.1.1
+ruff==0.15.20
+setuptools==82.0.1
+wheel==0.47.0
