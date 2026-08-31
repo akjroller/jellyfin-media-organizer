@@ -24,6 +24,7 @@ coverage.xml
 .organizer-cache/
 .organizer-manifests/
 .organizer-reports/
+/.jmo-overrides.toml
 audit/
 inventory/
 manifests/
