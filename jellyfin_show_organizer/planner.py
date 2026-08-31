@@ -448,7 +448,9 @@ def _apply_duplicate_decisions(
         and record.destination is not None
         and record.show is not None
     )
-    candidate_keys = {_path_key(record.source.relative_path)[0] for record in candidate_records}
+    candidate_keys = {
+        _path_key(record.source.relative_path)[0] for record in candidate_records
+    }
     configured_keys = {
         _path_key(preference.source)[0]
         for preference in overrides.duplicate_preferences
