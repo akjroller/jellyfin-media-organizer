@@ -213,8 +213,9 @@ def test_provider_catalog_failure_cannot_be_used_to_eliminate_candidate() -> Non
 
     assert resolution.status is ResolutionStatus.SUSPICIOUS
     assert resolution.show is None
-    assert "catalog-tiebreak:indeterminate-candidate-catalog" in (
-        resolution.evidence.reasons
+    assert (
+        "catalog-tiebreak:indeterminate-candidate-catalog"
+        in resolution.evidence.reasons
     )
 
 
@@ -240,8 +241,9 @@ def test_malformed_required_catalog_metadata_keeps_tie_indeterminate() -> None:
 
     assert resolution.status is ResolutionStatus.SUSPICIOUS
     assert resolution.show is None
-    assert "catalog-tiebreak:indeterminate-candidate-catalog" in (
-        resolution.evidence.reasons
+    assert (
+        "catalog-tiebreak:indeterminate-candidate-catalog"
+        in resolution.evidence.reasons
     )
 
 
