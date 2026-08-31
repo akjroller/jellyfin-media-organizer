@@ -1,8 +1,8 @@
-# Jellyfin Show Organizer
+# Jellyfin Media Organizer (JMO)
 
-A plan-first Python CLI for organizing TV-show media into Jellyfin-friendly layouts.
+A plan-first Python CLI for organizing media into Jellyfin-friendly layouts. The current implementation is deliberately focused on **TV shows** while the planning and safety model is built out.
 
-The project is intentionally conservative: planning, parsing, inventory, reconciliation, provider-cache handling, and manifest contracts are developed separately from filesystem mutation. There is currently **no apply command**, so the tool cannot move, rename, copy, overwrite, or delete media.
+JMO is intentionally conservative: planning, parsing, inventory, reconciliation, provider-cache handling, and manifest contracts are developed separately from filesystem mutation. There is currently **no apply command**, so the tool cannot move, rename, copy, overwrite, or delete media.
 
 ## Current capabilities
 
@@ -13,9 +13,10 @@ The project is intentionally conservative: planning, parsing, inventory, reconci
 - versioned organizer plan models and JSON schema validation;
 - data-driven aliases and numbering policies;
 - persistent TVMaze cache primitives designed for deterministic/offline testing;
+- canonical TVMaze show resolution with fail-closed ambiguity handling;
 - synthetic regression fixtures for ambiguous and adversarial filename cases.
 
-The `organizer plan` command is still a scaffold while the planning pipeline is assembled.
+The `jmo plan` command is still a scaffold while the complete planning pipeline is assembled.
 
 ## Requirements
 
@@ -27,6 +28,12 @@ The runtime package currently has no third-party dependencies.
 
 ```bash
 python -m pip install .
+jmo plan --help
+```
+
+The historical `organizer` command remains available as a compatibility alias:
+
+```bash
 organizer plan --help
 ```
 
@@ -39,7 +46,7 @@ python -m ruff check jellyfin_show_organizer tests
 python -m ruff format --check jellyfin_show_organizer tests
 ```
 
-You can also run the CLI without the console-script wrapper:
+You can also run the package directly:
 
 ```bash
 python -m jellyfin_show_organizer plan --help
@@ -47,7 +54,7 @@ python -m jellyfin_show_organizer plan --help
 
 ## Safety boundary
 
-This project is **Shows-only**. Do not point it at a Movies directory, a mixed media root, or a parent directory containing unrelated media.
+The current implementation is **Shows-only**. Do not point it at a Movies directory, a mixed media root, or a parent directory containing unrelated media.
 
 Repository examples and tests use synthetic paths and zero-byte fixtures. Real library inventories, provider caches, manifests, reports, media files, machine-specific paths, hostnames, usernames, and other environment-specific data should remain local and untracked.
 
@@ -55,11 +62,12 @@ Repository examples and tests use synthetic paths and zero-byte fixtures. Real l
 
 - [Architecture](docs/jellyfin-show-organizer-architecture.md)
 - [Windows and operational runbook](docs/jellyfin-show-organizer-runbook.md)
+- [Upstream acknowledgments](ACKNOWLEDGMENTS.md)
 
 ## Project layout
 
 ```text
-jellyfin_show_organizer/   application package
+jellyfin_show_organizer/   core application package
   data/                    versioned schemas and synthetic override data
 tests/
   fixtures/                synthetic deterministic fixtures
@@ -67,6 +75,12 @@ tests/
 docs/                      architecture and operating guidance
 ```
 
+## Project history and credit
+
+JMO began as a fork of [`jkwill87/mnamer`](https://github.com/jkwill87/mnamer), created and maintained by Jessy Williams. That MIT-licensed project provided the original media-organizing groundwork from which this project started.
+
+JMO has since diverged into its own Jellyfin-focused, plan-first design. The upstream project and its maintainers are not responsible for JMO's current behavior or support. See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) for the retained attribution.
+
 ## License
 
-MIT. See `LICENSE.txt` for the retained license notice covering inherited portions of the codebase.
+MIT. The original upstream copyright and permission notice is retained in `LICENSE.txt`.
