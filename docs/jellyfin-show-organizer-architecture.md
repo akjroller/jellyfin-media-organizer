@@ -11,9 +11,10 @@ The current project boundary is deliberately narrow:
 3. parse filename hints deterministically;
 4. resolve each source show to one canonical provider identity;
 5. resolve catalog/provider evidence through explicit data and cache layers;
-6. build versioned plan records;
-7. reconcile every expected source into an explained terminal status;
-8. audit the completed plan before any future apply implementation.
+6. classify explicit video extras before episode assignment;
+7. build versioned plan records;
+8. reconcile every expected source into an explained terminal status;
+9. audit the completed plan before any future apply implementation.
 
 There is currently no `apply` command.
 
@@ -22,6 +23,7 @@ There is currently no `apply` command.
 - `cli.py` — command-line surface. Only the plan scaffold is exposed today.
 - `inventory.py` — authorized-root checks and deterministic read-only video inventory.
 - `filename_parser.py` — pure filename/path hint parsing without filesystem or provider access.
+- `extra_classifier.py` — deterministic pre-assignment extra classification with fail-closed ambiguity handling.
 - `show_resolver.py` — conservative show-level canonical TVMaze resolution with explicit ambiguity states.
 - `models.py` — typed cross-stage contracts.
 - `overrides.py` — data-driven aliases, numbering modes, years, provider IDs, and title preferences.
@@ -34,7 +36,25 @@ There is currently no `apply` command.
 
 Equivalent input evidence should produce equivalent typed results and stable plan hashes. Run-local timestamps, machine paths, and other environment-specific metadata do not belong in the immutable plan contract.
 
-Filename parsing is pure and offline. Provider-backed matching consumes cached/provider-shaped evidence rather than hiding network access inside parsing logic.
+Filename parsing and extra classification are pure and offline. Provider-backed matching consumes cached/provider-shaped evidence rather than hiding network access inside parsing or classification logic.
+
+## Extra classification contract
+
+Explicit video extras are isolated before provider-backed episode assignment. The normalized extra kinds are:
+
+- `creditless-opening`
+- `creditless-ending`
+- `trailer`
+- `featurette`
+- `interview`
+- `behind-the-scenes`
+- `deleted-scene`
+- `clip`
+- `extra`
+
+The classifier uses explicit filename markers and recognized immediate extra-folder names. Strong explicit extra markers may classify a file even when its name also contains unrelated numeric noise. Strong episode evidence combined with explicit extra evidence is not guessed in either direction; it becomes suspicious for review. Conflicting extra kinds are also suspicious. Ambiguous words such as `bonus`, `special`, or `ova` remain unresolved unless later pipeline evidence can handle them safely.
+
+Classification returns its parsed filename evidence, normalized extra decision when one exists, and stable textual reasons so later plan/report stages can preserve why the decision was made. The classifier performs no filesystem or network access.
 
 ## Safety boundary
 
