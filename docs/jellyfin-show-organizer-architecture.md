@@ -13,9 +13,10 @@ The current project boundary is deliberately narrow:
 5. resolve catalog/provider evidence through explicit data and cache layers;
 6. classify explicit video extras before episode assignment;
 7. assign episode identities from one canonical cached catalog per source-show group;
-8. build versioned plan records;
-9. reconcile every expected source into an explained terminal status;
-10. audit the completed plan before any future apply implementation.
+8. construct deterministic Jellyfin destination paths from canonical assignments and extra decisions;
+9. build versioned plan records;
+10. reconcile every expected source into an explained terminal status;
+11. audit the completed plan before any future apply implementation.
 
 There is currently no `apply` command.
 
@@ -27,6 +28,7 @@ There is currently no `apply` command.
 - `extra_classifier.py` — deterministic pre-assignment extra classification with fail-closed ambiguity handling.
 - `show_resolver.py` — conservative show-level canonical TVMaze resolution with explicit ambiguity states.
 - `episode_assignment.py` — deterministic show-level episode mapping from one normalized cached provider catalog using explicit numbering policies.
+- `destination.py` — deterministic Jellyfin-relative destination construction and cross-platform sanitization/collision keys.
 - `models.py` — typed cross-stage contracts.
 - `overrides.py` — data-driven aliases, numbering modes, years, provider IDs, and title preferences.
 - `reconciliation.py` — one explained terminal inventory status per expected path.
@@ -38,7 +40,7 @@ There is currently no `apply` command.
 
 Equivalent input evidence should produce equivalent typed results and stable plan hashes. Run-local timestamps, machine paths, and other environment-specific metadata do not belong in the immutable plan contract.
 
-Filename parsing and extra classification are pure and offline. Provider-backed matching consumes cached/provider-shaped evidence rather than hiding network access inside parsing or classification logic.
+Filename parsing, extra classification, and destination construction are pure and offline. Provider-backed matching consumes cached/provider-shaped evidence rather than hiding network access inside parsing, classification, or naming logic.
 
 ## Extra classification contract
 
@@ -71,6 +73,35 @@ Supported numbering policies are explicit:
 Multi-episode sources preserve every requested episode in deterministic source order and remain one source assignment. A missing member prevents a partial match. Mixed numbering evidence, configured-policy conflicts, conflicting provider identities, malformed or duplicate catalog entries, and distinct segments that collapse to the same provider episode fail closed as suspicious or unresolved with stable reasons.
 
 Assignment evidence records the active numbering policy, cached catalog request identity, and provider episode mappings so later immutable plans and audit reports can explain the decision without rerunning provider discovery.
+
+## Destination construction contract
+
+Destination construction runs after episode/extra identity is known and never reparses source filenames. Its default series layout is Jellyfin-oriented and host-independent:
+
+```text
+Series Title (2024)/
+  Season 00/
+    Series Title (2024) S00E01 - Special Title.mkv
+  Season 01/
+    Series Title (2024) S01E01 - Episode Title.mkv
+    Series Title (2024) S01E02-E03 - Part One + Part Two.mkv
+  trailers/
+    Trailer.mkv
+  featurettes/
+    Featurette.mkv
+```
+
+The year is included when known by default. Supported Jellyfin provider tags (`tmdb`, `tvdb`, and `imdb`) may be attached to the series folder when explicitly available. TVMaze remains JMO's canonical/audit identity and is not emitted as an invented Jellyfin provider tag.
+
+Episodes use the canonical show title, assigned provider season/episode coordinates, provider episode title, and the normalized source extension. Season zero stays `Season 00`. A multi-episode source must represent one contiguous ascending range within one season; cross-season or gapped assignments fail closed instead of producing a misleading filename.
+
+Extra decisions map to explicit Jellyfin-compatible folders. Known categories such as trailers, featurettes, interviews, behind-the-scenes material, deleted scenes, and clips receive stable folders; generic or currently unmapped extra kinds fall back to `extras` with an explanatory reason.
+
+Every path component is Unicode-normalized and sanitized against Windows-invalid characters, control characters, trailing dots/spaces, and reserved device names while remaining valid on POSIX. Invalid characters are encoded rather than merely dropped so unrelated logical names do not silently collapse to the same sanitized component. Literal escape characters are themselves escaped, making this mapping deterministic. Configurable component/path limits use deterministic hash-suffixed shortening. If the configured limits cannot produce a safe path, destination construction returns unresolved rather than guessing.
+
+Each ready destination carries a Unicode-normalized, case-folded collision key. This means collisions are detected consistently during planning on Windows and POSIX, including case-only differences. Collision discovery reports every source/path set that converges on a logical destination; it does not choose winners or mutate files. Duplicate resolution remains a later stage.
+
+The destination layer performs no filesystem access, creates no directories, and writes no media.
 
 ## Safety boundary
 
