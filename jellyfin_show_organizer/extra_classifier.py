@@ -176,7 +176,10 @@ def classify_extra(relative_path: str) -> ExtraClassification:
 
     if unique_kinds:
         kind = unique_kinds[0]
-        if kind is ExtraKind.EXTRA and "structural season-extra marker" in marker_reasons:
+        if (
+            kind is ExtraKind.EXTRA
+            and "structural season-extra marker" in marker_reasons
+        ):
             rule = "structural season-extra marker"
             return ExtraClassification(
                 disposition=ExtraDisposition.EXTRA,
