@@ -1,0 +1,70 @@
+name: Normalize provider boundary
+
+on:
+  push:
+    branches: [issue-40-provider-adapter]
+    paths:
+      - .github/workflows/normalize-issue-40.yml
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: issue-40-provider-adapter
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Make destination evidence provider-neutral
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("jellyfin_show_organizer/destination.py")
+          text = path.read_text(encoding="utf-8")
+
+          old_episode = '''    reasons = [\n        "jellyfin-series-season-episode-layout",\n        f"canonical-tvmaze-id:{show.tvmaze_id}",\n        f"episode-token:{token}",\n    ]\n    reasons.extend(f"jellyfin-provider-tag:{tag}" for tag in provider_tags)\n    if show.tvmaze_id and not provider_tags:\n        reasons.append("tvmaze-id-retained-as-audit-only-identity")\n'''
+          new_episode = '''    reasons = [\n        "jellyfin-series-season-episode-layout",\n        f"canonical-provider-identity:{show.provider_identity.key}",\n        f"episode-token:{token}",\n    ]\n    if show.provider == "tvmaze":\n        reasons.append(f"canonical-tvmaze-id:{show.tvmaze_id}")\n    reasons.extend(f"jellyfin-provider-tag:{tag}" for tag in provider_tags)\n    if show.provider == "tvmaze" and not provider_tags:\n        reasons.append("tvmaze-id-retained-as-audit-only-identity")\n'''
+
+          old_extra = '''    reasons = [\n        "jellyfin-series-extra-folder-layout",\n        f"extra-kind:{extra_kind}",\n        f"canonical-tvmaze-id:{show.tvmaze_id}",\n    ]\n    reasons.extend(f"jellyfin-provider-tag:{tag}" for tag in provider_tags)\n'''
+          new_extra = '''    reasons = [\n        "jellyfin-series-extra-folder-layout",\n        f"extra-kind:{extra_kind}",\n        f"canonical-provider-identity:{show.provider_identity.key}",\n    ]\n    if show.provider == "tvmaze":\n        reasons.append(f"canonical-tvmaze-id:{show.tvmaze_id}")\n    reasons.extend(f"jellyfin-provider-tag:{tag}" for tag in provider_tags)\n'''
+
+          if old_episode not in text:
+              raise SystemExit("episode destination evidence target not found")
+          if old_extra not in text:
+              raise SystemExit("extra destination evidence target not found")
+          text = text.replace(old_episode, new_episode, 1)
+          text = text.replace(old_extra, new_extra, 1)
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Install development tools
+        run: python -m pip install -e ".[dev]"
+
+      - name: Normalize changed code
+        run: |
+          python -m ruff check --fix jellyfin_show_organizer/models.py jellyfin_show_organizer/providers.py jellyfin_show_organizer/overrides.py jellyfin_show_organizer/show_resolver.py jellyfin_show_organizer/episode_assignment.py jellyfin_show_organizer/destination.py tests/local/test_provider_adapter.py
+          python -m ruff format jellyfin_show_organizer/models.py jellyfin_show_organizer/providers.py jellyfin_show_organizer/overrides.py jellyfin_show_organizer/show_resolver.py jellyfin_show_organizer/episode_assignment.py jellyfin_show_organizer/destination.py tests/local/test_provider_adapter.py
+
+      - name: Run targeted provider tests
+        run: |
+          python -m pytest tests/local/test_provider_adapter.py tests/local/test_show_resolver.py tests/local/test_episode_assignment.py tests/local/test_episode_assignment_edge_cases.py tests/local/test_destination.py tests/local/test_organizer_models.py tests/local/test_organizer_schema.py
+
+      - name: Commit normalized provider boundary
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jellyfin_show_organizer tests/local/test_provider_adapter.py
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Normalize metadata provider boundary"
+          git push origin HEAD:issue-40-provider-adapter
