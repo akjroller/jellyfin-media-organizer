@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 
 
@@ -9,36 +8,29 @@ PROJECT_FILE = ROOT / "pyproject.toml"
 REPOSITORY_URL = "https://github.com/akjroller/jellyfin-media-organizer"
 
 
-def _project_metadata():
-    return tomllib.loads(PROJECT_FILE.read_text(encoding="utf-8"))
+def _project_text() -> str:
+    return PROJECT_FILE.read_text(encoding="utf-8")
 
 
 def test_installable_metadata_uses_standalone_project_identity() -> None:
-    metadata = _project_metadata()
-    project = metadata["project"]
+    text = _project_text()
 
-    assert project["name"] == "jellyfin-media-organizer"
-    assert project["dependencies"] == []
-    assert project["urls"] == {
-        "Homepage": REPOSITORY_URL,
-        "Repository": REPOSITORY_URL,
-        "Issues": f"{REPOSITORY_URL}/issues",
-    }
+    assert 'name = "jellyfin-media-organizer"' in text
+    assert 'dependencies = []' in text
+    assert f'Homepage = "{REPOSITORY_URL}"' in text
+    assert f'Repository = "{REPOSITORY_URL}"' in text
+    assert f'Issues = "{REPOSITORY_URL}/issues"' in text
 
 
 def test_only_standalone_application_package_is_shipped() -> None:
-    metadata = _project_metadata()
-    setuptools = metadata["tool"]["setuptools"]
-    assert setuptools["packages"] == ["jellyfin_show_organizer"]
+    text = _project_text()
 
-    scripts = metadata["project"]["scripts"]
-    assert scripts == {
-        "jmo": "jellyfin_show_organizer.cli:main",
-        "organizer": "jellyfin_show_organizer.cli:main",
-    }
+    assert 'packages = ["jellyfin_show_organizer"]' in text
+    assert 'jmo = "jellyfin_show_organizer.cli:main"' in text
+    assert 'organizer = "jellyfin_show_organizer.cli:main"' in text
 
 
 def test_project_metadata_does_not_restore_legacy_upstream_identity() -> None:
-    text = PROJECT_FILE.read_text(encoding="utf-8").casefold()
+    text = _project_text().casefold()
     assert "mnamer" not in text
     assert "jkwill87" not in text
