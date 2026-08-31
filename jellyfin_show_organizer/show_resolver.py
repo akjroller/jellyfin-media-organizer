@@ -412,14 +412,14 @@ def _catalog_tie_break(
             ),
         )
 
-    compatible = tuple(
+    compatible_identities = tuple(
         identity
         for identity, value in sorted(
             compatibility.items(), key=lambda item: item[0].key
         )
         if value
     )
-    if len(compatible) != 1:
+    if len(compatible_identities) != 1:
         return _CatalogTieBreak(
             winner=None,
             candidates=enriched,
@@ -429,7 +429,7 @@ def _catalog_tie_break(
             ),
         )
 
-    winner = compatible[0]
+    winner = compatible_identities[0]
     winner_first = tuple(
         sorted(
             enriched,
