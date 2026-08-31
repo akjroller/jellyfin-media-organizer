@@ -37,11 +37,13 @@ def test_runbook_has_posix_and_windows_setup_paths():
 
 
 def test_runbook_makes_shows_only_boundary_explicit():
-    text = RUNBOOK.read_text(encoding="utf-8")
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    readme = README.read_text(encoding="utf-8")
 
-    assert "**Shows-only**" in text
-    assert "Movies/      <- out of scope; never authorize or inspect" in text
-    assert "Do not point it at a Movies directory" in README.read_text(encoding="utf-8")
+    assert "**Shows-only**" in runbook
+    assert "Movies/      <- out of scope; never authorize or inspect" in runbook
+    assert "The active scope is **Shows-only**" in readme
+    assert "Movies directory, mixed media root" in readme
 
 
 def test_docs_do_not_pretend_plan_root_or_apply_are_implemented():
