@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import asdict
 from importlib.resources import files
 from typing import Any, cast
 
-from .models import OrganizerPlan
+from .models import OrganizerPlan, PlanRecord
 
 PLAN_SCHEMA_VERSION = 1
 PLAN_SCHEMA_RESOURCE = "data/plan-schema-v1.json"
@@ -22,10 +23,34 @@ def load_plan_schema() -> dict[str, Any]:
     return cast(dict[str, Any], json.loads(resource.read_text(encoding="utf-8")))
 
 
+def _path_sort_key(relative_path: str) -> tuple[str, str]:
+    normalized = unicodedata.normalize("NFKC", relative_path).casefold()
+    return normalized, relative_path
+
+
+def canonical_records(plan: OrganizerPlan) -> tuple[PlanRecord, ...]:
+    """Return plan records in a platform-independent deterministic order."""
+
+    return tuple(
+        sorted(
+            plan.records, key=lambda record: _path_sort_key(record.source.relative_path)
+        )
+    )
+
+
 def plan_to_manifest(plan: OrganizerPlan) -> dict[str, Any]:
     payload = cast(
         dict[str, Any],
-        json.loads(json.dumps(asdict(plan), ensure_ascii=False)),
+        json.loads(
+            json.dumps(
+                {
+                    "schema_version": plan.schema_version,
+                    "overrides_version": plan.overrides_version,
+                    "records": [asdict(record) for record in canonical_records(plan)],
+                },
+                ensure_ascii=False,
+            )
+        ),
     )
     validate_manifest(payload)
     return payload
