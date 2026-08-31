@@ -24,6 +24,12 @@ The `jmo plan` command is still a scaffold while the complete planning pipeline 
 
 The runtime package currently has no third-party dependencies.
 
+## Repository identity
+
+The standalone project is maintained in the `jellyfin-media-organizer` repository, matching the installable project name. This repository name is the intentional long-term identity for JMO rather than a temporary fork-era name.
+
+Maintained project metadata points to this repository and its issue tracker. Packaging or documentation changes should not reintroduce obsolete upstream package/repository URLs as JMO's own project metadata; historical upstream credit remains in the acknowledgments and license sections below.
+
 ## Install
 
 ```bash
