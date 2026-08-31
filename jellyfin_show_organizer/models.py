@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 
 
@@ -9,6 +10,8 @@ class NumberingMode(StrEnum):
     ABSOLUTE = "absolute"
     PARENTHESIZED_ABSOLUTE = "parenthesized-absolute"
     SEGMENT_TITLE = "segment-title"
+    SPECIAL = "special"
+    DATE = "date"
 
 
 class TitlePreference(StrEnum):
@@ -66,6 +69,9 @@ class ParseResult:
     season: int | None = None
     episodes: tuple[int, ...] = ()
     absolute_episode: int | None = None
+    special_kind: str | None = None
+    special_episode: int | None = None
+    episode_date: str | None = None
     segment_hint: str | None = None
     year: int | None = None
     embedded_tvmaze_id: int | None = None
@@ -78,6 +84,26 @@ class ParseResult:
             raise ValueError("episodes cannot contain negative values")
         if self.absolute_episode is not None and self.absolute_episode < 0:
             raise ValueError("absolute_episode cannot be negative")
+        if (self.special_kind is None) != (self.special_episode is None):
+            raise ValueError(
+                "special_kind and special_episode must be provided together"
+            )
+        if self.special_kind is not None:
+            special_kind = self.special_kind.casefold()
+            if special_kind not in {"ova", "oad"}:
+                raise ValueError("special_kind must be 'ova' or 'oad'")
+            object.__setattr__(self, "special_kind", special_kind)
+        if self.special_episode is not None and self.special_episode <= 0:
+            raise ValueError("special_episode must be positive")
+        if self.episode_date is not None:
+            try:
+                normalized_date = date.fromisoformat(self.episode_date).isoformat()
+            except ValueError as exc:
+                raise ValueError(
+                    "episode_date must use a valid YYYY-MM-DD date"
+                ) from exc
+            if normalized_date != self.episode_date:
+                raise ValueError("episode_date must use canonical YYYY-MM-DD form")
         if self.year is not None and self.year < 1800:
             raise ValueError("year is outside the supported range")
         if self.embedded_tvmaze_id is not None and self.embedded_tvmaze_id <= 0:

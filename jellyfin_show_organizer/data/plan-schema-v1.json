@@ -34,12 +34,15 @@
     "parse": {
       "type": ["object", "null"],
       "additionalProperties": false,
-      "required": ["series_hint", "season", "episodes", "absolute_episode", "segment_hint", "year", "embedded_tvmaze_id", "title_hint"],
+      "required": ["series_hint", "season", "episodes", "absolute_episode", "special_kind", "special_episode", "episode_date", "segment_hint", "year", "embedded_tvmaze_id", "title_hint"],
       "properties": {
         "series_hint": {"type": ["string", "null"]},
         "season": {"type": ["integer", "null"], "minimum": 0},
         "episodes": {"type": "array", "items": {"type": "integer", "minimum": 0}},
         "absolute_episode": {"type": ["integer", "null"], "minimum": 0},
+        "special_kind": {"enum": ["ova", "oad", null]},
+        "special_episode": {"type": ["integer", "null"], "minimum": 1},
+        "episode_date": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
         "segment_hint": {"type": ["string", "null"]},
         "year": {"type": ["integer", "null"], "minimum": 1800},
         "embedded_tvmaze_id": {"type": ["integer", "null"], "minimum": 1},
@@ -55,7 +58,7 @@
         "tvmaze_id": {"type": "integer", "minimum": 1},
         "title": {"type": "string", "minLength": 1},
         "year": {"type": ["integer", "null"], "minimum": 1800},
-        "numbering_mode": {"enum": ["aired", "absolute", "parenthesized-absolute", "segment-title"]}
+        "numbering_mode": {"enum": ["aired", "absolute", "parenthesized-absolute", "segment-title", "special", "date"]}
       }
     },
     "candidateEvidence": {

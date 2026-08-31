@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import PurePosixPath
 
 from .models import ParseResult
@@ -18,6 +19,13 @@ _X_NOTATION = re.compile(r"(?i)(?<!\d)(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?
 _EPISODE_WORD = re.compile(
     r"(?i)(?<![A-Za-z0-9])episode[ ._-]*(?P<episode>\d{1,3})"
     r"(?P<segment>[A-Za-z])?(?![A-Za-z0-9])"
+)
+_SPECIAL_NUMBERING = re.compile(
+    r"(?i)(?<![A-Za-z0-9])(?P<kind>OVA|OAD)[ ._-]*(?P<episode>\d{1,3})(?!\d)"
+)
+_EPISODE_DATE = re.compile(
+    r"(?<!\d)(?P<year>(?:18|19|20|21)\d{2})[-._]"
+    r"(?P<month>0[1-9]|1[0-2])[-._](?P<day>0[1-9]|[12]\d|3[01])(?!\d)"
 )
 _LEGACY_BRACKETED = re.compile(
     r"(?i)^(?P<series>.+?)"
@@ -111,6 +119,14 @@ def _title_hint(stem: str, start: int) -> str | None:
 def _embedded_tvmaze_id(stem: str) -> int | None:
     match = _TVMAZE_ID.search(stem)
     return int(match.group("id")) if match is not None else None
+
+
+def _episode_date_value(match: re.Match[str]) -> str | None:
+    value = f"{match.group('year')}-{match.group('month')}-{match.group('day')}"
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        return None
 
 
 def _fallback_series(path: PurePosixPath) -> tuple[str | None, int | None]:
@@ -250,6 +266,31 @@ def parse_video_path(relative_path: str) -> ParseResult:
             embedded_tvmaze_id=embedded_id,
             title_hint=_title_hint(stem, match.end()),
         )
+
+    match = _SPECIAL_NUMBERING.search(stem)
+    if match is not None:
+        series, year = _series_for_match(stem, path, match)
+        return ParseResult(
+            series_hint=series,
+            special_kind=match.group("kind").casefold(),
+            special_episode=int(match.group("episode")),
+            year=year,
+            embedded_tvmaze_id=embedded_id,
+            title_hint=_title_hint(stem, match.end()),
+        )
+
+    date_match = _EPISODE_DATE.search(stem)
+    if date_match is not None:
+        episode_date = _episode_date_value(date_match)
+        if episode_date is not None:
+            series, year = _series_for_match(stem, path, date_match)
+            return ParseResult(
+                series_hint=series,
+                episode_date=episode_date,
+                year=year,
+                embedded_tvmaze_id=embedded_id,
+                title_hint=_title_hint(stem, date_match.end()),
+            )
 
     match = _EPISODE_WORD.search(stem)
     if match is not None:
