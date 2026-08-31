@@ -1,0 +1,520 @@
+name: Apply provider boundary foundation slice
+
+on:
+  push:
+    branches: [issue-40-provider-adapter-v2]
+    paths:
+      - .github/workflows/issue-40-slice.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: issue-40-provider-adapter-v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply provider boundary foundation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          models = Path("jellyfin_show_organizer/models.py")
+          text = models.read_text(encoding="utf-8")
+          if "class ProviderIdentity:" not in text:
+              text = text.replace(
+                  "from __future__ import annotations\n\nfrom dataclasses import dataclass\n",
+                  "from __future__ import annotations\n\nimport re\nimport unicodedata\nfrom dataclasses import dataclass\n",
+                  1,
+              )
+              marker = '''class CompanionStatus(StrEnum):\n    ASSOCIATED = "associated"\n    DUPLICATE = "duplicate"\n    IGNORED = "ignored"\n    UNRESOLVED = "unresolved"\n\n\n'''
+              addition = marker + '''_PROVIDER_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$")\n\n\n@dataclass(frozen=True, slots=True)\nclass ProviderIdentity:\n    """Namespaced identity for one metadata-provider object."""\n\n    provider: str\n    value: str\n\n    def __post_init__(self) -> None:\n        provider = self.normalize_provider(self.provider)\n        value = unicodedata.normalize("NFKC", str(self.value)).strip()\n        if not provider or _PROVIDER_NAME.fullmatch(provider) is None:\n            raise ValueError("provider name must be a normalized identifier")\n        if not value:\n            raise ValueError("provider identity value cannot be empty")\n        object.__setattr__(self, "provider", provider)\n        object.__setattr__(self, "value", value)\n\n    @staticmethod\n    def normalize_provider(provider: str) -> str:\n        return unicodedata.normalize("NFKC", provider).strip().casefold()\n\n    @classmethod\n    def tvmaze(cls, value: int) -> ProviderIdentity:\n        if value <= 0:\n            raise ValueError("TVMaze identity must be positive")\n        return cls("tvmaze", str(value))\n\n    @property\n    def key(self) -> str:\n        return f"{self.provider}:{self.value}"\n\n    def require_positive_int(self, provider: str) -> int:\n        expected = self.normalize_provider(provider)\n        if self.provider != expected:\n            raise ValueError(\n                f"provider identity is {self.provider!r}, expected {expected!r}"\n            )\n        try:\n            value = int(self.value)\n        except ValueError as exc:\n            raise ValueError("provider identity must be a positive integer") from exc\n        if value <= 0 or str(value) != self.value:\n            raise ValueError("provider identity must be a canonical positive integer")\n        return value\n\n\n'''
+              if marker not in text:
+                  raise SystemExit("CompanionStatus insertion marker not found")
+              models.write_text(text.replace(marker, addition, 1), encoding="utf-8")
+
+          Path("jellyfin_show_organizer/providers.py").write_text('''from __future__ import annotations
+
+import re
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import date
+from typing import Any, Protocol, cast
+
+from .models import ProviderIdentity
+from .tvmaze_cache import JsonGetter, TVMAZE_PROVIDER, TvmazeCatalogCache
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderShow:
+    identity: ProviderIdentity
+    title: str
+    year: int | None
+
+    def __post_init__(self) -> None:
+        title = self.title.strip()
+        if not title:
+            raise ValueError("provider show title cannot be empty")
+        if self.year is not None and self.year < 1800:
+            raise ValueError("provider show year is outside the supported range")
+        object.__setattr__(self, "title", title)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderEpisode:
+    identity: ProviderIdentity
+    season: int
+    number: int | None
+    title: str
+    airdate: str | None = None
+    episode_type: str | None = None
+
+    def __post_init__(self) -> None:
+        title = self.title.strip()
+        if self.season < 0:
+            raise ValueError("provider episode season cannot be negative")
+        if self.number is not None and self.number < 0:
+            raise ValueError("provider episode number cannot be negative")
+        if not title:
+            raise ValueError("provider episode title cannot be empty")
+        object.__setattr__(self, "title", title)
+        if self.airdate is not None:
+            try:
+                normalized = date.fromisoformat(self.airdate).isoformat()
+            except ValueError as exc:
+                raise ValueError("provider episode airdate must use YYYY-MM-DD") from exc
+            if normalized != self.airdate:
+                raise ValueError("provider episode airdate must be canonical")
+        if self.episode_type is not None:
+            episode_type = self.episode_type.strip().casefold()
+            if not episode_type:
+                raise ValueError("provider episode type cannot be empty")
+            object.__setattr__(self, "episode_type", episode_type)
+
+    @property
+    def provider(self) -> str:
+        return self.identity.provider
+
+    @property
+    def provider_id(self) -> str:
+        return self.identity.value
+
+    @property
+    def tvmaze_episode_id(self) -> int:
+        return self.identity.require_positive_int(TVMAZE_PROVIDER)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderSearchSnapshot:
+    provider: str
+    request_key: str
+    cache_snapshot_id: str
+    shows: tuple[ProviderShow, ...]
+    unresolved_reason: str | None = None
+    retrieved_at: str | None = None
+
+    def __post_init__(self) -> None:
+        provider = ProviderIdentity.normalize_provider(self.provider)
+        if provider != self.provider:
+            raise ValueError("provider snapshot name must already be normalized")
+        if not self.request_key or not self.cache_snapshot_id:
+            raise ValueError("provider search snapshot identity cannot be empty")
+        if any(show.identity.provider != provider for show in self.shows):
+            raise ValueError("provider search snapshot contains a foreign identity")
+        if self.unresolved_reason is not None and self.shows:
+            raise ValueError("unresolved provider search snapshots cannot carry shows")
+
+    @property
+    def resolved(self) -> bool:
+        return self.unresolved_reason is None
+
+    @property
+    def snapshot_identity(self) -> str:
+        return f"{self.provider}:{self.request_key}:{self.cache_snapshot_id}"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderEpisodeCatalog:
+    provider: str
+    request_key: str
+    cache_snapshot_id: str
+    show_identity: ProviderIdentity
+    episodes: tuple[ProviderEpisode, ...]
+    errors: tuple[str, ...] = ()
+    unresolved_reason: str | None = None
+    retrieved_at: str | None = None
+
+    def __post_init__(self) -> None:
+        provider = ProviderIdentity.normalize_provider(self.provider)
+        if provider != self.provider:
+            raise ValueError("provider catalog name must already be normalized")
+        if not self.request_key or not self.cache_snapshot_id:
+            raise ValueError("provider catalog snapshot identity cannot be empty")
+        if self.show_identity.provider != provider:
+            raise ValueError("provider catalog show identity is foreign")
+        if any(episode.identity.provider != provider for episode in self.episodes):
+            raise ValueError("provider catalog contains a foreign episode identity")
+        if self.unresolved_reason is not None and (self.episodes or self.errors):
+            raise ValueError("unresolved provider catalogs cannot carry normalized data")
+
+    @property
+    def resolved(self) -> bool:
+        return self.unresolved_reason is None
+
+    @property
+    def snapshot_identity(self) -> str:
+        return f"{self.provider}:{self.request_key}:{self.cache_snapshot_id}"
+
+
+class MetadataProvider(Protocol):
+    @property
+    def provider_name(self) -> str: ...
+
+    def search_shows(self, title: str) -> ProviderSearchSnapshot: ...
+
+    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog: ...
+
+
+def _tvmaze_show_candidates(response: object) -> tuple[ProviderShow, ...]:
+    if not isinstance(response, list):
+        return ()
+    candidates: dict[tuple[str, str, int | None], ProviderShow] = {}
+    for item in response:
+        if not isinstance(item, dict):
+            continue
+        raw_item = cast(dict[str, Any], item)
+        show = raw_item.get("show")
+        if not isinstance(show, dict):
+            continue
+        raw_show = cast(dict[str, Any], show)
+        provider_id = raw_show.get("id")
+        title = raw_show.get("name")
+        premiered = raw_show.get("premiered")
+        if not isinstance(provider_id, int) or provider_id <= 0:
+            continue
+        if not isinstance(title, str) or not title.strip():
+            continue
+        year = None
+        if isinstance(premiered, str):
+            match = re.match(r"^(\\d{4})-", premiered)
+            if match is not None:
+                year = int(match.group(1))
+        candidate = ProviderShow(
+            identity=ProviderIdentity.tvmaze(provider_id),
+            title=title,
+            year=year,
+        )
+        candidates[(candidate.identity.value, candidate.title, candidate.year)] = candidate
+    return tuple(
+        sorted(
+            candidates.values(),
+            key=lambda value: (
+                value.title.casefold(),
+                value.title,
+                value.year if value.year is not None else -1,
+                value.identity.value,
+            ),
+        )
+    )
+
+
+def _tvmaze_episode_catalog(
+    response: object,
+) -> tuple[tuple[ProviderEpisode, ...], tuple[str, ...]]:
+    if not isinstance(response, list):
+        return (), ("episode-catalog-is-not-a-list",)
+    episodes: list[ProviderEpisode] = []
+    errors: list[str] = []
+    for index, item in enumerate(response):
+        if not isinstance(item, dict):
+            errors.append(f"invalid-catalog-entry:{index}")
+            continue
+        raw = cast(dict[str, Any], item)
+        episode_id = raw.get("id")
+        season = raw.get("season")
+        number = raw.get("number")
+        title = raw.get("name")
+        airdate = raw.get("airdate")
+        episode_type = raw.get("type")
+        if not isinstance(episode_id, int) or episode_id <= 0:
+            errors.append(f"invalid-catalog-episode-id:{index}")
+            continue
+        if not isinstance(season, int) or season < 0:
+            errors.append(f"invalid-catalog-season:{index}")
+            continue
+        if number is not None and (not isinstance(number, int) or number < 0):
+            errors.append(f"invalid-catalog-number:{index}")
+            continue
+        if not isinstance(title, str) or not title.strip():
+            errors.append(f"invalid-catalog-title:{index}")
+            continue
+        if airdate is not None:
+            if not isinstance(airdate, str):
+                errors.append(f"invalid-catalog-airdate:{index}")
+                continue
+            try:
+                if date.fromisoformat(airdate).isoformat() != airdate:
+                    raise ValueError
+            except ValueError:
+                errors.append(f"invalid-catalog-airdate:{index}")
+                continue
+        if episode_type is not None and (
+            not isinstance(episode_type, str) or not episode_type.strip()
+        ):
+            errors.append(f"invalid-catalog-type:{index}")
+            continue
+        episodes.append(
+            ProviderEpisode(
+                identity=ProviderIdentity.tvmaze(episode_id),
+                season=season,
+                number=number,
+                title=title,
+                airdate=airdate,
+                episode_type=episode_type,
+            )
+        )
+
+    by_id: dict[ProviderIdentity, list[ProviderEpisode]] = defaultdict(list)
+    by_coordinate: dict[tuple[int, int], list[ProviderEpisode]] = defaultdict(list)
+    for episode in episodes:
+        by_id[episode.identity].append(episode)
+        if episode.number is not None:
+            by_coordinate[(episode.season, episode.number)].append(episode)
+    for identity, matches in sorted(by_id.items(), key=lambda item: item[0].key):
+        if len(matches) > 1:
+            errors.append(f"duplicate-provider-episode-id:{identity.value}")
+    for (season, number), matches in sorted(by_coordinate.items()):
+        if len(matches) > 1:
+            errors.append(f"duplicate-aired-coordinate:S{season:02d}E{number:02d}")
+
+    return (
+        tuple(
+            sorted(
+                episodes,
+                key=lambda episode: (
+                    episode.season,
+                    episode.number if episode.number is not None else 10**9,
+                    episode.identity.value,
+                ),
+            )
+        ),
+        tuple(errors),
+    )
+
+
+class TvmazeProviderAdapter:
+    """Normalize TVMaze cache records behind the provider-neutral boundary."""
+
+    provider_name = TVMAZE_PROVIDER
+
+    def __init__(self, cache: TvmazeCatalogCache, getter: JsonGetter) -> None:
+        self._cache = cache
+        self._getter = getter
+
+    def search_shows(self, title: str) -> ProviderSearchSnapshot:
+        record = self._cache.search_show(title, self._getter)
+        if not record.resolved:
+            return ProviderSearchSnapshot(
+                provider=self.provider_name,
+                request_key=record.request_key,
+                cache_snapshot_id=record.snapshot_id,
+                shows=(),
+                unresolved_reason=record.unresolved_reason or "provider-search-unresolved",
+                retrieved_at=record.retrieved_at,
+            )
+        return ProviderSearchSnapshot(
+            provider=self.provider_name,
+            request_key=record.request_key,
+            cache_snapshot_id=record.snapshot_id,
+            shows=_tvmaze_show_candidates(record.response),
+            retrieved_at=record.retrieved_at,
+        )
+
+    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+        if show_identity.provider != self.provider_name:
+            raise ValueError(
+                f"provider identity is {show_identity.provider!r}, "
+                f"expected {self.provider_name!r}"
+            )
+        tvmaze_id = show_identity.require_positive_int(self.provider_name)
+        record = self._cache.episode_catalog(tvmaze_id, self._getter)
+        if not record.resolved:
+            return ProviderEpisodeCatalog(
+                provider=self.provider_name,
+                request_key=record.request_key,
+                cache_snapshot_id=record.snapshot_id,
+                show_identity=show_identity,
+                episodes=(),
+                unresolved_reason=record.unresolved_reason or "provider-catalog-unresolved",
+                retrieved_at=record.retrieved_at,
+            )
+        episodes, errors = _tvmaze_episode_catalog(record.response)
+        return ProviderEpisodeCatalog(
+            provider=self.provider_name,
+            request_key=record.request_key,
+            cache_snapshot_id=record.snapshot_id,
+            show_identity=show_identity,
+            episodes=episodes,
+            errors=errors,
+            retrieved_at=record.retrieved_at,
+        )
+''', encoding="utf-8")
+
+          Path("tests/local/test_provider_boundary.py").write_text('''from __future__ import annotations
+
+from collections.abc import Mapping
+from pathlib import Path
+
+import pytest
+
+from jellyfin_show_organizer.models import ProviderIdentity
+from jellyfin_show_organizer.providers import TvmazeProviderAdapter
+from jellyfin_show_organizer.tvmaze_cache import (
+    TVMAZE_EPISODES_URL,
+    TVMAZE_SEARCH_URL,
+    TvmazeCatalogCache,
+)
+
+pytestmark = pytest.mark.local
+
+
+class RecordingGetter:
+    def __init__(self, responses: dict[str, object]) -> None:
+        self.responses = responses
+        self.calls: list[tuple[str, Mapping[str, str] | None]] = []
+
+    def __call__(
+        self,
+        url: str,
+        params: Mapping[str, str] | None = None,
+    ) -> object:
+        self.calls.append((url, params))
+        return self.responses[url]
+
+
+def test_provider_identity_is_namespaced_and_normalized() -> None:
+    identity = ProviderIdentity("Fixture-Provider", "show-17")
+
+    assert identity.provider == "fixture-provider"
+    assert identity.value == "show-17"
+    assert identity.key == "fixture-provider:show-17"
+
+
+def test_tvmaze_identity_requires_canonical_positive_integer() -> None:
+    assert ProviderIdentity.tvmaze(42).require_positive_int("tvmaze") == 42
+    with pytest.raises(ValueError, match="canonical positive integer"):
+        ProviderIdentity("tvmaze", "0042").require_positive_int("tvmaze")
+
+
+def test_tvmaze_adapter_normalizes_search_and_episode_catalog(tmp_path: Path) -> None:
+    getter = RecordingGetter(
+        {
+            TVMAZE_SEARCH_URL: [
+                {
+                    "score": 1.0,
+                    "show": {
+                        "id": 101,
+                        "name": "Fixture Harbor",
+                        "premiered": "2026-03-04",
+                    },
+                }
+            ],
+            TVMAZE_EPISODES_URL.format(tvmaze_id=101): [
+                {
+                    "id": 1001,
+                    "season": 0,
+                    "number": 1,
+                    "name": "OVA One",
+                    "airdate": "2026-05-06",
+                    "type": "special",
+                }
+            ],
+        }
+    )
+    adapter = TvmazeProviderAdapter(TvmazeCatalogCache(tmp_path / "cache"), getter)
+
+    search = adapter.search_shows("Fixture Harbor")
+    catalog = adapter.episode_catalog(search.shows[0].identity)
+
+    assert search.provider == "tvmaze"
+    assert search.shows[0].identity == ProviderIdentity("tvmaze", "101")
+    assert search.shows[0].year == 2026
+    assert search.snapshot_identity.startswith("tvmaze:search:fixture harbor:")
+    assert catalog.show_identity == ProviderIdentity("tvmaze", "101")
+    episode = catalog.episodes[0]
+    assert episode.identity == ProviderIdentity("tvmaze", "1001")
+    assert episode.tvmaze_episode_id == 1001
+    assert episode.airdate == "2026-05-06"
+    assert episode.episode_type == "special"
+    assert catalog.snapshot_identity.startswith("tvmaze:episodes:101:")
+    assert [call[0] for call in getter.calls] == [
+        TVMAZE_SEARCH_URL,
+        TVMAZE_EPISODES_URL.format(tvmaze_id=101),
+    ]
+
+
+def test_foreign_identity_fails_before_tvmaze_network_access(tmp_path: Path) -> None:
+    getter = RecordingGetter({})
+    adapter = TvmazeProviderAdapter(TvmazeCatalogCache(tmp_path / "cache"), getter)
+
+    with pytest.raises(ValueError, match="expected 'tvmaze'"):
+        adapter.episode_catalog(ProviderIdentity("fixture", "show-17"))
+
+    assert getter.calls == []
+
+
+def test_duplicate_provider_coordinates_are_normalized_as_catalog_errors(
+    tmp_path: Path,
+) -> None:
+    getter = RecordingGetter(
+        {
+            TVMAZE_EPISODES_URL.format(tvmaze_id=101): [
+                {"id": 1001, "season": 1, "number": 1, "name": "One"},
+                {"id": 1002, "season": 1, "number": 1, "name": "Other One"},
+            ]
+        }
+    )
+    adapter = TvmazeProviderAdapter(TvmazeCatalogCache(tmp_path / "cache"), getter)
+
+    catalog = adapter.episode_catalog(ProviderIdentity.tvmaze(101))
+
+    assert "duplicate-aired-coordinate:S01E01" in catalog.errors
+''', encoding="utf-8")
+
+          Path("docs/metadata-provider-boundary.md").write_text('''# Metadata provider boundary
+
+Jellyfin Media Organizer currently uses TVMaze, but core planning must not assume every future metadata identity is a bare TVMaze integer.
+
+This foundation introduces a namespaced `ProviderIdentity` (`provider` + provider-owned value), normalized provider show/episode records, provider-scoped snapshots, a small `MetadataProvider` protocol, and a TVMaze adapter backed by the existing deterministic cache.
+
+## Safety and determinism
+
+Provider namespaces are normalized with Unicode NFKC plus case folding. Identity values remain provider-owned strings. TVMaze compatibility requires canonical positive integers. Search and episode snapshots include the provider namespace, cache request key, and cache snapshot hash so identities from different providers cannot collide.
+
+The TVMaze adapter normalizes only cached/injected provider responses. It preserves episode airdate and episode type because special/date numbering depends on that evidence. Invalid episode entries and duplicate aired coordinates are surfaced as catalog errors rather than guessed through.
+
+Passing a foreign provider identity to the TVMaze adapter fails before any network access.
+
+## Current migration boundary
+
+TVMaze remains the only configured provider. This slice establishes normalized provider-facing domain models without changing the existing parser, resolver, planner, destination, duplicate, report, or preflight outcomes. Later #40 work can migrate those layers incrementally behind the same interface.
+
+Adding a second provider must require an adapter plus synthetic offline fixtures, not provider-specific branches in filename parsing or destination policy.
+''', encoding="utf-8")
+          PY
+          python -m pip install -e ".[dev]"
+          python -m ruff format jellyfin_show_organizer/models.py jellyfin_show_organizer/providers.py tests/local/test_provider_boundary.py
+          python -m ruff check --fix jellyfin_show_organizer/models.py jellyfin_show_organizer/providers.py tests/local/test_provider_boundary.py
+          python -m ruff format --check jellyfin_show_organizer/models.py jellyfin_show_organizer/providers.py tests/local/test_provider_boundary.py
+          python -m mypy jellyfin_show_organizer/models.py jellyfin_show_organizer/providers.py tests/local/test_provider_boundary.py
+          python -m pytest tests/local/test_provider_boundary.py tests/local/test_tvmaze_cache.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jellyfin_show_organizer/models.py jellyfin_show_organizer/providers.py tests/local/test_provider_boundary.py docs/metadata-provider-boundary.md
+          git commit -m "Add metadata provider boundary foundation"
+          git push origin HEAD:issue-40-provider-adapter-v2
