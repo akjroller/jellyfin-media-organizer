@@ -1,13 +1,14 @@
 [project]
-name = "jellyfin-show-organizer"
+name = "jellyfin-media-organizer"
 version = "0.1.0"
-description = "Plan-first tooling for organizing TV-show media for Jellyfin."
+description = "Plan-first Jellyfin media organizer, currently focused on TV shows."
 readme = "README.md"
 license = { file = "LICENSE.txt" }
 requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
+jmo = "jellyfin_show_organizer.cli:main"
 organizer = "jellyfin_show_organizer.cli:main"
 
 [project.optional-dependencies]

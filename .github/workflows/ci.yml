@@ -34,4 +34,7 @@ jobs:
         run: python -m pytest
 
       - name: CLI smoke test
-        run: python -m jellyfin_show_organizer plan --help
+        run: |
+          jmo plan --help
+          organizer plan --help
+          python -m jellyfin_show_organizer plan --help

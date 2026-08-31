@@ -1,18 +1,19 @@
-# Jellyfin Show Organizer architecture
+# Jellyfin Media Organizer (JMO) architecture
 
 ## Purpose
 
-`jellyfin_show_organizer` is a standalone Python package for building a deterministic, auditable plan for TV-show media organization before any filesystem mutation is allowed.
+`jellyfin_show_organizer` is the standalone Python package that provides the core of Jellyfin Media Organizer (JMO). It builds a deterministic, auditable plan for TV-show media organization before any filesystem mutation is allowed.
 
 The current project boundary is deliberately narrow:
 
 1. authorize one Shows root;
 2. inventory eligible video files read-only;
 3. parse filename hints deterministically;
-4. resolve catalog/provider evidence through explicit data and cache layers;
-5. build versioned plan records;
-6. reconcile every expected source into an explained terminal status;
-7. audit the completed plan before any future apply implementation.
+4. resolve each source show to one canonical provider identity;
+5. resolve catalog/provider evidence through explicit data and cache layers;
+6. build versioned plan records;
+7. reconcile every expected source into an explained terminal status;
+8. audit the completed plan before any future apply implementation.
 
 There is currently no `apply` command.
 
@@ -21,6 +22,7 @@ There is currently no `apply` command.
 - `cli.py` — command-line surface. Only the plan scaffold is exposed today.
 - `inventory.py` — authorized-root checks and deterministic read-only video inventory.
 - `filename_parser.py` — pure filename/path hint parsing without filesystem or provider access.
+- `show_resolver.py` — conservative show-level canonical TVMaze resolution with explicit ambiguity states.
 - `models.py` — typed cross-stage contracts.
 - `overrides.py` — data-driven aliases, numbering modes, years, provider IDs, and title preferences.
 - `reconciliation.py` — one explained terminal inventory status per expected path.
@@ -36,9 +38,9 @@ Filename parsing is pure and offline. Provider-backed matching consumes cached/p
 
 ## Safety boundary
 
-The organizer is Shows-only. A caller must authorize the exact Shows directory rather than a parent media-library root. Symlinks and junctions are not followed outside that boundary.
+The current implementation is Shows-only. A caller must authorize the exact Shows directory rather than a parent media-library root. Symlinks and junctions are not followed outside that boundary.
 
-Inventory is video-only for `.mkv`, `.mp4`, and `.avi`. Subtitles, artwork, metadata, Movies, and unrelated directories are not organizer inputs.
+Inventory is video-only for `.mkv`, `.mp4`, and `.avi`. Subtitles, artwork, metadata, Movies, and unrelated directories are not primary organizer inputs at this stage. Sidecar discovery is tracked separately and must remain non-destructive.
 
 Planning and mutation remain separate. Generating a plan never implies approval, and approval must never be inferred from a successful scan or test run.
 
@@ -66,9 +68,15 @@ The normal development gate is:
 python -m pytest
 python -m ruff check jellyfin_show_organizer tests
 python -m ruff format --check jellyfin_show_organizer tests
-python -m jellyfin_show_organizer plan --help
+jmo plan --help
 ```
+
+The `organizer` console command remains a compatibility alias, and direct package execution remains supported.
+
+## Upstream foundation
+
+JMO began from the MIT-licensed `jkwill87/mnamer` project by Jessy Williams and has since diverged into a Jellyfin-focused architecture. The retained attribution and independence statement are documented in `ACKNOWLEDGMENTS.md`.
 
 ## License
 
-The repository retains the MIT license notice required for inherited portions of the codebase. See `LICENSE.txt`.
+MIT. The original upstream copyright and permission notice is retained in `LICENSE.txt`.
