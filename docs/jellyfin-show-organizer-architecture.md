@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`jellyfin_show_organizer` is the core Python package for Jellyfin Media Organizer (JMO). It builds a deterministic, auditable plan for TV-show media organization before any filesystem mutation is allowed.
+`jellyfin_show_organizer` is the standalone Python package that provides the core of Jellyfin Media Organizer (JMO). It builds a deterministic, auditable plan for TV-show media organization before any filesystem mutation is allowed.
 
 The current project boundary is deliberately narrow:
 
