@@ -208,7 +208,9 @@ def test_non_tvmaze_provider_flows_through_planning_consumers() -> None:
 
     assert resolution.status is ResolutionStatus.MATCHED
     assert resolution.show is not None
-    assert resolution.show.provider_identity == ProviderIdentity("fixture", "show-alpha")
+    assert resolution.show.provider_identity == ProviderIdentity(
+        "fixture", "show-alpha"
+    )
 
     assignment_group = assign_episode_group_with_provider(
         resolution.show,
@@ -252,9 +254,7 @@ def test_non_tvmaze_provider_flows_through_planning_consumers() -> None:
             ),
         ),
     )
-    rows = tuple(
-        csv.DictReader(io.StringIO(render_mapping_csv(plan).decode("utf-8-sig")))
-    )
+    rows = tuple(csv.DictReader(io.StringIO(render_mapping_csv(plan).decode("utf-8-sig"))))
     assert rows[0]["provider"] == "fixture"
     assert rows[0]["provider_id"] == "show-alpha"
     assert rows[0]["tvmaze_id"] == ""
