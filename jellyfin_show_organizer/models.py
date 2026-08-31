@@ -134,6 +134,7 @@ class ParseResult:
     year: int | None = None
     embedded_tvmaze_id: int | None = None
     title_hint: str | None = None
+    embedded_provider_identity: ProviderIdentity | None = None
 
     def __post_init__(self) -> None:
         if self.season is not None and self.season < 0:
@@ -166,37 +167,127 @@ class ParseResult:
             raise ValueError("year is outside the supported range")
         if self.embedded_tvmaze_id is not None and self.embedded_tvmaze_id <= 0:
             raise ValueError("embedded_tvmaze_id must be positive")
+        if (
+            self.embedded_tvmaze_id is not None
+            and self.embedded_provider_identity is not None
+            and self.embedded_provider_identity
+            != ProviderIdentity.tvmaze(self.embedded_tvmaze_id)
+        ):
+            raise ValueError("conflicting embedded provider identities")
+
+    @property
+    def provider_identities(self) -> tuple[ProviderIdentity, ...]:
+        identities: set[ProviderIdentity] = set()
+        if self.embedded_tvmaze_id is not None:
+            identities.add(ProviderIdentity.tvmaze(self.embedded_tvmaze_id))
+        if self.embedded_provider_identity is not None:
+            identities.add(self.embedded_provider_identity)
+        return tuple(sorted(identities, key=lambda identity: identity.key))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class CanonicalShow:
     source_key: str
-    tvmaze_id: int
+    provider_identity: ProviderIdentity
     title: str
     year: int | None
     numbering_mode: NumberingMode
 
+    def __init__(
+        self,
+        source_key: str,
+        tvmaze_id: int | None = None,
+        title: str | None = None,
+        year: int | None = None,
+        numbering_mode: NumberingMode = NumberingMode.AIRED,
+        *,
+        provider_identity: ProviderIdentity | None = None,
+    ) -> None:
+        if provider_identity is None:
+            if tvmaze_id is None:
+                raise ValueError("canonical show provider identity is required")
+            provider_identity = ProviderIdentity.tvmaze(tvmaze_id)
+        elif tvmaze_id is not None:
+            legacy_identity = ProviderIdentity.tvmaze(tvmaze_id)
+            if provider_identity != legacy_identity:
+                raise ValueError("conflicting canonical show provider identities")
+
+        object.__setattr__(self, "source_key", source_key)
+        object.__setattr__(self, "provider_identity", provider_identity)
+        object.__setattr__(self, "title", "" if title is None else title)
+        object.__setattr__(self, "year", year)
+        object.__setattr__(self, "numbering_mode", numbering_mode)
+        self.__post_init__()
+
     def __post_init__(self) -> None:
         if not self.source_key:
             raise ValueError("canonical show source_key cannot be empty")
-        if self.tvmaze_id <= 0:
-            raise ValueError("canonical show tvmaze_id must be positive")
         if not self.title:
             raise ValueError("canonical show title cannot be empty")
 
+    @property
+    def provider(self) -> str:
+        return self.provider_identity.provider
 
-@dataclass(frozen=True, slots=True)
+    @property
+    def provider_id(self) -> str:
+        return self.provider_identity.value
+
+    @property
+    def tvmaze_id(self) -> int:
+        """Compatibility alias for callers still using the initial provider."""
+
+        return self.provider_identity.require_positive_int("tvmaze")
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class CandidateEvidence:
-    tvmaze_id: int
+    provider_identity: ProviderIdentity
     title: str
     score: float
-    reasons: tuple[str, ...] = ()
+    reasons: tuple[str, ...]
+
+    def __init__(
+        self,
+        tvmaze_id: int | None = None,
+        title: str | None = None,
+        score: float = 0.0,
+        reasons: tuple[str, ...] = (),
+        *,
+        provider_identity: ProviderIdentity | None = None,
+    ) -> None:
+        if provider_identity is None:
+            if tvmaze_id is None:
+                raise ValueError("candidate provider identity is required")
+            provider_identity = ProviderIdentity.tvmaze(tvmaze_id)
+        elif tvmaze_id is not None:
+            legacy_identity = ProviderIdentity.tvmaze(tvmaze_id)
+            if provider_identity != legacy_identity:
+                raise ValueError("conflicting candidate provider identities")
+
+        object.__setattr__(self, "provider_identity", provider_identity)
+        object.__setattr__(self, "title", "" if title is None else title)
+        object.__setattr__(self, "score", score)
+        object.__setattr__(self, "reasons", reasons)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
-        if self.tvmaze_id <= 0:
-            raise ValueError("candidate tvmaze_id must be positive")
+        if not self.title:
+            raise ValueError("candidate title cannot be empty")
         if not 0.0 <= self.score <= 1.0:
             raise ValueError("candidate score must be between 0 and 1")
+
+    @property
+    def provider(self) -> str:
+        return self.provider_identity.provider
+
+    @property
+    def provider_id(self) -> str:
+        return self.provider_identity.value
+
+    @property
+    def tvmaze_id(self) -> int:
+        return self.provider_identity.require_positive_int("tvmaze")
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,17 +336,41 @@ class DuplicateDecision:
             raise ValueError("duplicate losers must be candidates")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class PlanEpisode:
-    tvmaze_episode_id: int
+    provider_identity: ProviderIdentity
     season: int
     number: int | None
     title: str
-    airdate: str | None = None
+    airdate: str | None
+
+    def __init__(
+        self,
+        tvmaze_episode_id: int | None = None,
+        season: int = 0,
+        number: int | None = None,
+        title: str = "",
+        airdate: str | None = None,
+        *,
+        provider_identity: ProviderIdentity | None = None,
+    ) -> None:
+        if provider_identity is None:
+            if tvmaze_episode_id is None:
+                raise ValueError("plan episode provider identity is required")
+            provider_identity = ProviderIdentity.tvmaze(tvmaze_episode_id)
+        elif tvmaze_episode_id is not None:
+            legacy_identity = ProviderIdentity.tvmaze(tvmaze_episode_id)
+            if provider_identity != legacy_identity:
+                raise ValueError("conflicting plan episode provider identities")
+
+        object.__setattr__(self, "provider_identity", provider_identity)
+        object.__setattr__(self, "season", season)
+        object.__setattr__(self, "number", number)
+        object.__setattr__(self, "title", title)
+        object.__setattr__(self, "airdate", airdate)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
-        if self.tvmaze_episode_id <= 0:
-            raise ValueError("plan episode tvmaze_episode_id must be positive")
         if self.season < 0:
             raise ValueError("plan episode season cannot be negative")
         if self.number is not None and self.number < 0:
@@ -271,6 +386,18 @@ class PlanEpisode:
                 ) from exc
             if normalized_date != self.airdate:
                 raise ValueError("plan episode airdate must be canonical")
+
+    @property
+    def provider(self) -> str:
+        return self.provider_identity.provider
+
+    @property
+    def provider_id(self) -> str:
+        return self.provider_identity.value
+
+    @property
+    def tvmaze_episode_id(self) -> int:
+        return self.provider_identity.require_positive_int("tvmaze")
 
 
 @dataclass(frozen=True, slots=True)
