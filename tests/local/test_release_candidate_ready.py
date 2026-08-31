@@ -17,7 +17,7 @@ from jellyfin_show_organizer.tvmaze_cache import JsonGetter
 pytestmark = pytest.mark.local
 FIXED_MTIME_NS = 1_700_000_000_000_000_000
 APPROVED_PLAN_SHA256 = (
-    "0b23404313c3f2e32c158d8edaf4b48634a589b9e632a038d0d62f141a3456f4"
+    "0383550248892bc2979c1ad8d258b4835772b67616b794fe78e9cb739d7c3bd2"
 )
 
 

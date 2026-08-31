@@ -7,7 +7,7 @@ import tomllib
 import unicodedata
 from dataclasses import dataclass
 from importlib.resources import files
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, TypeGuard
 
 from .models import NumberingMode, ProviderIdentity, TitlePreference
@@ -20,6 +20,24 @@ def _normalize_identity(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()
     normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
     return " ".join(normalized.split())
+
+
+def _normalize_source_reference(value: str) -> str:
+    if not value or value != value.strip():
+        raise ValueError("duplicate preference source must be a non-empty trimmed path")
+    normalized = unicodedata.normalize("NFC", value.replace("\\", "/"))
+    if re.match(r"^[A-Za-z]:", normalized):
+        raise ValueError("duplicate preference source must be relative")
+    path = PurePosixPath(normalized)
+    if path.is_absolute() or not path.parts:
+        raise ValueError("duplicate preference source must be relative")
+    if any(part in {"", ".", ".."} for part in path.parts):
+        raise ValueError("duplicate preference source cannot contain dot segments")
+    return path.as_posix()
+
+
+def _source_reference_key(value: str) -> str:
+    return unicodedata.normalize("NFKC", _normalize_source_reference(value)).casefold()
 
 
 def _is_plain_int(value: object) -> TypeGuard[int]:
@@ -119,9 +137,36 @@ class ShowOverride:
 
 
 @dataclass(frozen=True, slots=True)
+class DuplicatePreferenceOverride:
+    """One explicit local preference for a source participating in a collision."""
+
+    source: str
+    rank: int
+    reasons: tuple[str, ...] = ("explicit local duplicate preference",)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "source", _normalize_source_reference(self.source))
+        if self.rank < 0:
+            raise ValueError("duplicate preference rank cannot be negative")
+        if not self.reasons or any(
+            not reason or reason != reason.strip() for reason in self.reasons
+        ):
+            raise ValueError(
+                "duplicate preference reasons must contain non-empty trimmed strings"
+            )
+
+        normalized_reasons = [
+            unicodedata.normalize("NFKC", reason).casefold() for reason in self.reasons
+        ]
+        if len(normalized_reasons) != len(set(normalized_reasons)):
+            raise ValueError("duplicate preference reasons must be unique")
+
+
+@dataclass(frozen=True, slots=True)
 class OverrideCatalog:
     schema_version: int
     shows: tuple[ShowOverride, ...]
+    duplicate_preferences: tuple[DuplicatePreferenceOverride, ...] = ()
 
     def __post_init__(self) -> None:
         if self.schema_version not in SUPPORTED_OVERRIDE_SCHEMA_VERSIONS:
@@ -132,6 +177,8 @@ class OverrideCatalog:
                 "unsupported override schema_version: "
                 f"{self.schema_version}; supported versions: {supported}"
             )
+        if self.schema_version < 2 and self.duplicate_preferences:
+            raise ValueError("duplicate preferences require override schema_version 2")
 
         identities: dict[str, str] = {}
         provider_ids: dict[ProviderIdentity, str] = {}
@@ -158,6 +205,17 @@ class OverrideCatalog:
                     )
                 provider_ids[show.provider_identity] = show.key
 
+        duplicate_sources: dict[str, str] = {}
+        for preference in self.duplicate_preferences:
+            normalized = _source_reference_key(preference.source)
+            owner = duplicate_sources.get(normalized)
+            if owner is not None:
+                raise ValueError(
+                    "duplicate preference source is configured more than once: "
+                    f"{preference.source!r} conflicts with {owner!r}"
+                )
+            duplicate_sources[normalized] = preference.source
+
     def get(self, key: str) -> ShowOverride | None:
         normalized = _normalize_identity(key)
         return next(
@@ -165,6 +223,19 @@ class OverrideCatalog:
                 show
                 for show in self.shows
                 if _normalize_identity(show.key) == normalized
+            ),
+            None,
+        )
+
+    def duplicate_preference_for(
+        self, source_relative_path: str
+    ) -> DuplicatePreferenceOverride | None:
+        normalized = _source_reference_key(source_relative_path)
+        return next(
+            (
+                preference
+                for preference in self.duplicate_preferences
+                if _source_reference_key(preference.source) == normalized
             ),
             None,
         )
@@ -193,10 +264,28 @@ class OverrideCatalog:
                 }
             )
 
-        payload = {
+        payload: dict[str, object] = {
             "schema_version": self.schema_version,
             "shows": canonical_shows,
         }
+        if self.schema_version >= 2:
+            payload["duplicate_preferences"] = [
+                {
+                    "rank": preference.rank,
+                    "reasons": sorted(
+                        preference.reasons,
+                        key=lambda reason: (
+                            unicodedata.normalize("NFKC", reason).casefold(),
+                            reason,
+                        ),
+                    ),
+                    "source": preference.source,
+                }
+                for preference in sorted(
+                    self.duplicate_preferences,
+                    key=lambda item: (_source_reference_key(item.source), item.source),
+                )
+            ]
         return json.dumps(
             payload,
             ensure_ascii=False,
@@ -295,6 +384,31 @@ def _parse_override(raw: dict[str, Any]) -> ShowOverride:
     )
 
 
+def _parse_duplicate_preference(raw: dict[str, Any]) -> DuplicatePreferenceOverride:
+    allowed = {"source", "rank", "reasons"}
+    unknown = set(raw) - allowed
+    if unknown:
+        raise ValueError(f"unknown duplicate preference fields: {sorted(unknown)}")
+
+    source = raw.get("source")
+    rank = raw.get("rank")
+    reasons = raw.get("reasons", ["explicit local duplicate preference"])
+    if not isinstance(source, str):
+        raise ValueError("duplicate preference source must be a string")
+    if not _is_plain_int(rank):
+        raise ValueError("duplicate preference rank must be an integer")
+    if not isinstance(reasons, list) or not all(
+        isinstance(reason, str) for reason in reasons
+    ):
+        raise ValueError("duplicate preference reasons must be a list of strings")
+
+    return DuplicatePreferenceOverride(
+        source=source,
+        rank=rank,
+        reasons=tuple(reasons),
+    )
+
+
 def load_overrides(path: Path | None = None) -> OverrideCatalog:
     payload = path.read_bytes() if path is not None else _read_default_overrides()
     try:
@@ -304,7 +418,7 @@ def load_overrides(path: Path | None = None) -> OverrideCatalog:
     except tomllib.TOMLDecodeError as exc:
         raise ValueError(f"invalid override TOML: {exc}") from exc
 
-    allowed_top_level = {"schema_version", "shows"}
+    allowed_top_level = {"schema_version", "shows", "duplicate_preferences"}
     unknown_top_level = set(raw) - allowed_top_level
     if unknown_top_level:
         raise ValueError(
@@ -313,12 +427,21 @@ def load_overrides(path: Path | None = None) -> OverrideCatalog:
 
     schema_version = raw.get("schema_version")
     shows = raw.get("shows", [])
+    duplicate_preferences = raw.get("duplicate_preferences", [])
     if not _is_plain_int(schema_version):
         raise ValueError("override schema_version must be an integer")
     if not isinstance(shows, list) or not all(isinstance(show, dict) for show in shows):
         raise ValueError("override shows must be an array of tables")
+    if not isinstance(duplicate_preferences, list) or not all(
+        isinstance(preference, dict) for preference in duplicate_preferences
+    ):
+        raise ValueError("duplicate_preferences must be an array of tables")
 
     return OverrideCatalog(
         schema_version=schema_version,
         shows=tuple(_parse_override(show) for show in shows),
+        duplicate_preferences=tuple(
+            _parse_duplicate_preference(preference)
+            for preference in duplicate_preferences
+        ),
     )

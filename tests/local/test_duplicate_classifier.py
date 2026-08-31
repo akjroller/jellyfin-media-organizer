@@ -119,7 +119,7 @@ def test_unique_explicit_preference_rank_can_select_winner():
     assert "configured source preference: disc" in result.decision.evidence
 
 
-def test_missing_or_tied_preference_evidence_fails_closed():
+def test_tied_preferences_fail_closed_and_one_explicit_preference_can_win():
     tied_a = _candidate(
         "source-a",
         preference=DuplicatePreference(rank=10, reasons=("same explicit rank",)),
@@ -135,8 +135,13 @@ def test_missing_or_tied_preference_evidence_fails_closed():
 
     missing = _candidate("source-c")
     (missing_result,) = classify_duplicate_candidates([tied_a, missing])
-    assert missing_result.decision.winner is None
-    assert missing_result.decision.losers == ()
+    assert missing_result.decision.winner == "source-a"
+    assert missing_result.decision.losers == ("source-c",)
+
+    unranked = _candidate("source-d")
+    (unranked_result,) = classify_duplicate_candidates([missing, unranked])
+    assert unranked_result.decision.winner is None
+    assert unranked_result.decision.losers == ()
 
 
 def test_destination_convergence_across_logical_identities_is_suspicious():
