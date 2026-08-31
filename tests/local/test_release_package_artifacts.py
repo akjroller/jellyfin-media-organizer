@@ -23,6 +23,19 @@ from jellyfin_show_organizer.sidecars import (
 pytestmark = pytest.mark.local
 
 
+RELEASE_ARTIFACT_NAMES = (
+    "fabricated-release.rar",
+    "FABRICATED-ARCHIVE.RAR",
+    "fabricated-part-zero.r00",
+    "fabricated-part-one.R01",
+    "fabricated-part-last.r99",
+    "fabricated-checksum.sfv",
+    "FABRICATED-CHECKSUM-UPPER.SFV",
+    "fabricated-reconstruction.srr",
+    "FABRICATED-RECONSTRUCTION-UPPER.SRR",
+)
+
+
 def _touch(path: Path, content: bytes = b"") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
@@ -45,17 +58,7 @@ def test_release_package_artifacts_are_ignored_but_unknown_files_fail_closed(
     series = shows / "Fabricated Series"
     _touch(series / "Fabricated Series S01E01.mkv", b"video")
     _touch(series / "Fabricated Series S01E01.en.srt", b"subtitle")
-    for name in (
-        "fabricated-release.rar",
-        "fabricated-release.RAR",
-        "fabricated-release.r00",
-        "fabricated-release.R01",
-        "fabricated-release.r99",
-        "fabricated-release.sfv",
-        "fabricated-release.SFV",
-        "fabricated-release.srr",
-        "fabricated-release.SRR",
-    ):
+    for name in RELEASE_ARTIFACT_NAMES:
         _touch(series / name, name.encode("ascii"))
     _touch(series / "fabricated-release.par2", b"unknown")
 
@@ -70,20 +73,10 @@ def test_release_package_artifacts_are_ignored_but_unknown_files_fail_closed(
     assert companion.suffix == ".en"
 
     ignored_paths = {file.relative_path for file in result.ignored}
-    assert ignored_paths == {
-        f"Fabricated Series/{name}"
-        for name in (
-            "fabricated-release.rar",
-            "fabricated-release.RAR",
-            "fabricated-release.r00",
-            "fabricated-release.R01",
-            "fabricated-release.r99",
-            "fabricated-release.sfv",
-            "fabricated-release.SFV",
-            "fabricated-release.srr",
-            "fabricated-release.SRR",
-        )
+    expected_paths = {
+        f"Fabricated Series/{name}" for name in RELEASE_ARTIFACT_NAMES
     }
+    assert ignored_paths == expected_paths
     assert all(
         file.disposition is AdjacentDisposition.IGNORED
         and file.reason == "known-release-package-artifact"
@@ -164,7 +157,9 @@ def test_release_package_artifacts_are_audited_without_blocking_preflight(
         if record.status is CompanionStatus.IGNORED
     ]
     assert len(ignored) == 5
-    assert all(record.reason == "known-release-package-artifact" for record in ignored)
+    assert all(
+        record.reason == "known-release-package-artifact" for record in ignored
+    )
 
     rendered = outcome.bundle.sidecars_csv.decode("utf-8-sig")
     rows = list(csv.DictReader(io.StringIO(rendered)))
