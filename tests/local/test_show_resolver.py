@@ -223,7 +223,7 @@ def test_representative_title_uses_majority_frequency(tmp_path: Path):
     )
 
     assert resolution.status is ResolutionStatus.MATCHED
-    assert getter.calls[0][1]["q"] == "Majority Show"
+    assert getter.calls[0][1]["q"] == normalize_show_identity("Majority Show")
 
 
 def test_representative_title_tie_break_is_normalized_title_order(tmp_path: Path):
@@ -259,10 +259,11 @@ def test_representative_title_tie_break_is_normalized_title_order(tmp_path: Path
         second_getter,
     )
 
+    expected_query = normalize_show_identity("Alpha Show")
     assert first.status is ResolutionStatus.MATCHED
     assert second.status is ResolutionStatus.MATCHED
-    assert first_getter.calls[0][1]["q"] == "Alpha Show"
-    assert second_getter.calls[0][1]["q"] == "Alpha Show"
+    assert first_getter.calls[0][1]["q"] == expected_query
+    assert second_getter.calls[0][1]["q"] == expected_query
 
 
 def test_representative_title_uses_stable_display_form(tmp_path: Path):
