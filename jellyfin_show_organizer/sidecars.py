@@ -23,6 +23,8 @@ IGNORED_ADJACENT_EXTENSIONS = frozenset(
         ".tiff",
     }
 )
+_RELEASE_PACKAGE_EXTENSIONS = frozenset({".rar", ".sfv", ".srr"})
+_RAR_VOLUME_EXTENSION = re.compile(r"^\.r\d{2}$", re.IGNORECASE)
 _LANGUAGE_TAG = re.compile(r"^[a-z]{2,3}(?:-[a-z]{2,4})?$", re.IGNORECASE)
 _SUBTITLE_FLAGS = frozenset({"default", "forced", "sdh", "cc"})
 
@@ -171,6 +173,17 @@ def _subtitle_candidates(
     return tuple(candidates)
 
 
+def _ignored_adjacent_reason(extension: str) -> str | None:
+    if extension in IGNORED_ADJACENT_EXTENSIONS:
+        return "explicitly-ignored-adjacent-file"
+    if (
+        extension in _RELEASE_PACKAGE_EXTENSIONS
+        or _RAR_VOLUME_EXTENSION.fullmatch(extension) is not None
+    ):
+        return "known-release-package-artifact"
+    return None
+
+
 def discover_sidecars(
     root: AuthorizedShowsRoot,
     videos: tuple[SourceFile, ...],
@@ -282,14 +295,15 @@ def discover_sidecars(
                 )
                 continue
 
-            if extension in IGNORED_ADJACENT_EXTENSIONS:
+            ignored_reason = _ignored_adjacent_reason(extension)
+            if ignored_reason is not None:
                 ignored.append(
                     AdjacentFile(
                         relative_path=relative_path,
                         extension=extension,
                         fingerprint=fingerprint,
                         disposition=AdjacentDisposition.IGNORED,
-                        reason="explicitly-ignored-adjacent-file",
+                        reason=ignored_reason,
                     )
                 )
                 continue
