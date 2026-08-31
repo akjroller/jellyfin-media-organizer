@@ -203,7 +203,9 @@ def discover_sidecars(
                     key=lambda entry: (entry.name.casefold(), entry.name),
                 )
         except OSError as exc:
-            raise RuntimeError("cannot enumerate authorized sidecar directory") from exc
+            raise RuntimeError(
+                "cannot enumerate authorized sidecar directory"
+            ) from exc
 
         for entry in entries:
             path = Path(entry.path)
@@ -318,7 +320,9 @@ def discover_sidecars(
                 disposition=AdjacentDisposition.ASSOCIATED,
                 reason="deterministic-subtitle-association",
             )
-            subtitle_files.setdefault((video.relative_path, suffix), []).append(adjacent)
+            subtitle_files.setdefault((video.relative_path, suffix), []).append(
+                adjacent
+            )
 
     for (source_video, suffix), files in sorted(
         subtitle_files.items(),
