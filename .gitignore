@@ -48,5 +48,6 @@ venv/
 *.mkv
 *.mp4
 
-# Checked-in organizer contracts are source, not generated evidence.
+# Checked-in organizer contracts and synthetic fixtures are source.
 !jellyfin_show_organizer/data/*.json
+!tests/fixtures/organizer/*.json
