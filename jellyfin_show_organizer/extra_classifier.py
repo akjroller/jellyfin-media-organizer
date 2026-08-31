@@ -46,7 +46,7 @@ class ExtraClassification:
 
 _SEPARATORS = re.compile(r"[\s._\-\[\](){}]+")
 
-_FILE_MARKERS: tuple[tuple[ExtraKind, re.Pattern[str]], ...] = (
+_STRONG_FILE_MARKERS: tuple[tuple[ExtraKind, re.Pattern[str]], ...] = (
     (
         ExtraKind.CREDITLESS_OPENING,
         re.compile(r"\b(?:ncop|creditless opening|clean opening)\b"),
@@ -63,11 +63,15 @@ _FILE_MARKERS: tuple[tuple[ExtraKind, re.Pattern[str]], ...] = (
         re.compile(r"\b(?:behind the scenes|bts)\b"),
     ),
     (ExtraKind.DELETED_SCENE, re.compile(r"\bdeleted scenes?\b")),
-    (ExtraKind.CLIP, re.compile(r"\bclips?\b")),
 )
 
 _GENERIC_EXTRA = re.compile(r"\bextras?\b")
-_AMBIGUOUS_EXTRA = re.compile(r"\b(?:bonus|special|ova)\b")
+_WEAK_CLIP = re.compile(r"\bclips?\b")
+_AMBIGUOUS_EXTRA = re.compile(r"\b(?:bonus|special)\b")
+_SPECIAL_NUMBERING = re.compile(r"\b(?:ova|oad)\b")
+_STRUCTURAL_SEASON_EXTRA = re.compile(
+    r"(?i)(?<![A-Za-z0-9])s\d{1,2}[ ._-]*extras?(?:[ ._-]*\d{1,3})?(?![A-Za-z])"
+)
 
 _FOLDER_KINDS: dict[str, ExtraKind] = {
     "creditless openings": ExtraKind.CREDITLESS_OPENING,
@@ -101,24 +105,41 @@ def _strong_episode_evidence(parsed: ParseResult) -> bool:
     )
 
 
-def _extra_markers(path: PurePosixPath) -> tuple[tuple[ExtraKind, str], ...]:
+def _append_marker(
+    hits: list[tuple[ExtraKind, str]],
+    kind: ExtraKind,
+    reason: str,
+) -> None:
+    if all(existing is not kind for existing, _ in hits):
+        hits.append((kind, reason))
+
+
+def _extra_markers(
+    path: PurePosixPath,
+    *,
+    strong_episode: bool,
+) -> tuple[tuple[ExtraKind, str], ...]:
     stem = _normalize(path.stem)
     hits: list[tuple[ExtraKind, str]] = []
 
-    for kind, pattern in _FILE_MARKERS:
+    for kind, pattern in _STRONG_FILE_MARKERS:
         if pattern.search(stem):
-            hits.append((kind, f"filename marker: {kind.value}"))
+            _append_marker(hits, kind, f"filename marker: {kind.value}")
 
-    if not hits and _GENERIC_EXTRA.search(stem):
-        hits.append((ExtraKind.EXTRA, "filename marker: extra"))
+    if _STRUCTURAL_SEASON_EXTRA.search(path.stem):
+        _append_marker(hits, ExtraKind.EXTRA, "structural season-extra marker")
+    elif not strong_episode:
+        if _WEAK_CLIP.search(stem):
+            _append_marker(hits, ExtraKind.CLIP, "filename marker: clip")
+        if not hits and _GENERIC_EXTRA.search(stem):
+            _append_marker(hits, ExtraKind.EXTRA, "filename marker: extra")
 
-    parent_kind = _FOLDER_KINDS.get(_normalize(path.parent.name))
+    parent_normalized = _normalize(path.parent.name)
+    parent_kind = _FOLDER_KINDS.get(parent_normalized)
     if parent_kind is not None:
-        if not hits or parent_kind is not ExtraKind.EXTRA:
-            if all(kind is not parent_kind for kind, _ in hits):
-                hits.append((parent_kind, f"extra folder: {parent_kind.value}"))
-        elif not hits:
-            hits.append((parent_kind, "extra folder: extra"))
+        _append_marker(hits, parent_kind, f"extra folder: {parent_kind.value}")
+    elif _GENERIC_EXTRA.search(parent_normalized):
+        _append_marker(hits, ExtraKind.EXTRA, "embedded extra folder marker")
 
     if any(kind is ExtraKind.DELETED_SCENE for kind, _ in hits):
         hits = [(kind, reason) for kind, reason in hits if kind is not ExtraKind.CLIP]
@@ -135,8 +156,10 @@ def classify_extra(relative_path: str) -> ExtraClassification:
 
     path = PurePosixPath(relative_path.replace("\\", "/"))
     parsed = parse_video_path(relative_path)
-    markers = _extra_markers(path)
     strong_episode = _strong_episode_evidence(parsed)
+    markers = _extra_markers(path, strong_episode=strong_episode)
+    normalized_stem = _normalize(path.stem)
+    special_numbering_match = _SPECIAL_NUMBERING.search(normalized_stem)
 
     unique_kinds = tuple(dict.fromkeys(kind for kind, _ in markers))
     marker_reasons = tuple(reason for _, reason in markers)
@@ -153,12 +176,15 @@ def classify_extra(relative_path: str) -> ExtraClassification:
 
     if unique_kinds:
         kind = unique_kinds[0]
-        if strong_episode:
+        if strong_episode or special_numbering_match is not None:
+            conflict = "strong episode evidence"
+            if special_numbering_match is not None and not strong_episode:
+                conflict = "special-numbering evidence"
             return ExtraClassification(
                 disposition=ExtraDisposition.SUSPICIOUS,
                 parse=parsed,
                 reasons=(
-                    "strong episode evidence conflicts with explicit extra evidence",
+                    f"{conflict} conflicts with explicit extra evidence",
                     *marker_reasons,
                 ),
             )
@@ -171,17 +197,17 @@ def classify_extra(relative_path: str) -> ExtraClassification:
             reasons=(rule,),
         )
 
-    ambiguous_match = _AMBIGUOUS_EXTRA.search(_normalize(path.stem))
-    if ambiguous_match is not None:
+    if special_numbering_match is not None:
+        marker = special_numbering_match.group(0)
+        return ExtraClassification(
+            disposition=ExtraDisposition.EPISODE_CANDIDATE,
+            parse=parsed,
+            reasons=(f"special-numbering marker: {marker}",),
+        )
+
+    ambiguous_match = _AMBIGUOUS_EXTRA.search(normalized_stem)
+    if ambiguous_match is not None and not strong_episode:
         marker = ambiguous_match.group(0)
-        if strong_episode:
-            return ExtraClassification(
-                disposition=ExtraDisposition.SUSPICIOUS,
-                parse=parsed,
-                reasons=(
-                    f"ambiguous extra marker conflicts with strong episode evidence: {marker}",
-                ),
-            )
         return ExtraClassification(
             disposition=ExtraDisposition.UNRESOLVED,
             parse=parsed,
