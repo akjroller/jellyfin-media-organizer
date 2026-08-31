@@ -72,8 +72,7 @@ def test_default_episode_layout_matches_jellyfin_series_and_season_policy() -> N
 
     assert decision.status is DestinationStatus.READY
     assert decision.relative_path == (
-        "Example Series (2024)/Season 01/"
-        "Example Series (2024) S01E01 - Pilot.mkv"
+        "Example Series (2024)/Season 01/Example Series (2024) S01E01 - Pilot.mkv"
     )
     assert "canonical-tvmaze-id:4242" in decision.reasons
     assert "tvmaze-id-retained-as-audit-only-identity" in decision.reasons
@@ -85,9 +84,7 @@ def test_supported_jellyfin_provider_tag_is_added_to_series_folder_only() -> Non
         _show(),
         _assignment("source.mkv", _episode(1001, 1, 1, "Pilot")),
         ".mkv",
-        provider_ids=(
-            JellyfinProviderIdentifier(JellyfinProvider.TVDB, "12345"),
-        ),
+        provider_ids=(JellyfinProviderIdentifier(JellyfinProvider.TVDB, "12345"),),
     )
 
     assert decision.relative_path == (
@@ -216,7 +213,9 @@ def test_unmatched_episode_assignment_cannot_receive_destination() -> None:
         ("creditless-ending", "extras"),
     ],
 )
-def test_extras_use_explicit_jellyfin_compatible_folders(kind: str, folder: str) -> None:
+def test_extras_use_explicit_jellyfin_compatible_folders(
+    kind: str, folder: str
+) -> None:
     decision = build_extra_destination(
         _show(),
         source_key=f"{kind}.mkv",
@@ -280,7 +279,9 @@ def test_case_insensitive_destination_collisions_are_reported() -> None:
     assert len(collisions[0].relative_paths) == 2
 
 
-def test_loss_preserving_sanitization_avoids_false_forbidden_character_collision() -> None:
+def test_loss_preserving_sanitization_avoids_false_forbidden_character_collision() -> (
+    None
+):
     colon = build_episode_destination(
         _show("Series: Name"),
         _assignment("colon.mkv", _episode(1001, 1, 1, "Pilot")),

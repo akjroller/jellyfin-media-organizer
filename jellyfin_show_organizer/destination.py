@@ -309,7 +309,9 @@ def _ready(
     )
 
 
-def _episode_token(episodes: tuple[ProviderEpisode, ...]) -> tuple[str | None, str | None]:
+def _episode_token(
+    episodes: tuple[ProviderEpisode, ...],
+) -> tuple[str | None, str | None]:
     if not episodes:
         return None, "episode-assignment-has-no-provider-episodes"
     if any(episode.number is None for episode in episodes):
@@ -320,7 +322,9 @@ def _episode_token(episodes: tuple[ProviderEpisode, ...]) -> tuple[str | None, s
         return None, "multi-episode-source-spans-seasons"
 
     season = episodes[0].season
-    numbers = tuple(int(episode.number) for episode in episodes if episode.number is not None)
+    numbers = tuple(
+        int(episode.number) for episode in episodes if episode.number is not None
+    )
     if len(set(numbers)) != len(numbers):
         return None, "duplicate-provider-episode-number-in-source"
     if len(numbers) == 1:
@@ -356,7 +360,9 @@ def build_episode_destination(
 
     token, token_error = _episode_token(assignment.episodes)
     if token_error is not None or token is None:
-        return _unresolved(assignment.source_key, token_error or "invalid-episode-token")
+        return _unresolved(
+            assignment.source_key, token_error or "invalid-episode-token"
+        )
 
     try:
         extension = _normalized_extension(source_extension)
