@@ -24,9 +24,7 @@ def _normalize_identity(value: str) -> str:
 
 def _normalize_source_reference(value: str) -> str:
     if not value or value != value.strip():
-        raise ValueError(
-            "duplicate preference source must be a non-empty trimmed path"
-        )
+        raise ValueError("duplicate preference source must be a non-empty trimmed path")
     normalized = unicodedata.normalize("NFC", value.replace("\\", "/"))
     if re.match(r"^[A-Za-z]:", normalized):
         raise ValueError("duplicate preference source must be relative")
