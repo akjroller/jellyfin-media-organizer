@@ -91,6 +91,7 @@ class EpisodeGroupAssignment:
 class _NormalizedCatalog:
     episodes: tuple[ProviderEpisode, ...]
     errors: tuple[str, ...]
+    diagnostics: tuple[str, ...] = ()
 
 
 def _normalize_title(value: str) -> str:
@@ -99,12 +100,45 @@ def _normalize_title(value: str) -> str:
     return " ".join(normalized.split())
 
 
+def _normalize_optional_airdate(
+    value: object,
+    index: int,
+    diagnostics: list[str],
+) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        diagnostics.append(f"invalid-catalog-airdate:{index}")
+        return None
+    try:
+        if date.fromisoformat(value).isoformat() != value:
+            raise ValueError
+    except ValueError:
+        diagnostics.append(f"invalid-catalog-airdate:{index}")
+        return None
+    return value
+
+
+def _normalize_optional_episode_type(
+    value: object,
+    index: int,
+    diagnostics: list[str],
+) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        diagnostics.append(f"invalid-catalog-type:{index}")
+        return None
+    return value
+
+
 def _normalize_catalog(response: object) -> _NormalizedCatalog:
     if not isinstance(response, list):
         return _NormalizedCatalog((), ("episode-catalog-is-not-a-list",))
 
     episodes: list[ProviderEpisode] = []
     errors: list[str] = []
+    diagnostics: list[str] = []
     for index, item in enumerate(response):
         if not isinstance(item, dict):
             errors.append(f"invalid-catalog-entry:{index}")
@@ -114,8 +148,6 @@ def _normalize_catalog(response: object) -> _NormalizedCatalog:
         season = raw.get("season")
         number = raw.get("number")
         title = raw.get("name")
-        airdate = raw.get("airdate")
-        episode_type = raw.get("type")
         if not isinstance(episode_id, int) or episode_id <= 0:
             errors.append(f"invalid-catalog-episode-id:{index}")
             continue
@@ -128,21 +160,17 @@ def _normalize_catalog(response: object) -> _NormalizedCatalog:
         if not isinstance(title, str) or not title.strip():
             errors.append(f"invalid-catalog-title:{index}")
             continue
-        if airdate is not None:
-            if not isinstance(airdate, str):
-                errors.append(f"invalid-catalog-airdate:{index}")
-                continue
-            try:
-                if date.fromisoformat(airdate).isoformat() != airdate:
-                    raise ValueError
-            except ValueError:
-                errors.append(f"invalid-catalog-airdate:{index}")
-                continue
-        if episode_type is not None and (
-            not isinstance(episode_type, str) or not episode_type.strip()
-        ):
-            errors.append(f"invalid-catalog-type:{index}")
-            continue
+
+        airdate = _normalize_optional_airdate(
+            raw.get("airdate"),
+            index,
+            diagnostics,
+        )
+        episode_type = _normalize_optional_episode_type(
+            raw.get("type"),
+            index,
+            diagnostics,
+        )
         episodes.append(
             ProviderEpisode(
                 tvmaze_episode_id=episode_id,
@@ -180,6 +208,32 @@ def _normalize_catalog(response: object) -> _NormalizedCatalog:
             )
         ),
         tuple(errors),
+        tuple(diagnostics),
+    )
+
+
+def _catalog_diagnostic_reasons(catalog: _NormalizedCatalog) -> tuple[str, ...]:
+    return tuple(
+        f"catalog-diagnostic:{diagnostic}" for diagnostic in catalog.diagnostics
+    )
+
+
+def _append_catalog_diagnostics(
+    assignments: tuple[SourceEpisodeAssignment, ...],
+    catalog: _NormalizedCatalog,
+) -> tuple[SourceEpisodeAssignment, ...]:
+    diagnostic_reasons = _catalog_diagnostic_reasons(catalog)
+    if not diagnostic_reasons:
+        return assignments
+    return tuple(
+        replace(
+            assignment,
+            evidence=replace(
+                assignment.evidence,
+                reasons=(*assignment.evidence.reasons, *diagnostic_reasons),
+            ),
+        )
+        for assignment in assignments
     )
 
 
@@ -512,6 +566,15 @@ def _date_assignment(
             f"missing-date-catalog-entry:{parse.episode_date}",
             f"catalog-request:{request_key}",
         )
+    if any(episode.number is None for episode in matches):
+        return _assignment(
+            source.source_key,
+            AssignmentStatus.UNRESOLVED,
+            "episode-catalog",
+            f"numbering-mode:{show.numbering_mode.value}",
+            f"date-catalog-entry-missing-number:{parse.episode_date}",
+            f"catalog-request:{request_key}",
+        )
     if len(matches) > 1:
         return _assignment(
             source.source_key,
@@ -814,6 +877,7 @@ def assign_episode_group(
         )
 
     catalog = _normalize_catalog(cache_record.response)
+    diagnostic_reasons = _catalog_diagnostic_reasons(catalog)
     if catalog.errors:
         assignments = tuple(
             _assignment(
@@ -822,6 +886,7 @@ def assign_episode_group(
                 "episode-catalog",
                 f"numbering-mode:{show.numbering_mode.value}",
                 f"catalog-request:{request_key}",
+                *diagnostic_reasons,
                 *catalog.errors,
             )
             for source in source_group
@@ -837,6 +902,7 @@ def assign_episode_group(
                 "episode-catalog",
                 f"numbering-mode:{show.numbering_mode.value}",
                 f"catalog-request:{request_key}",
+                *diagnostic_reasons,
                 "empty-episode-catalog",
             )
             for source in source_group
@@ -865,6 +931,7 @@ def assign_episode_group(
         assignments = _protect_segment_identity(source_group, assignments)
     else:
         assignments = _protect_provider_episode_identity(assignments)
+    assignments = _append_catalog_diagnostics(assignments, catalog)
 
     return EpisodeGroupAssignment(
         show=show,
