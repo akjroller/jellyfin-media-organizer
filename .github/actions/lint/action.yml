@@ -20,12 +20,9 @@ runs:
       run: uv run ruff check mnamer jellyfin_show_organizer tests
       shell: sh
 
-    - name: Formatting diagnostic with ruff
+    - name: Formatting with ruff
       if: inputs.ruff == 'true'
-      run: |
-        uv run ruff format jellyfin_show_organizer/show_resolver.py
-        git diff -- jellyfin_show_organizer/show_resolver.py
-        exit 1
+      run: uv run ruff format --check mnamer jellyfin_show_organizer tests
       shell: sh
 
     - name: Type checking with mypy

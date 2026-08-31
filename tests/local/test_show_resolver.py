@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from jellyfin_show_organizer.models import NumberingMode, ParseResult
-from jellyfin_show_organizer.overrides import load_overrides
+from jellyfin_show_organizer.overrides import OverrideCatalog, load_overrides
 from jellyfin_show_organizer.show_resolver import (
     ResolutionStatus,
     normalize_show_identity,
@@ -53,7 +53,7 @@ def _search_response() -> list[dict[str, object]]:
     ]
 
 
-def _catalog(tmp_path: Path, text: str) -> object:
+def _catalog(tmp_path: Path, text: str) -> OverrideCatalog:
     path = tmp_path / "overrides.toml"
     path.write_text(text.strip(), encoding="utf-8")
     return load_overrides(path)

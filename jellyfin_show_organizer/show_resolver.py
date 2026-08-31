@@ -57,7 +57,9 @@ def _source_titles(parses: Iterable[ParseResult]) -> tuple[str, ...]:
         for parse in parses
         if parse.series_hint is not None and parse.series_hint.strip()
     }
-    return tuple(sorted(values, key=lambda value: (normalize_show_identity(value), value)))
+    return tuple(
+        sorted(values, key=lambda value: (normalize_show_identity(value), value))
+    )
 
 
 def _representative_title(titles: tuple[str, ...]) -> str | None:
@@ -178,7 +180,9 @@ def _provider_candidates(response: object) -> tuple[_ProviderCandidate, ...]:
             )
         )
 
-    unique = {(candidate.tvmaze_id, candidate.title): candidate for candidate in candidates}
+    unique = {
+        (candidate.tvmaze_id, candidate.title): candidate for candidate in candidates
+    }
     return tuple(
         sorted(
             unique.values(),
