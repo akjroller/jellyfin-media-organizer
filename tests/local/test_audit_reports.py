@@ -51,9 +51,7 @@ def _matched_record(relative_path: str, *, episode: int, size: int) -> PlanRecor
             confidence=1.0,
             reasons=("fabricated evidence",),
         ),
-        destination=(
-            f"Example Series/Season 01/Example Series S01E{episode:02d}.mkv"
-        ),
+        destination=(f"Example Series/Season 01/Example Series S01E{episode:02d}.mkv"),
     )
 
 
