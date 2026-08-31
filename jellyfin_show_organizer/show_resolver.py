@@ -247,9 +247,7 @@ def _catalog_tiebreak(
         if not catalog.resolved:
             detail = catalog.unresolved_reason or "provider-catalog-unresolved"
             candidate_reasons.append(f"catalog-unresolved:{detail}")
-            incomplete_reasons.append(
-                f"catalog-unresolved:{identity.key}:{detail}"
-            )
+            incomplete_reasons.append(f"catalog-unresolved:{identity.key}:{detail}")
         elif catalog.errors:
             detail = "|".join(catalog.errors)
             candidate_reasons.append(f"catalog-invalid:{detail}")
@@ -531,7 +529,9 @@ def resolve_show_group_with_provider(
         if status is ResolutionStatus.SUSPICIOUS
         else "provider-evidence-below-threshold"
     )
-    method = f"{provider_method}+episode-catalog" if catalog_reasons else provider_method
+    method = (
+        f"{provider_method}+episode-catalog" if catalog_reasons else provider_method
+    )
     return ShowResolution(
         status=status,
         show=None,
