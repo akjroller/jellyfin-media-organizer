@@ -297,7 +297,9 @@ def _validate_source_state(
         findings.append(_finding("source-not-regular-file", (record,)))
         return tuple(findings)
 
-    changed = stat.st_size != fingerprint.size or stat.st_mtime_ns != fingerprint.mtime_ns
+    changed = (
+        stat.st_size != fingerprint.size or stat.st_mtime_ns != fingerprint.mtime_ns
+    )
     if not changed and fingerprint.sha256 is not None:
         try:
             changed = _sha256(candidate) != fingerprint.sha256.casefold()
@@ -338,14 +340,20 @@ def _validate_destination_state(
         findings.append(_finding("destination-root-escape", (record,)))
         return tuple(findings)
     if candidate.exists():
-        code = "destination-directory-exists" if candidate.is_dir() else "destination-file-exists"
+        code = (
+            "destination-directory-exists"
+            if candidate.is_dir()
+            else "destination-file-exists"
+        )
         findings.append(_finding(code, (record,)))
     elif candidate.is_symlink():
         findings.append(_finding("destination-link-or-junction-traversal", (record,)))
     return tuple(findings)
 
 
-def _collision_findings(records: tuple[PreflightRecord, ...]) -> tuple[PreflightFinding, ...]:
+def _collision_findings(
+    records: tuple[PreflightRecord, ...],
+) -> tuple[PreflightFinding, ...]:
     matched = tuple(
         record
         for record in records
@@ -371,7 +379,9 @@ def _collision_findings(records: tuple[PreflightRecord, ...]) -> tuple[Preflight
     for candidates in by_nfc.values():
         raw_paths = {record.destination_relative_path for record in candidates}
         if len(candidates) > 1 and len(raw_paths) > 1:
-            findings.append(_finding("destination-unicode-normalization-collision", candidates))
+            findings.append(
+                _finding("destination-unicode-normalization-collision", candidates)
+            )
 
     for candidates in by_casefold.values():
         normalized_paths = {
@@ -379,7 +389,9 @@ def _collision_findings(records: tuple[PreflightRecord, ...]) -> tuple[Preflight
             for record in candidates
         }
         if len(candidates) > 1 and len(normalized_paths) > 1:
-            findings.append(_finding("destination-case-insensitive-collision", candidates))
+            findings.append(
+                _finding("destination-case-insensitive-collision", candidates)
+            )
 
     return tuple(findings)
 
@@ -394,13 +406,23 @@ def _group_identity_findings(
 
     findings: list[PreflightFinding] = []
     for members in groups.values():
-        matched = [member for member in members if member.status is PreflightStatus.MATCHED]
-        providers = {member.provider_identity for member in matched if member.provider_identity}
-        numbering = {member.numbering_identity for member in matched if member.numbering_identity}
+        matched = [
+            member for member in members if member.status is PreflightStatus.MATCHED
+        ]
+        providers = {
+            member.provider_identity for member in matched if member.provider_identity
+        }
+        numbering = {
+            member.numbering_identity for member in matched if member.numbering_identity
+        }
         if len(providers) > 1:
-            findings.append(_finding("operation-group-mixed-provider-identity", members))
+            findings.append(
+                _finding("operation-group-mixed-provider-identity", members)
+            )
         if len(numbering) > 1:
-            findings.append(_finding("operation-group-mixed-numbering-identity", members))
+            findings.append(
+                _finding("operation-group-mixed-numbering-identity", members)
+            )
     return tuple(findings)
 
 
@@ -416,7 +438,9 @@ def _duplicate_findings(
         if record.status is not PreflightStatus.MATCHED:
             continue
         if decision.winner is None:
-            findings.append(_finding("unresolved-duplicate-group-marked-matched", (record,)))
+            findings.append(
+                _finding("unresolved-duplicate-group-marked-matched", (record,))
+            )
             continue
         if decision.winner != record.source_relative_path:
             findings.append(_finding("duplicate-loser-marked-matched", (record,)))
@@ -428,7 +452,9 @@ def _duplicate_findings(
         ]
         if matched_losers:
             findings.append(
-                _finding("duplicate-loser-also-marked-matched", (record, *matched_losers))
+                _finding(
+                    "duplicate-loser-also-marked-matched", (record, *matched_losers)
+                )
             )
     return tuple(findings)
 
@@ -456,21 +482,27 @@ def preflight_plan(
         raise ValueError("max_component_length must be between 32 and 255")
 
     record_group = tuple(
-        sorted(records, key=lambda record: (record.record_id.casefold(), record.record_id))
+        sorted(
+            records, key=lambda record: (record.record_id.casefold(), record.record_id)
+        )
     )
     findings: list[PreflightFinding] = []
 
     record_id_counts = Counter(record.record_id for record in record_group)
     for record_id, count in sorted(record_id_counts.items()):
         if count > 1:
-            duplicates = [record for record in record_group if record.record_id == record_id]
+            duplicates = [
+                record for record in record_group if record.record_id == record_id
+            ]
             findings.append(_finding("duplicate-preflight-record-id", duplicates))
 
     source_counts = Counter(record.source_relative_path for record in record_group)
     for source_path, count in sorted(source_counts.items()):
         if count > 1:
             duplicates = [
-                record for record in record_group if record.source_relative_path == source_path
+                record
+                for record in record_group
+                if record.source_relative_path == source_path
             ]
             findings.append(_finding("duplicate-source-record", duplicates))
 

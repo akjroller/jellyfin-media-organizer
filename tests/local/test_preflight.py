@@ -27,7 +27,12 @@ def _roots(tmp_path: Path):
     destination = tmp_path / "organized"
     shows.mkdir()
     destination.mkdir()
-    return shows, authorize_shows_root(shows), destination, authorize_destination_root(destination)
+    return (
+        shows,
+        authorize_shows_root(shows),
+        destination,
+        authorize_destination_root(destination),
+    )
 
 
 def _source(
@@ -72,7 +77,9 @@ def _matched(
     )
 
 
-def test_clean_operation_set_is_ready_without_creating_destinations(tmp_path: Path) -> None:
+def test_clean_operation_set_is_ready_without_creating_destinations(
+    tmp_path: Path,
+) -> None:
     shows, source_root, destination, destination_root = _roots(tmp_path)
     fingerprint = _source(shows, "Fabricated Show/episode.mkv")
     record = _matched(
@@ -98,7 +105,9 @@ def test_clean_operation_set_is_ready_without_creating_destinations(tmp_path: Pa
     )
 
 
-def test_exact_case_and_unicode_destination_collisions_fail_closed(tmp_path: Path) -> None:
+def test_exact_case_and_unicode_destination_collisions_fail_closed(
+    tmp_path: Path,
+) -> None:
     shows, source_root, _, destination_root = _roots(tmp_path)
     fingerprints = {
         name: _source(shows, name)
@@ -107,10 +116,34 @@ def test_exact_case_and_unicode_destination_collisions_fail_closed(tmp_path: Pat
     composed = "Caf\u00e9/Season 01/Episode.mkv"
     decomposed = unicodedata.normalize("NFD", composed)
     records = (
-        _matched("a", "a.mkv", fingerprints["a.mkv"], "Exact/Season 01/Episode.mkv", group_id="ga"),
-        _matched("b", "b.mkv", fingerprints["b.mkv"], "Exact/Season 01/Episode.mkv", group_id="gb"),
-        _matched("c", "c.mkv", fingerprints["c.mkv"], "Case/Season 01/Episode.mkv", group_id="gc"),
-        _matched("d", "d.mkv", fingerprints["d.mkv"], "case/season 01/episode.mkv", group_id="gd"),
+        _matched(
+            "a",
+            "a.mkv",
+            fingerprints["a.mkv"],
+            "Exact/Season 01/Episode.mkv",
+            group_id="ga",
+        ),
+        _matched(
+            "b",
+            "b.mkv",
+            fingerprints["b.mkv"],
+            "Exact/Season 01/Episode.mkv",
+            group_id="gb",
+        ),
+        _matched(
+            "c",
+            "c.mkv",
+            fingerprints["c.mkv"],
+            "Case/Season 01/Episode.mkv",
+            group_id="gc",
+        ),
+        _matched(
+            "d",
+            "d.mkv",
+            fingerprints["d.mkv"],
+            "case/season 01/episode.mkv",
+            group_id="gd",
+        ),
         _matched("e", "e.mkv", fingerprints["e.mkv"], composed, group_id="ge"),
         _matched("f", "f.mkv", fingerprints["f.mkv"], decomposed, group_id="gf"),
     )
@@ -137,7 +170,11 @@ def test_exact_case_and_unicode_destination_collisions_fail_closed(tmp_path: Pat
         ("Fabricated/CON.mkv", "destination-component-windows-reserved", {}),
         ("Fabricated/bad?.mkv", "destination-component-forbidden-character", {}),
         ("Fabricated./Episode.mkv", "destination-component-trailing-dot-space", {}),
-        ("Fabricated\\Season 01\\Episode.mkv", "destination-path-noncanonical-separator", {}),
+        (
+            "Fabricated\\Season 01\\Episode.mkv",
+            "destination-path-noncanonical-separator",
+            {},
+        ),
         ("L" * 81, "destination-path-too-long", {"max_path_length": 80}),
         (
             f"{'C' * 33}/Episode.mkv",
@@ -199,7 +236,11 @@ def test_changed_source_fingerprint_blocks_preflight(tmp_path: Path) -> None:
 
     result = preflight_plan(
         PLAN_HASH,
-        (_matched("record-1", "episode.mkv", fingerprint, "Show/Season 01/Episode.mkv"),),
+        (
+            _matched(
+                "record-1", "episode.mkv", fingerprint, "Show/Season 01/Episode.mkv"
+            ),
+        ),
         source_root=source_root,
         destination_root=destination_root,
     )
@@ -208,7 +249,9 @@ def test_changed_source_fingerprint_blocks_preflight(tmp_path: Path) -> None:
     assert "source-fingerprint-changed" in {finding.code for finding in result.findings}
 
 
-def test_sha256_revalidation_catches_content_change_with_same_metadata(tmp_path: Path) -> None:
+def test_sha256_revalidation_catches_content_change_with_same_metadata(
+    tmp_path: Path,
+) -> None:
     shows, source_root, _, destination_root = _roots(tmp_path)
     fingerprint = _source(
         shows,
@@ -223,7 +266,11 @@ def test_sha256_revalidation_catches_content_change_with_same_metadata(tmp_path:
 
     result = preflight_plan(
         PLAN_HASH,
-        (_matched("record-1", "episode.mkv", fingerprint, "Show/Season 01/Episode.mkv"),),
+        (
+            _matched(
+                "record-1", "episode.mkv", fingerprint, "Show/Season 01/Episode.mkv"
+            ),
+        ),
         source_root=source_root,
         destination_root=destination_root,
     )
@@ -289,7 +336,9 @@ def test_unresolved_or_suspicious_records_block_the_whole_plan(tmp_path: Path) -
     }
 
 
-def test_one_bad_companion_member_blocks_its_entire_operation_group(tmp_path: Path) -> None:
+def test_one_bad_companion_member_blocks_its_entire_operation_group(
+    tmp_path: Path,
+) -> None:
     shows, source_root, _, destination_root = _roots(tmp_path)
     video_fingerprint = _source(shows, "episode.mkv")
     subtitle_fingerprint = _source(shows, "episode.en.srt", payload=b"subtitle")
@@ -409,7 +458,9 @@ def test_preflight_output_is_deterministic_across_input_order(tmp_path: Path) ->
     second = _source(shows, "b.mkv")
     records = (
         _matched("z", "a.mkv", first, "Show/Season 01/Episode.mkv", group_id="z-group"),
-        _matched("a", "b.mkv", second, "show/season 01/episode.mkv", group_id="a-group"),
+        _matched(
+            "a", "b.mkv", second, "show/season 01/episode.mkv", group_id="a-group"
+        ),
     )
 
     first_result = preflight_plan(
