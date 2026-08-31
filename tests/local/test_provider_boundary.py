@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from jellyfin_show_organizer.destination import DestinationStatus, build_episode_destination
+from jellyfin_show_organizer.destination import (
+    DestinationStatus,
+    build_episode_destination,
+)
 from jellyfin_show_organizer.episode_assignment import (
     AssignmentStatus,
     SourceEpisodeInput,
