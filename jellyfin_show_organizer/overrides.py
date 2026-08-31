@@ -6,26 +6,52 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
-from .models import NumberingMode, TitlePreference
+from .models import NumberingMode, ProviderIdentity, TitlePreference
 
 OVERRIDES_RESOURCE = "data/overrides-v1.toml"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ShowOverride:
     key: str
-    tvmaze_id: int | None
+    provider_identity: ProviderIdentity | None
     aliases: tuple[str, ...]
     year: int | None
     numbering_mode: NumberingMode
     title_preference: TitlePreference
-    preferred_title: str | None = None
+    preferred_title: str | None
+
+    def __init__(
+        self,
+        key: str,
+        tvmaze_id: int | None = None,
+        aliases: tuple[str, ...] = (),
+        year: int | None = None,
+        numbering_mode: NumberingMode = NumberingMode.AIRED,
+        title_preference: TitlePreference = TitlePreference.PROVIDER,
+        preferred_title: str | None = None,
+        *,
+        provider_identity: ProviderIdentity | None = None,
+    ) -> None:
+        if provider_identity is None and tvmaze_id is not None:
+            provider_identity = ProviderIdentity.tvmaze(tvmaze_id)
+        elif provider_identity is not None and tvmaze_id is not None:
+            legacy_identity = ProviderIdentity.tvmaze(tvmaze_id)
+            if provider_identity != legacy_identity:
+                raise ValueError("conflicting override provider identities")
+
+        object.__setattr__(self, "key", key)
+        object.__setattr__(self, "provider_identity", provider_identity)
+        object.__setattr__(self, "aliases", aliases)
+        object.__setattr__(self, "year", year)
+        object.__setattr__(self, "numbering_mode", numbering_mode)
+        object.__setattr__(self, "title_preference", title_preference)
+        object.__setattr__(self, "preferred_title", preferred_title)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         if not self.key:
             raise ValueError("override key cannot be empty")
-        if self.tvmaze_id is not None and self.tvmaze_id <= 0:
-            raise ValueError("override tvmaze_id must be positive")
         if self.year is not None and self.year < 1800:
             raise ValueError("override year is outside the supported range")
         if (
@@ -33,6 +59,32 @@ class ShowOverride:
             and not self.preferred_title
         ):
             raise ValueError("title_preference='override' requires preferred_title")
+
+    @property
+    def provider(self) -> str | None:
+        return (
+            self.provider_identity.provider
+            if self.provider_identity is not None
+            else None
+        )
+
+    @property
+    def provider_id(self) -> str | None:
+        return (
+            self.provider_identity.value
+            if self.provider_identity is not None
+            else None
+        )
+
+    @property
+    def tvmaze_id(self) -> int | None:
+        """Compatibility alias for existing TVMaze override files/callers."""
+
+        if self.provider_identity is None:
+            return None
+        if self.provider_identity.provider != "tvmaze":
+            return None
+        return self.provider_identity.require_positive_int("tvmaze")
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,10 +112,37 @@ def _read_default_overrides() -> bytes:
     return resource.read_bytes()
 
 
+def _provider_identity(raw: dict[str, Any]) -> ProviderIdentity | None:
+    tvmaze_id = raw.get("tvmaze_id")
+    provider = raw.get("provider")
+    provider_id = raw.get("provider_id")
+
+    if tvmaze_id is not None and not isinstance(tvmaze_id, int):
+        raise ValueError("override tvmaze_id must be an integer")
+    if provider is not None and not isinstance(provider, str):
+        raise ValueError("override provider must be a string")
+    if provider_id is not None and not isinstance(provider_id, str | int):
+        raise ValueError("override provider_id must be a string or integer")
+    if (provider is None) != (provider_id is None):
+        raise ValueError("override provider and provider_id must be supplied together")
+
+    legacy = ProviderIdentity.tvmaze(tvmaze_id) if tvmaze_id is not None else None
+    generic = (
+        ProviderIdentity(provider, str(provider_id))
+        if provider is not None and provider_id is not None
+        else None
+    )
+    if legacy is not None and generic is not None and legacy != generic:
+        raise ValueError("conflicting override provider identities")
+    return generic or legacy
+
+
 def _parse_override(raw: dict[str, Any]) -> ShowOverride:
     allowed = {
         "key",
         "tvmaze_id",
+        "provider",
+        "provider_id",
         "aliases",
         "year",
         "numbering_mode",
@@ -83,11 +162,8 @@ def _parse_override(raw: dict[str, Any]) -> ShowOverride:
     ):
         raise ValueError("override aliases must be a list of strings")
 
-    tvmaze_id = raw.get("tvmaze_id")
     year = raw.get("year")
     preferred_title = raw.get("preferred_title")
-    if tvmaze_id is not None and not isinstance(tvmaze_id, int):
-        raise ValueError("override tvmaze_id must be an integer")
     if year is not None and not isinstance(year, int):
         raise ValueError("override year must be an integer")
     if preferred_title is not None and not isinstance(preferred_title, str):
@@ -104,7 +180,7 @@ def _parse_override(raw: dict[str, Any]) -> ShowOverride:
 
     return ShowOverride(
         key=key,
-        tvmaze_id=tvmaze_id,
+        provider_identity=_provider_identity(raw),
         aliases=tuple(aliases),
         year=year,
         numbering_mode=numbering_mode,
