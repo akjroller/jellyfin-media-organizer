@@ -16,7 +16,7 @@ JMO is intentionally conservative: planning, parsing, inventory, reconciliation,
 - canonical TVMaze show resolution with fail-closed ambiguity handling;
 - synthetic regression fixtures for ambiguous and adversarial filename cases.
 
-The `jmo plan` command is still a scaffold while the complete planning pipeline is assembled.
+The `jmo plan` command is still a scaffold while the complete planning pipeline is assembled. Running the scaffold exits nonzero and reports that planning is not implemented; it does not create a plan, report, cache, destination directory, or media output. `jmo plan --help` remains available for inspecting the current command contract.
 
 ## Requirements
 

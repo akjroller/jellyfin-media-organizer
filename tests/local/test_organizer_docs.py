@@ -4,6 +4,7 @@ import pytest
 
 pytestmark = pytest.mark.local
 ROOT = Path(__file__).parents[2]
+README = ROOT / "README.md"
 ARCHITECTURE = ROOT / "docs" / "jellyfin-show-organizer-architecture.md"
 RUNBOOK = ROOT / "docs" / "jellyfin-show-organizer-runbook.md"
 
@@ -39,6 +40,16 @@ def test_runbook_separates_operational_stages_and_has_no_apply_command():
         assert heading in text
 
     assert "There is intentionally no organizer `apply` command" in text
+
+
+def test_scaffold_plan_is_documented_as_nonzero_and_non_producing():
+    readme = README.read_text(encoding="utf-8")
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+
+    for text in (readme, runbook):
+        assert "exits nonzero" in text
+        assert "planning is not implemented" in text
+        assert "destination directory" in text
 
 
 def test_docs_keep_privacy_and_data_driven_extension_rules_explicit():

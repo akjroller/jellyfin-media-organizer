@@ -50,7 +50,7 @@ Current status: the scanner layer exists but is not yet wired into the CLI plan 
 
 Combine inventory, parsing, show resolution, episode assignment, extras/duplicate decisions, and provider evidence into one immutable, versioned plan.
 
-Current status: the CLI exposes a non-mutating `plan` scaffold while the complete planner is assembled.
+Current status: the CLI exposes a non-mutating `plan` scaffold while the complete planner is assembled. Invoking the scaffold exits nonzero and reports that planning is not implemented; it creates no plan, report, cache, destination directory, or media output. Use `plan --help` only to inspect the temporary command contract until the end-to-end planner is wired in.
 
 ### 3. Audit
 
