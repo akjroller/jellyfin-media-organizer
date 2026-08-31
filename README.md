@@ -6,21 +6,22 @@ JMO is intentionally conservative: planning, parsing, inventory, reconciliation,
 
 ## Current capabilities
 
-- deterministic parsing of common season/episode and absolute-number filename patterns;
+- deterministic parsing of common season/episode, absolute, special/OVA-OAD, and date-based filename patterns;
 - read-only inventory scanning for `.mkv`, `.mp4`, and `.avi` files;
-- explicit handling of samples, unreadable entries, and blocked links;
+- explicit handling of samples, unreadable entries, blocked links, extras, and ambiguous evidence;
 - deterministic inventory reconciliation;
 - versioned organizer plan models and JSON schema validation;
 - data-driven aliases and numbering policies;
-- persistent TVMaze cache primitives designed for deterministic/offline testing;
+- persistent TVMaze cache primitives for deterministic/offline replay;
 - canonical TVMaze show resolution with fail-closed ambiguity handling;
+- a namespaced metadata-provider boundary while TVMaze remains the configured provider;
 - end-to-end, show-grouped plan generation with cached provider metadata;
 - companion subtitle planning and duplicate-safe operation groups;
 - immutable JSON/CSV/text audit bundles with provenance and stable hashes;
 - whole-plan preflight that blocks unresolved, colliding, or unsafe plans;
-- synthetic regression fixtures for ambiguous and adversarial filename cases.
+- synthetic regression fixtures for ambiguous and adversarial cases.
 
-`jmo plan` is operational and remains strictly non-mutating. It inventories one explicit Shows root, resolves each show through the persistent TVMaze cache, constructs destinations, classifies duplicates and companions, runs preflight, and writes an immutable audit bundle. It never moves, copies, renames, overwrites, or deletes media.
+`jmo plan` is operational and remains strictly non-mutating. It inventories one explicit Shows root, resolves each show through the persistent provider cache, constructs destinations, classifies duplicates and companions, runs preflight, and writes an immutable audit bundle. It never moves, copies, renames, overwrites, or deletes media.
 
 ## Requirements
 
@@ -38,10 +39,26 @@ Maintained project metadata points to this repository and its issue tracker. Pac
 
 ## Install
 
+From a source checkout:
+
 ```bash
-python -m pip install .
-jmo --version
-jmo plan --help
+git clone https://github.com/akjroller/jellyfin-media-organizer.git
+cd jellyfin-media-organizer
+python -m venv .venv
+./.venv/bin/python -m pip install .
+./.venv/bin/jmo --version
+./.venv/bin/jmo plan --help
+```
+
+Windows PowerShell does not require virtual-environment activation or an execution-policy change:
+
+```powershell
+git clone https://github.com/akjroller/jellyfin-media-organizer.git
+cd jellyfin-media-organizer
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\jmo.exe --version
+.\.venv\Scripts\jmo.exe plan --help
 ```
 
 A minimal planning run uses separate existing source and destination roots, plus generated-state locations outside both media roots:
@@ -53,22 +70,15 @@ jmo plan ExampleMedia/Shows \
   --cache-dir LocalState/cache
 ```
 
-Review `plan.json`, `plan.sha256`, `preflight.txt`, and the CSV reports in the output directory. A ready plan exits `0`; configuration, provider, unresolved, and preflight failures use distinct nonzero exit codes. Re-running with a warmed cache and `--offline` performs zero provider calls.
+Review `plan.json`, `plan.sha256`, `preflight.txt`, and the CSV reports in the output directory. A ready plan exits `0`; configuration, provider, unresolved, and preflight failures use distinct nonzero exit codes.
+
+Use `--offline` for a hard zero-provider-call replay from a warmed cache and `--refresh` for a deliberate refresh. Local override files are passed explicitly with `--overrides`. `--json` emits the versioned machine-readable summary; `--verbose` opts into additional local diagnostic detail.
 
 The historical `organizer` command remains available as a compatibility alias:
 
 ```bash
 organizer --version
 organizer plan --help
-```
-
-For development:
-
-```bash
-python -m pip install -e ".[dev]"
-python -m pytest
-python -m ruff check jellyfin_show_organizer tests
-python -m ruff format --check jellyfin_show_organizer tests
 ```
 
 You can also run the package directly:
@@ -82,20 +92,42 @@ python -m jellyfin_show_organizer plan --help
 
 The current implementation is **Shows-only**. Do not point it at a Movies directory, a mixed media root, or a parent directory containing unrelated media.
 
-Repository examples and tests use synthetic paths and zero-byte fixtures. Real library inventories, provider caches, manifests, reports, media files, machine-specific paths, hostnames, usernames, and other environment-specific data should remain local and untracked.
+Planning and preflight are read-only with respect to media. A successful plan is not authorization to mutate files, and there is intentionally no `apply` command today.
+
+Repository examples and tests use synthetic paths and fixtures. Real library inventories, provider caches, manifests, reports, media files, deployment-specific overrides, machine-specific paths, and other environment-specific data should remain local and untracked.
 
 ## Documentation
 
+- [Operational runbook](docs/jellyfin-show-organizer-runbook.md)
+- [Troubleshooting safely](docs/troubleshooting.md)
+- [Contributor workflow](docs/contributing.md)
 - [Architecture](docs/jellyfin-show-organizer-architecture.md)
-- [Windows and operational runbook](docs/jellyfin-show-organizer-runbook.md)
+- [Local overrides](docs/local-overrides.md)
+- [Provider cache and offline policy](docs/provider-cache-policy.md)
+- [Numbering policies](docs/numbering-policies.md)
+- [Metadata-provider boundary](docs/metadata-provider-boundary.md)
 - [Release and versioning policy](docs/releasing.md)
 - [Upstream acknowledgments](ACKNOWLEDGMENTS.md)
+
+## Development
+
+```bash
+python -m pip install -e ".[dev]"
+python tools/check_ci_constraints.py
+python -m ruff check jellyfin_show_organizer tests tools
+python -m ruff format --check jellyfin_show_organizer tests tools
+python -m mypy jellyfin_show_organizer tests
+python -m pytest
+python tools/check_repository_safety.py
+```
+
+Public regression tests use fabricated data and offline provider fixtures. See the [contributor workflow](docs/contributing.md) before adding parser, matcher, numbering, destination, sidecar, override, or provider behavior.
 
 ## Project layout
 
 ```text
 jellyfin_show_organizer/   core application package
-  data/                    versioned schemas and synthetic override data
+  data/                    versioned schemas and generic packaged defaults
 tests/
   fixtures/                synthetic deterministic fixtures
   local/                   offline test suite
@@ -104,9 +136,11 @@ docs/                      architecture and operating guidance
 
 ## Releases
 
-JMO uses Semantic Versioning. Pull-request CI builds and verifies both wheel and source-distribution installs in isolated environments. Release artifacts are produced only by an explicit release workflow or a matching version tag; the repository does not automatically publish packages to a package registry.
+JMO uses Semantic Versioning. Pull-request CI builds and verifies both wheel and source-distribution installs in isolated environments. Verified artifacts can be built by the deliberate release-artifact workflow or a matching version tag; the repository does not automatically publish packages to a package registry.
 
-Current releases are **plan-only**. See the [release policy](docs/releasing.md) for the version source of truth, supported runtime matrix, tag rules, artifact verification process, and privacy boundary.
+**No JMO release or tag has been created yet by design.** The first public release will be a deliberate decision once the plan-only milestone is considered ready. Until a separately gated apply milestone is implemented and approved, any future release notes must describe JMO as plan-only and must not imply media-moving capability.
+
+See the [release policy](docs/releasing.md) for the version source of truth, supported runtime matrix, tag rules, artifact verification process, and privacy boundary.
 
 ## Project history and credit
 
