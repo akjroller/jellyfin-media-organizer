@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 
-from .inventory import AuthorizedShowsRoot, VIDEO_EXTENSIONS
+from .inventory import VIDEO_EXTENSIONS, AuthorizedShowsRoot
 from .models import SourceFile, SourceFingerprint
 
 SUBTITLE_EXTENSIONS = frozenset({".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx"})
@@ -373,7 +373,7 @@ def discover_sidecars(
         elif sub:
             by_extension[".sub"] = sub
 
-        for extension, matches in sorted(by_extension.items()):
+        for _extension, matches in sorted(by_extension.items()):
             file = matches[0]
             companions.append(
                 CompanionGroup(
