@@ -6,9 +6,14 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import Any, cast
 
-from .models import CanonicalShow, MatchEvidence, NumberingMode, ParseResult
+from .models import CanonicalShow, MatchEvidence, NumberingMode, ParseResult, ProviderIdentity
+from .providers import (
+    MetadataProvider,
+    ProviderEpisode,
+    ProviderEpisodeCatalog,
+    TvmazeProviderAdapter,
+)
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
 
@@ -16,24 +21,6 @@ class AssignmentStatus(StrEnum):
     MATCHED = "matched"
     SUSPICIOUS = "suspicious"
     UNRESOLVED = "unresolved"
-
-
-@dataclass(frozen=True, slots=True)
-class ProviderEpisode:
-    tvmaze_episode_id: int
-    season: int
-    number: int | None
-    title: str
-
-    def __post_init__(self) -> None:
-        if self.tvmaze_episode_id <= 0:
-            raise ValueError("provider episode id must be positive")
-        if self.season < 0:
-            raise ValueError("provider episode season cannot be negative")
-        if self.number is not None and self.number < 0:
-            raise ValueError("provider episode number cannot be negative")
-        if not self.title:
-            raise ValueError("provider episode title cannot be empty")
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,81 +57,10 @@ class EpisodeGroupAssignment:
     catalog_request_key: str | None
 
 
-@dataclass(frozen=True, slots=True)
-class _NormalizedCatalog:
-    episodes: tuple[ProviderEpisode, ...]
-    errors: tuple[str, ...]
-
-
 def _normalize_title(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()
     normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
     return " ".join(normalized.split())
-
-
-def _normalize_catalog(response: object) -> _NormalizedCatalog:
-    if not isinstance(response, list):
-        return _NormalizedCatalog((), ("episode-catalog-is-not-a-list",))
-
-    episodes: list[ProviderEpisode] = []
-    errors: list[str] = []
-    for index, item in enumerate(response):
-        if not isinstance(item, dict):
-            errors.append(f"invalid-catalog-entry:{index}")
-            continue
-        raw = cast(dict[str, Any], item)
-        episode_id = raw.get("id")
-        season = raw.get("season")
-        number = raw.get("number")
-        title = raw.get("name")
-        if not isinstance(episode_id, int) or episode_id <= 0:
-            errors.append(f"invalid-catalog-episode-id:{index}")
-            continue
-        if not isinstance(season, int) or season < 0:
-            errors.append(f"invalid-catalog-season:{index}")
-            continue
-        if number is not None and (not isinstance(number, int) or number < 0):
-            errors.append(f"invalid-catalog-number:{index}")
-            continue
-        if not isinstance(title, str) or not title.strip():
-            errors.append(f"invalid-catalog-title:{index}")
-            continue
-        episodes.append(
-            ProviderEpisode(
-                tvmaze_episode_id=episode_id,
-                season=season,
-                number=number,
-                title=title.strip(),
-            )
-        )
-
-    by_id: dict[int, list[ProviderEpisode]] = defaultdict(list)
-    by_coordinate: dict[tuple[int, int], list[ProviderEpisode]] = defaultdict(list)
-    for episode in episodes:
-        by_id[episode.tvmaze_episode_id].append(episode)
-        if episode.number is not None:
-            by_coordinate[(episode.season, episode.number)].append(episode)
-
-    for episode_id, matches in sorted(by_id.items()):
-        if len(matches) > 1:
-            errors.append(f"duplicate-provider-episode-id:{episode_id}")
-    for (season, number), matches in sorted(by_coordinate.items()):
-        if len(matches) > 1:
-            errors.append(f"duplicate-aired-coordinate:S{season:02d}E{number:02d}")
-
-    return _NormalizedCatalog(
-        tuple(
-            sorted(
-                episodes,
-                key=lambda episode: (
-                    episode.season,
-                    episode.number if episode.number is not None else 10**9,
-                    episode.tvmaze_episode_id,
-                ),
-            )
-        ),
-        tuple(errors),
-    )
 
 
 def _assignment(
@@ -189,10 +105,14 @@ def _expected_family(mode: NumberingMode) -> str:
     return "segment"
 
 
+def _provider_episode_reason(episode: ProviderEpisode) -> str:
+    return f"{episode.provider}-episode:{episode.provider_id}"
+
+
 def _aired_assignment(
     source: SourceEpisodeInput,
     show: CanonicalShow,
-    catalog: _NormalizedCatalog,
+    catalog: ProviderEpisodeCatalog,
     request_key: str,
 ) -> SourceEpisodeAssignment:
     parse = source.parse
@@ -246,7 +166,7 @@ def _aired_assignment(
         matches.append(episode)
         reasons.append(
             f"catalog-match:S{parse.season:02d}E{number:02d}"
-            f"->tvmaze-episode:{episode.tvmaze_episode_id}"
+            f"->{episode.identity.key}"
         )
 
     return _assignment(
@@ -262,7 +182,7 @@ def _aired_assignment(
 def _absolute_assignment(
     source: SourceEpisodeInput,
     show: CanonicalShow,
-    catalog: _NormalizedCatalog,
+    catalog: ProviderEpisodeCatalog,
     request_key: str,
 ) -> SourceEpisodeAssignment:
     parse = source.parse
@@ -309,7 +229,7 @@ def _absolute_assignment(
         f"numbering-mode:{show.numbering_mode.value}",
         f"catalog-request:{request_key}",
         f"absolute-match:{absolute}->S{episode.season:02d}E{episode.number:02d}",
-        f"tvmaze-episode:{episode.tvmaze_episode_id}",
+        _provider_episode_reason(episode),
         episodes=(episode,),
         confidence=1.0,
     )
@@ -318,7 +238,7 @@ def _absolute_assignment(
 def _segment_assignment(
     source: SourceEpisodeInput,
     show: CanonicalShow,
-    catalog: _NormalizedCatalog,
+    catalog: ProviderEpisodeCatalog,
     request_key: str,
 ) -> SourceEpisodeAssignment:
     parse = source.parse
@@ -378,7 +298,7 @@ def _segment_assignment(
         f"segment-hint:{parse.segment_hint.casefold()}",
         f"segment-title-match:{normalized_title}",
         f"catalog-request:{request_key}",
-        f"tvmaze-episode:{episode.tvmaze_episode_id}",
+        _provider_episode_reason(episode),
         episodes=(episode,),
         confidence=1.0,
     )
@@ -398,11 +318,11 @@ def _protect_segment_identity(
     assignments: tuple[SourceEpisodeAssignment, ...],
 ) -> tuple[SourceEpisodeAssignment, ...]:
     parse_by_key = {source.source_key: source.parse for source in sources}
-    by_episode: dict[int, list[SourceEpisodeAssignment]] = defaultdict(list)
+    by_episode: dict[ProviderIdentity, list[SourceEpisodeAssignment]] = defaultdict(list)
     for assignment in assignments:
         if assignment.status is AssignmentStatus.MATCHED:
             for episode in assignment.episodes:
-                by_episode[episode.tvmaze_episode_id].append(assignment)
+                by_episode[episode.identity].append(assignment)
 
     collapsed_keys: set[str] = set()
     for matches in by_episode.values():
@@ -440,18 +360,21 @@ def _protect_segment_identity(
     return tuple(protected)
 
 
-def assign_episode_group(
+def _source_provider_identities(
+    sources: Iterable[SourceEpisodeInput],
+) -> tuple[ProviderIdentity, ...]:
+    identities: set[ProviderIdentity] = set()
+    for source in sources:
+        identities.update(source.parse.provider_identities)
+    return tuple(sorted(identities, key=lambda identity: identity.key))
+
+
+def assign_episode_group_with_provider(
     show: CanonicalShow,
     sources: Iterable[SourceEpisodeInput],
-    cache: TvmazeCatalogCache,
-    getter: JsonGetter,
+    provider: MetadataProvider,
 ) -> EpisodeGroupAssignment:
-    """Assign episode identities for one canonical source-show group.
-
-    The provider episode catalog is requested once for the whole group. The
-    function never searches for a show and never performs per-file provider
-    lookups. Callers must remove extra videos before invoking this layer.
-    """
+    """Assign one canonical source-show group from a normalized provider catalog."""
 
     source_group = tuple(
         sorted(
@@ -465,18 +388,15 @@ def assign_episode_group(
     if len(set(source_keys)) != len(source_keys):
         raise ValueError("episode assignment source_key values must be unique")
 
-    explicit_ids = {
-        source.parse.embedded_tvmaze_id
-        for source in source_group
-        if source.parse.embedded_tvmaze_id is not None
-    }
-    if any(tvmaze_id != show.tvmaze_id for tvmaze_id in explicit_ids):
+    explicit_identities = _source_provider_identities(source_group)
+    if any(identity != show.provider_identity for identity in explicit_identities):
         assignments = tuple(
             _assignment(
                 source.source_key,
                 AssignmentStatus.SUSPICIOUS,
                 "group-validation",
                 "source-provider-id-conflicts-with-canonical-show",
+                f"canonical-provider-identity:{show.provider_identity.key}",
             )
             for source in source_group
         )
@@ -525,9 +445,9 @@ def assign_episode_group(
             show, AssignmentStatus.SUSPICIOUS, assignments, None
         )
 
-    cache_record = cache.episode_catalog(show.tvmaze_id, getter)
-    request_key = cache_record.request_key
-    if not cache_record.resolved:
+    catalog = provider.episode_catalog(show.provider_identity)
+    request_key = catalog.request_key
+    if not catalog.resolved:
         assignments = tuple(
             _assignment(
                 source.source_key,
@@ -535,7 +455,8 @@ def assign_episode_group(
                 "episode-catalog",
                 f"numbering-mode:{show.numbering_mode.value}",
                 f"catalog-request:{request_key}",
-                f"catalog-unresolved:{cache_record.unresolved_reason or 'unknown'}",
+                f"catalog-unresolved:{catalog.unresolved_reason or 'unknown'}",
+                f"provider-snapshot:{catalog.snapshot_identity}",
             )
             for source in source_group
         )
@@ -543,7 +464,21 @@ def assign_episode_group(
             show, AssignmentStatus.UNRESOLVED, assignments, request_key
         )
 
-    catalog = _normalize_catalog(cache_record.response)
+    if catalog.show_identity != show.provider_identity:
+        assignments = tuple(
+            _assignment(
+                source.source_key,
+                AssignmentStatus.SUSPICIOUS,
+                "episode-catalog",
+                "provider-catalog-identity-conflicts-with-canonical-show",
+                f"catalog-request:{request_key}",
+            )
+            for source in source_group
+        )
+        return EpisodeGroupAssignment(
+            show, AssignmentStatus.SUSPICIOUS, assignments, request_key
+        )
+
     if catalog.errors:
         assignments = tuple(
             _assignment(
@@ -595,4 +530,19 @@ def assign_episode_group(
         status=_group_status(assignments),
         assignments=assignments,
         catalog_request_key=request_key,
+    )
+
+
+def assign_episode_group(
+    show: CanonicalShow,
+    sources: Iterable[SourceEpisodeInput],
+    cache: TvmazeCatalogCache,
+    getter: JsonGetter,
+) -> EpisodeGroupAssignment:
+    """Compatibility wrapper using the initial TVMaze provider adapter."""
+
+    return assign_episode_group_with_provider(
+        show,
+        sources,
+        TvmazeProviderAdapter(cache, getter),
     )
