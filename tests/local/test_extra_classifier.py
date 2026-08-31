@@ -15,8 +15,7 @@ pytestmark = pytest.mark.local
     ("relative_path", "expected_kind"),
     [
         (
-            "synthetic/Starforge Academy/"
-            "[SYNTH] Starforge Academy - NCOP [1080p].mkv",
+            "synthetic/Starforge Academy/[SYNTH] Starforge Academy - NCOP [1080p].mkv",
             ExtraKind.CREDITLESS_OPENING,
         ),
         (
@@ -141,8 +140,7 @@ def test_structural_season_extra_markers_are_explicit_extras(relative_path: str)
 
 def test_embedded_extra_parent_directory_is_structural_evidence():
     result = classify_extra(
-        "synthetic/Mirror City/Mirror.City.S01.EXTRAS.1080p/"
-        "Cast.Reunion.mkv"
+        "synthetic/Mirror City/Mirror.City.S01.EXTRAS.1080p/Cast.Reunion.mkv"
     )
 
     assert result.disposition is ExtraDisposition.EXTRA
