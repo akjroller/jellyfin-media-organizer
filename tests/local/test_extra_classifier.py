@@ -15,7 +15,8 @@ pytestmark = pytest.mark.local
     ("relative_path", "expected_kind"),
     [
         (
-            "synthetic/Starforge Academy/[SYNTH] Starforge Academy - NCOP [1080p].mkv",
+            "synthetic/Starforge Academy/"
+            "[SYNTH] Starforge Academy - NCOP [1080p].mkv",
             ExtraKind.CREDITLESS_OPENING,
         ),
         (
@@ -99,22 +100,68 @@ def test_conflicting_extra_markers_fail_closed():
 
 
 def test_ambiguous_extra_word_without_episode_evidence_is_unresolved():
-    result = classify_extra("synthetic/Old Harbor/Old.Harbor.Bonus.Production.Reel.mkv")
+    result = classify_extra(
+        "synthetic/Old Harbor/Old.Harbor.Bonus.Production.Reel.mkv"
+    )
 
     assert result.disposition is ExtraDisposition.UNRESOLVED
     assert result.decision is None
     assert "requires review" in result.reasons[0]
 
 
-def test_ambiguous_extra_word_with_episode_evidence_is_suspicious():
+@pytest.mark.parametrize("word", ["Special", "Bonus", "Clip", "Extra"])
+def test_weak_title_words_do_not_downgrade_strong_episode_evidence(word: str):
     result = classify_extra(
-        "synthetic/Old Harbor/Old.Harbor.S00E01.Special.Presentation.mkv"
+        f"synthetic/Old Harbor/Old.Harbor.S01E03.{word}.Delivery.mkv"
     )
 
-    assert result.disposition is ExtraDisposition.SUSPICIOUS
+    assert result.disposition is ExtraDisposition.EPISODE_CANDIDATE
     assert result.decision is None
-    assert result.parse.season == 0
-    assert result.parse.episodes == (1,)
+    assert result.parse.season == 1
+    assert result.parse.episodes == (3,)
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "synthetic/Mirror City/Mirror.City.S01EXTRA.mkv",
+        "synthetic/Mirror City/Mirror.City.S01EXTRAS.mkv",
+        "synthetic/Mirror City/Mirror.City.s01extra01.mkv",
+        "synthetic/Mirror City/Mirror.City.S01.Extra.02.mkv",
+    ],
+)
+def test_structural_season_extra_markers_are_explicit_extras(relative_path: str):
+    result = classify_extra(relative_path)
+
+    assert result.disposition is ExtraDisposition.EXTRA
+    assert result.decision is not None
+    assert result.decision.kind == ExtraKind.EXTRA.value
+    assert result.decision.rule == "structural season-extra marker"
+
+
+def test_embedded_extra_parent_directory_is_structural_evidence():
+    result = classify_extra(
+        "synthetic/Mirror City/Mirror.City.S01.EXTRAS.1080p/"
+        "Cast.Reunion.mkv"
+    )
+
+    assert result.disposition is ExtraDisposition.EXTRA
+    assert result.decision is not None
+    assert result.decision.kind == ExtraKind.EXTRA.value
+    assert result.decision.rule == "embedded extra folder marker"
+
+
+@pytest.mark.parametrize("marker", ["OVA", "OAD"])
+def test_ova_and_oad_route_to_special_numbering_instead_of_generic_extra(
+    marker: str,
+):
+    result = classify_extra(
+        f"synthetic/Starforge Academy/Starforge.Academy.{marker}.01.mkv"
+    )
+
+    assert result.disposition is ExtraDisposition.EPISODE_CANDIDATE
+    assert result.decision is None
+    assert result.reasons == (f"special-numbering marker: {marker.casefold()}",)
 
 
 def test_normal_episode_remains_episode_candidate():
