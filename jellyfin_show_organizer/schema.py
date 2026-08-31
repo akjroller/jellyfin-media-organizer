@@ -32,7 +32,9 @@ def canonical_records(plan: OrganizerPlan) -> tuple[PlanRecord, ...]:
     """Return plan records in a platform-independent deterministic order."""
 
     return tuple(
-        sorted(plan.records, key=lambda record: _path_sort_key(record.source.relative_path))
+        sorted(
+            plan.records, key=lambda record: _path_sort_key(record.source.relative_path)
+        )
     )
 
 
