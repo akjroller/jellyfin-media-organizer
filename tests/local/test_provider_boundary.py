@@ -254,7 +254,9 @@ def test_non_tvmaze_provider_flows_through_planning_consumers() -> None:
             ),
         ),
     )
-    rows = tuple(csv.DictReader(io.StringIO(render_mapping_csv(plan).decode("utf-8-sig"))))
+    rows = tuple(
+        csv.DictReader(io.StringIO(render_mapping_csv(plan).decode("utf-8-sig")))
+    )
     assert rows[0]["provider"] == "fixture"
     assert rows[0]["provider_id"] == "show-alpha"
     assert rows[0]["tvmaze_id"] == ""
