@@ -14,9 +14,13 @@ JMO is intentionally conservative: planning, parsing, inventory, reconciliation,
 - data-driven aliases and numbering policies;
 - persistent TVMaze cache primitives designed for deterministic/offline testing;
 - canonical TVMaze show resolution with fail-closed ambiguity handling;
+- end-to-end, show-grouped plan generation with cached provider metadata;
+- companion subtitle planning and duplicate-safe operation groups;
+- immutable JSON/CSV/text audit bundles with provenance and stable hashes;
+- whole-plan preflight that blocks unresolved, colliding, or unsafe plans;
 - synthetic regression fixtures for ambiguous and adversarial filename cases.
 
-The `jmo plan` command is still a scaffold while the complete planning pipeline is assembled. Running the scaffold exits nonzero and reports that planning is not implemented; it does not create a plan, report, cache, destination directory, or media output. `jmo plan --help` remains available for inspecting the current command contract.
+`jmo plan` is operational and remains strictly non-mutating. It inventories one explicit Shows root, resolves each show through the persistent TVMaze cache, constructs destinations, classifies duplicates and companions, runs preflight, and writes an immutable audit bundle. It never moves, copies, renames, overwrites, or deletes media.
 
 ## Requirements
 
@@ -39,6 +43,17 @@ python -m pip install .
 jmo --version
 jmo plan --help
 ```
+
+A minimal planning run uses separate existing source and destination roots, plus generated-state locations outside both media roots:
+
+```bash
+jmo plan ExampleMedia/Shows \
+  --destination-root ExampleMedia/OrganizedShows \
+  --output-dir LocalState/audit-001 \
+  --cache-dir LocalState/cache
+```
+
+Review `plan.json`, `plan.sha256`, `preflight.txt`, and the CSV reports in the output directory. A ready plan exits `0`; configuration, provider, unresolved, and preflight failures use distinct nonzero exit codes. Re-running with a warmed cache and `--offline` performs zero provider calls.
 
 The historical `organizer` command remains available as a compatibility alias:
 

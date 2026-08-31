@@ -8,7 +8,7 @@ from dataclasses import asdict
 from importlib.resources import files
 from typing import Any, cast
 
-from .models import OrganizerPlan, PlanRecord
+from .models import CompanionPlanRecord, OrganizerPlan, PlanRecord
 
 PLAN_SCHEMA_VERSION = 1
 PLAN_SCHEMA_RESOURCE = "data/plan-schema-v1.json"
@@ -38,7 +38,29 @@ def canonical_records(plan: OrganizerPlan) -> tuple[PlanRecord, ...]:
     )
 
 
+def canonical_companions(plan: OrganizerPlan) -> tuple[CompanionPlanRecord, ...]:
+    """Return companion records in a platform-independent deterministic order."""
+
+    return tuple(
+        sorted(
+            plan.companions,
+            key=lambda record: _path_sort_key(record.relative_path),
+        )
+    )
+
+
 def plan_to_manifest(plan: OrganizerPlan) -> dict[str, Any]:
+    provenance = asdict(plan.provenance) if plan.provenance is not None else None
+    if provenance is not None:
+        provenance["cache_snapshots"] = sorted(
+            provenance["cache_snapshots"],
+            key=lambda item: (
+                item["provider"],
+                item["kind"],
+                item["request_key"],
+                item["snapshot_id"],
+            ),
+        )
     payload = cast(
         dict[str, Any],
         json.loads(
@@ -46,7 +68,11 @@ def plan_to_manifest(plan: OrganizerPlan) -> dict[str, Any]:
                 {
                     "schema_version": plan.schema_version,
                     "overrides_version": plan.overrides_version,
+                    "provenance": provenance,
                     "records": [asdict(record) for record in canonical_records(plan)],
+                    "companions": [
+                        asdict(record) for record in canonical_companions(plan)
+                    ],
                 },
                 ensure_ascii=False,
             )
@@ -133,6 +159,9 @@ def _validate_record(value: object, index: int) -> None:
         "destination",
         "extra",
         "duplicate",
+        "operation_group_id",
+        "provider_episodes",
+        "reason",
     }
     if set(record) != required:
         raise ManifestValidationError(f"{field} has unexpected fields")
@@ -144,6 +173,30 @@ def _validate_record(value: object, index: int) -> None:
     if status not in allowed_statuses:
         raise ManifestValidationError(f"{field}.status is not supported")
     _require_string(record["destination"], f"{field}.destination", allow_none=True)
+    _require_string(
+        record["operation_group_id"],
+        f"{field}.operation_group_id",
+        allow_none=True,
+    )
+    _require_string(record["reason"], f"{field}.reason", allow_none=True)
+
+    provider_episodes = record["provider_episodes"]
+    if not isinstance(provider_episodes, list | tuple):
+        raise ManifestValidationError(f"{field}.provider_episodes must be an array")
+    for episode_index, raw_episode in enumerate(provider_episodes):
+        episode_field = f"{field}.provider_episodes[{episode_index}]"
+        episode = _require_mapping(raw_episode, episode_field)
+        expected = {"tvmaze_episode_id", "season", "number", "title", "airdate"}
+        if set(episode) != expected:
+            raise ManifestValidationError(f"{episode_field} has unexpected fields")
+        for key in ("tvmaze_episode_id", "season"):
+            current = episode[key]
+            if isinstance(current, bool) or not isinstance(current, int):
+                raise ManifestValidationError(
+                    f"{episode_field}.{key} must be an integer"
+                )
+        _require_string(episode["title"], f"{episode_field}.title")
+        _require_string(episode["airdate"], f"{episode_field}.airdate", allow_none=True)
 
     if status == "matched":
         if (
@@ -175,9 +228,69 @@ def _validate_record(value: object, index: int) -> None:
             )
 
 
+def _validate_companion(value: object, index: int) -> None:
+    field = f"companions[{index}]"
+    companion = _require_mapping(value, field)
+    required = {
+        "relative_path",
+        "extension",
+        "fingerprint",
+        "status",
+        "reason",
+        "source_video",
+        "operation_group_id",
+        "destination",
+        "kind",
+    }
+    if set(companion) != required:
+        raise ManifestValidationError(f"{field} has unexpected fields")
+    for key in ("relative_path", "extension", "status", "reason"):
+        _require_string(companion[key], f"{field}.{key}")
+    for key in ("source_video", "operation_group_id", "destination", "kind"):
+        _require_string(companion[key], f"{field}.{key}", allow_none=True)
+    if companion["fingerprint"] is not None:
+        _validate_fingerprint(companion["fingerprint"], f"{field}.fingerprint")
+    allowed = {"associated", "duplicate", "ignored", "unresolved"}
+    if companion["status"] not in allowed:
+        raise ManifestValidationError(f"{field}.status is not supported")
+
+
+def _validate_provenance(value: object) -> None:
+    if value is None:
+        return
+    provenance = _require_mapping(value, "provenance")
+    required = {
+        "tool_version",
+        "config_snapshot_id",
+        "overrides_snapshot_id",
+        "cache_snapshots",
+    }
+    if set(provenance) != required:
+        raise ManifestValidationError("provenance has unexpected fields")
+    for key in ("tool_version", "config_snapshot_id", "overrides_snapshot_id"):
+        _require_string(provenance[key], f"provenance.{key}")
+    snapshots = provenance["cache_snapshots"]
+    if not isinstance(snapshots, list | tuple):
+        raise ManifestValidationError("provenance.cache_snapshots must be an array")
+    for index, raw_snapshot in enumerate(snapshots):
+        field = f"provenance.cache_snapshots[{index}]"
+        snapshot = _require_mapping(raw_snapshot, field)
+        expected = {"provider", "kind", "request_key", "snapshot_id", "state"}
+        if set(snapshot) != expected:
+            raise ManifestValidationError(f"{field} has unexpected fields")
+        for key in expected:
+            _require_string(snapshot[key], f"{field}.{key}")
+
+
 def validate_manifest(value: object) -> None:
     manifest = _require_mapping(value, "manifest")
-    required = {"schema_version", "overrides_version", "records"}
+    required = {
+        "schema_version",
+        "overrides_version",
+        "provenance",
+        "records",
+        "companions",
+    }
     if set(manifest) != required:
         raise ManifestValidationError("manifest has unexpected fields")
 
@@ -198,3 +311,11 @@ def validate_manifest(value: object) -> None:
         raise ManifestValidationError("records must be an array")
     for index, record in enumerate(records):
         _validate_record(record, index)
+
+    companions = manifest["companions"]
+    if not isinstance(companions, list | tuple):
+        raise ManifestValidationError("companions must be an array")
+    for index, companion in enumerate(companions):
+        _validate_companion(companion, index)
+
+    _validate_provenance(manifest["provenance"])
