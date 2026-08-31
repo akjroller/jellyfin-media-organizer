@@ -49,7 +49,9 @@ def _generic_assignment() -> SourceEpisodeAssignment:
     )
 
 
-def test_destination_uses_canonical_namespaced_identity_without_tvmaze_assumption() -> None:
+def test_destination_uses_canonical_namespaced_identity_without_tvmaze_assumption() -> (
+    None
+):
     decision = build_episode_destination(
         _generic_show(),
         _generic_assignment(),
@@ -61,7 +63,9 @@ def test_destination_uses_canonical_namespaced_identity_without_tvmaze_assumptio
         "Fixture Harbor (2026)/Season 01/Fixture Harbor (2026) S01E01 - Arrival.mkv"
     )
     assert "canonical-provider-identity:fixture:show-17" in decision.reasons
-    assert not any(reason.startswith("canonical-tvmaze-id:") for reason in decision.reasons)
+    assert not any(
+        reason.startswith("canonical-tvmaze-id:") for reason in decision.reasons
+    )
 
 
 def test_plan_manifest_serializes_provider_plus_id_instead_of_bare_tvmaze_id() -> None:
