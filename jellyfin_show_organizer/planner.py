@@ -22,6 +22,7 @@ from .destination import (
 from .duplicate_classifier import (
     DuplicateCandidate,
     DuplicateDisposition,
+    DuplicatePreference,
     classify_duplicate_candidates,
 )
 from .episode_assignment import (
@@ -432,6 +433,7 @@ def _logical_identity(record: PlanRecord) -> str:
 def _apply_duplicate_decisions(
     records: list[PlanRecord],
     sidecars: SidecarDiscovery,
+    overrides: OverrideCatalog,
 ) -> list[PlanRecord]:
     companions_by_video: dict[str, list[str]] = defaultdict(list)
     for group in sidecars.companions:
@@ -439,26 +441,65 @@ def _apply_duplicate_decisions(
             file.relative_path for file in group.files
         )
 
-    candidates = [
-        DuplicateCandidate(
-            operation_key=record.source.relative_path,
-            members=(
-                record.source.relative_path,
-                *sorted(
-                    companions_by_video.get(record.source.relative_path, ()),
-                    key=_path_key,
-                ),
-            ),
-            destination=cast(str, record.destination),
-            logical_identity=_logical_identity(record),
-            fingerprint=record.source.fingerprint,
-        )
+    candidate_records = tuple(
+        record
         for record in records
         if record.status in {TerminalStatus.MATCHED, TerminalStatus.EXTRA}
         and record.destination is not None
         and record.show is not None
-    ]
+    )
+    candidate_keys = {_path_key(record.source.relative_path)[0] for record in candidate_records}
+    configured_keys = {
+        _path_key(preference.source)[0]
+        for preference in overrides.duplicate_preferences
+    }
+    if configured_keys - candidate_keys:
+        raise PlanningConfigurationError(
+            "duplicate preference references an unknown or non-movable source"
+        )
+
+    candidates: list[DuplicateCandidate] = []
+    for record in candidate_records:
+        configured = overrides.duplicate_preference_for(record.source.relative_path)
+        preference = (
+            DuplicatePreference(
+                rank=configured.rank,
+                reasons=(
+                    f"local duplicate preference for {configured.source}",
+                    *configured.reasons,
+                ),
+            )
+            if configured is not None
+            else None
+        )
+        candidates.append(
+            DuplicateCandidate(
+                operation_key=record.source.relative_path,
+                members=(
+                    record.source.relative_path,
+                    *sorted(
+                        companions_by_video.get(record.source.relative_path, ()),
+                        key=_path_key,
+                    ),
+                ),
+                destination=cast(str, record.destination),
+                logical_identity=_logical_identity(record),
+                fingerprint=record.source.fingerprint,
+                preference=preference,
+            )
+        )
+
     results = classify_duplicate_candidates(candidates)
+    collision_keys = {
+        _path_key(candidate.operation_key)[0]
+        for result in results
+        for candidate in result.candidates
+    }
+    if configured_keys - collision_keys:
+        raise PlanningConfigurationError(
+            "duplicate preference source is not part of a destination collision"
+        )
+
     by_source = {
         record.source.relative_path: index for index, record in enumerate(records)
     }
@@ -643,7 +684,7 @@ def _build_plan(
             )
         )
 
-    records = _apply_duplicate_decisions(records, sidecars)
+    records = _apply_duplicate_decisions(records, sidecars, overrides)
     ordered_records = tuple(
         sorted(records, key=lambda item: _path_key(item.source.relative_path))
     )
