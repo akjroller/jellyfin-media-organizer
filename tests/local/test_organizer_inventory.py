@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,7 @@ def test_scan_is_video_only_case_insensitive_and_accounts_for_samples(tmp_path: 
     assert all(record.fingerprint is not None for record in records)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="case-only siblings cannot coexist on Windows")
 def test_scan_uses_stable_case_insensitive_windows_ordering(tmp_path: Path):
     shows = tmp_path / "Shows"
     for name in ("beta.mkv", "alpha.mkv", "Alpha.mkv", "ALPHA 2.mkv"):
@@ -55,6 +57,22 @@ def test_scan_uses_stable_case_insensitive_windows_ordering(tmp_path: Path):
         "Series/alpha.mkv",
         "Series/beta.mkv",
     ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows filesystem semantics only")
+def test_windows_case_only_names_share_one_directory_entry(tmp_path: Path):
+    shows = tmp_path / "Shows"
+    first = _touch(shows / "Series" / "alpha.mkv", b"first")
+    second = _touch(shows / "Series" / "Alpha.mkv", b"second")
+
+    assert first.samefile(second)
+
+    records = scan_videos(authorize_shows_root(shows))
+
+    assert len(records) == 1
+    assert records[0].relative_path.casefold() == "series/alpha.mkv"
+    assert records[0].fingerprint is not None
+    assert records[0].fingerprint.size == len(b"second")
 
 
 def test_scan_ignores_movies_quarantine_artwork_metadata_and_subtitles_dirs(
