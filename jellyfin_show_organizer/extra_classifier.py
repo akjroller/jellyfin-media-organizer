@@ -176,6 +176,15 @@ def classify_extra(relative_path: str) -> ExtraClassification:
 
     if unique_kinds:
         kind = unique_kinds[0]
+        if kind is ExtraKind.EXTRA and "structural season-extra marker" in marker_reasons:
+            rule = "structural season-extra marker"
+            return ExtraClassification(
+                disposition=ExtraDisposition.EXTRA,
+                parse=parsed,
+                decision=ExtraDecision(kind=kind.value, rule=rule),
+                reasons=(rule,),
+            )
+
         if strong_episode or special_numbering_match is not None:
             conflict = "strong episode evidence"
             if special_numbering_match is not None and not strong_episode:
