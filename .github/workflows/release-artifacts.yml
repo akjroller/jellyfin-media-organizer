@@ -54,15 +54,15 @@ jobs:
       - name: Build wheel and source distribution
         run: python -m build
 
-      - name: Verify built artifacts
+      - name: Verify wheel artifact
         shell: bash
         run: |
-          python -m venv "$RUNNER_TEMP/release-venv"
-          "$RUNNER_TEMP/release-venv/bin/python" -m pip install --no-deps dist/*.whl
+          python -m venv "$RUNNER_TEMP/release-wheel-venv"
+          "$RUNNER_TEMP/release-wheel-venv/bin/python" -m pip install --no-deps dist/*.whl
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/release-venv/bin/jmo" --version
-          "$RUNNER_TEMP/release-venv/bin/organizer" plan --help
-          "$RUNNER_TEMP/release-venv/bin/python" - <<'PY'
+          "$RUNNER_TEMP/release-wheel-venv/bin/jmo" --version
+          "$RUNNER_TEMP/release-wheel-venv/bin/organizer" plan --help
+          "$RUNNER_TEMP/release-wheel-venv/bin/python" - <<'PY'
           from importlib.metadata import version
           from importlib.resources import files
           from jellyfin_show_organizer import __version__
@@ -71,7 +71,28 @@ jobs:
           data = files("jellyfin_show_organizer").joinpath("data")
           assert data.joinpath("plan-schema-v1.json").is_file()
           assert data.joinpath("overrides-v1.toml").is_file()
-          print("release artifact verified")
+          print("release wheel verified")
+          PY
+
+      - name: Verify source distribution artifact
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/release-sdist-venv"
+          "$RUNNER_TEMP/release-sdist-venv/bin/python" -m pip install setuptools wheel
+          "$RUNNER_TEMP/release-sdist-venv/bin/python" -m pip install --no-build-isolation --no-deps "$GITHUB_WORKSPACE"/dist/*.tar.gz
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/release-sdist-venv/bin/jmo" --version
+          "$RUNNER_TEMP/release-sdist-venv/bin/organizer" plan --help
+          "$RUNNER_TEMP/release-sdist-venv/bin/python" - <<'PY'
+          from importlib.metadata import version
+          from importlib.resources import files
+          from jellyfin_show_organizer import __version__
+
+          assert version("jellyfin-media-organizer") == __version__
+          data = files("jellyfin_show_organizer").joinpath("data")
+          assert data.joinpath("plan-schema-v1.json").is_file()
+          assert data.joinpath("overrides-v1.toml").is_file()
+          print("release sdist verified")
           PY
 
       - name: Upload verified artifacts
