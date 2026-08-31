@@ -13,6 +13,7 @@ from . import __version__
 from .models import TerminalStatus
 from .overrides import load_overrides
 from .planner import PlanningConfig, PlanningConfigurationError, execute_plan
+from .review import render_override_stub
 
 CommandHandler = Callable[[argparse.Namespace], int]
 PLAN_SUCCESS_EXIT = 0
@@ -81,8 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
         "overrides",
         help="Inspect explicitly selected local override files.",
         description=(
-            "Validate local planning overrides without reading or mutating media. "
-            "Override files are never loaded implicitly by this command."
+            "Validate local planning overrides or derive a review starter from one "
+            "explicit plan manifest without reading or mutating media."
         ),
     )
     overrides_subparsers = overrides_parser.add_subparsers(
@@ -95,6 +96,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_parser.add_argument("path", type=Path)
     validate_parser.set_defaults(handler=_run_overrides_validate)
+
+    stub_parser = overrides_subparsers.add_parser(
+        "stub",
+        help="Emit a local override starter for unresolved plan records.",
+        description=(
+            "Validate one plan.json manifest and write a TOML override starter to "
+            "stdout. Observed provider IDs remain comments until deliberately edited."
+        ),
+    )
+    stub_parser.add_argument("plan", type=Path)
+    stub_parser.set_defaults(handler=_run_overrides_stub)
 
     return parser
 
@@ -248,6 +260,23 @@ def _run_overrides_validate(args: argparse.Namespace) -> int:
         f"shows={len(catalog.shows)} "
         f"snapshot={catalog.snapshot_id}"
     )
+    return 0
+
+
+def _run_overrides_stub(args: argparse.Namespace) -> int:
+    path = cast(Path, args.plan)
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        rendered = render_override_stub(manifest).decode("utf-8")
+    except OSError as exc:
+        detail = exc.strerror or exc.__class__.__name__
+        print(f"Plan manifest invalid: cannot read file ({detail})", file=sys.stderr)
+        return 2
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        print(f"Plan manifest invalid: {exc}", file=sys.stderr)
+        return 2
+
+    print(rendered, end="")
     return 0
 
 
