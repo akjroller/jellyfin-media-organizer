@@ -15,7 +15,6 @@ from jellyfin_show_organizer.models import (
 )
 from jellyfin_show_organizer.tvmaze_cache import TvmazeCatalogCache
 
-
 CATALOG = [
     {"id": 9001, "season": 0, "number": 1, "name": "Preview Special"},
     {"id": 1001, "season": 1, "number": 1, "name": "Part Alpha"},
@@ -73,7 +72,9 @@ def test_aired_assignment_preserves_specials_and_multi_episode_order(
     assert result.status is AssignmentStatus.MATCHED
     assert len(result.assignments) == 2
     assert [episode.season for episode in result.assignments[0].episodes] == [0]
-    assert [episode.tvmaze_episode_id for episode in result.assignments[1].episodes] == [
+    assert [
+        episode.tvmaze_episode_id for episode in result.assignments[1].episodes
+    ] == [
         1001,
         1002,
     ]
@@ -98,9 +99,7 @@ def test_absolute_assignment_uses_regular_catalog_order_and_skips_specials(
     assert result.status is AssignmentStatus.MATCHED
     assert result.assignments[0].episodes[0].tvmaze_episode_id == 1001
     assert result.assignments[1].episodes[0].tvmaze_episode_id == 2001
-    assert all(
-        assignment.episodes[0].season > 0 for assignment in result.assignments
-    )
+    assert all(assignment.episodes[0].season > 0 for assignment in result.assignments)
 
 
 def test_parenthesized_absolute_records_explicit_policy(tmp_path: Path) -> None:
@@ -134,7 +133,10 @@ def test_mixed_numbering_evidence_fails_group_before_provider_access(
     assert result.status is AssignmentStatus.SUSPICIOUS
     assert not getter.calls
     assert all(not assignment.episodes for assignment in result.assignments)
-    assert "mixed-numbering-evidence:absolute,aired" in result.assignments[0].evidence.reasons
+    assert (
+        "mixed-numbering-evidence:absolute,aired"
+        in result.assignments[0].evidence.reasons
+    )
 
 
 def test_numbering_policy_conflict_fails_closed(tmp_path: Path) -> None:
@@ -148,8 +150,10 @@ def test_numbering_policy_conflict_fails_closed(tmp_path: Path) -> None:
 
     assert result.status is AssignmentStatus.SUSPICIOUS
     assert not getter.calls
-    assert result.assignments[0].evidence.reasons[0].startswith(
-        "numbering-policy-conflict:"
+    assert (
+        result.assignments[0]
+        .evidence.reasons[0]
+        .startswith("numbering-policy-conflict:")
     )
 
 
@@ -214,7 +218,9 @@ def test_segment_title_mode_preserves_distinct_segment_evidence(tmp_path: Path) 
     )
 
     assert result.status is AssignmentStatus.MATCHED
-    assert [assignment.episodes[0].tvmaze_episode_id for assignment in result.assignments] == [
+    assert [
+        assignment.episodes[0].tvmaze_episode_id for assignment in result.assignments
+    ] == [
         1001,
         1002,
     ]

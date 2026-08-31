@@ -472,7 +472,9 @@ def assign_episode_group(
             )
             for source in source_group
         )
-        return EpisodeGroupAssignment(show, AssignmentStatus.SUSPICIOUS, assignments, None)
+        return EpisodeGroupAssignment(
+            show, AssignmentStatus.SUSPICIOUS, assignments, None
+        )
 
     families = {
         _evidence_family(source.parse)
@@ -491,7 +493,9 @@ def assign_episode_group(
             )
             for source in source_group
         )
-        return EpisodeGroupAssignment(show, AssignmentStatus.SUSPICIOUS, assignments, None)
+        return EpisodeGroupAssignment(
+            show, AssignmentStatus.SUSPICIOUS, assignments, None
+        )
 
     expected_family = _expected_family(show.numbering_mode)
     if families and families != {expected_family}:
@@ -509,7 +513,9 @@ def assign_episode_group(
             )
             for source in source_group
         )
-        return EpisodeGroupAssignment(show, AssignmentStatus.SUSPICIOUS, assignments, None)
+        return EpisodeGroupAssignment(
+            show, AssignmentStatus.SUSPICIOUS, assignments, None
+        )
 
     cache_record = cache.episode_catalog(show.tvmaze_id, getter)
     request_key = cache_record.request_key
@@ -525,7 +531,9 @@ def assign_episode_group(
             )
             for source in source_group
         )
-        return EpisodeGroupAssignment(show, AssignmentStatus.UNRESOLVED, assignments, request_key)
+        return EpisodeGroupAssignment(
+            show, AssignmentStatus.UNRESOLVED, assignments, request_key
+        )
 
     catalog = _normalize_catalog(cache_record.response)
     if catalog.errors:
@@ -540,7 +548,9 @@ def assign_episode_group(
             )
             for source in source_group
         )
-        return EpisodeGroupAssignment(show, AssignmentStatus.UNRESOLVED, assignments, request_key)
+        return EpisodeGroupAssignment(
+            show, AssignmentStatus.UNRESOLVED, assignments, request_key
+        )
     if not catalog.episodes:
         assignments = tuple(
             _assignment(
@@ -553,7 +563,9 @@ def assign_episode_group(
             )
             for source in source_group
         )
-        return EpisodeGroupAssignment(show, AssignmentStatus.UNRESOLVED, assignments, request_key)
+        return EpisodeGroupAssignment(
+            show, AssignmentStatus.UNRESOLVED, assignments, request_key
+        )
 
     matcher = _aired_assignment
     if show.numbering_mode in {
