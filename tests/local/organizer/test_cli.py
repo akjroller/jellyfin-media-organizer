@@ -5,7 +5,9 @@ from mnamer.organizer.cli import build_parser, main
 pytestmark = pytest.mark.local
 
 
-def test_plan_help_is_available_without_media_access(capsys: pytest.CaptureFixture[str]):
+def test_plan_help_is_available_without_media_access(
+    capsys: pytest.CaptureFixture[str],
+):
     with pytest.raises(SystemExit) as exc_info:
         build_parser().parse_args(["plan", "--help"])
 

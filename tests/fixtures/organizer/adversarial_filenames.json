@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "description": "Fabricated filename grammars for offline organizer regression tests.",
+  "cases": [
+    {
+      "id": "avatar-animated-2005-s01e01",
+      "features": ["avatar", "edition-disambiguation"],
+      "relative_path": "synthetic/inbox/avatar-animated/Avatar.The.Last.Airbender.2005.S01E01.The.Boy.in.the.Iceberg.1080p.WEB-DL-SYNTH.mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Avatar: The Last Airbender",
+        "series_year": 2005,
+        "numbering_mode": "aired",
+        "season": 1,
+        "episodes": [1],
+        "absolute_episodes": [],
+        "segments": [],
+        "title": "The Boy in the Iceberg"
+      }
+    },
+    {
+      "id": "avatar-live-action-2024-s01e01",
+      "features": ["avatar", "edition-disambiguation"],
+      "relative_path": "synthetic/inbox/avatar-live-action/Avatar.The.Last.Airbender.2024.S01E01.Aang.1080p.WEB-DL-SYNTH.mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Avatar: The Last Airbender",
+        "series_year": 2024,
+        "numbering_mode": "aired",
+        "season": 1,
+        "episodes": [1],
+        "absolute_episodes": [],
+        "segments": [],
+        "title": "Aang"
+      }
+    },
+    {
+      "id": "frieren-romanized-alias-01",
+      "features": ["frieren-alias"],
+      "relative_path": "synthetic/inbox/frieren/[SYNTH] Sousou no Frieren - 01 [1080p].mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Frieren: Beyond Journey's End",
+        "series_year": 2023,
+        "numbering_mode": "absolute",
+        "season": null,
+        "episodes": [],
+        "absolute_episodes": [1],
+        "segments": [],
+        "title": null
+      }
+    },
+    {
+      "id": "frieren-english-alias-02",
+      "features": ["frieren-alias"],
+      "relative_path": "synthetic/inbox/frieren/Frieren.Beyond.Journeys.End.Episode.02.1080p-SYNTH.mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Frieren: Beyond Journey's End",
+        "series_year": 2023,
+        "numbering_mode": "absolute",
+        "season": null,
+        "episodes": [],
+        "absolute_episodes": [2],
+        "segments": [],
+        "title": null
+      }
+    },
+    {
+      "id": "naruto-parenthesized-absolute-135",
+      "features": ["naruto-parenthesized-absolute"],
+      "relative_path": "synthetic/inbox/naruto/[SYNTH] Naruto (135) [1080p].mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Naruto",
+        "series_year": 2002,
+        "numbering_mode": "parenthesized-absolute",
+        "season": null,
+        "episodes": [],
+        "absolute_episodes": [135],
+        "segments": [],
+        "title": null
+      }
+    },
+    {
+      "id": "fairy-tail-absolute-176",
+      "features": ["fairy-tail-absolute"],
+      "relative_path": "synthetic/inbox/fairy-tail/[SYNTH] Fairy Tail - 176 [1080p].mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Fairy Tail",
+        "series_year": 2009,
+        "numbering_mode": "absolute",
+        "season": null,
+        "episodes": [],
+        "absolute_episodes": [176],
+        "segments": [],
+        "title": null
+      }
+    },
+    {
+      "id": "fullmetal-brotherhood-absolute-27",
+      "features": ["fullmetal-absolute"],
+      "relative_path": "synthetic/inbox/fullmetal/[SYNTH] Fullmetal Alchemist Brotherhood - 27 [1080p].mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Fullmetal Alchemist: Brotherhood",
+        "series_year": 2009,
+        "numbering_mode": "absolute",
+        "season": null,
+        "episodes": [],
+        "absolute_episodes": [27],
+        "segments": [],
+        "title": null
+      }
+    },
+    {
+      "id": "cartoon-hyphenated-multi-episode",
+      "features": ["multi-episode-cartoon"],
+      "relative_path": "synthetic/inbox/cartoon-ranges/Gravity.Falls.S01E03-E04.Double.Feature.1080p-SYNTH.mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Gravity Falls",
+        "series_year": 2012,
+        "numbering_mode": "aired",
+        "season": 1,
+        "episodes": [3, 4],
+        "absolute_episodes": [],
+        "segments": [],
+        "title": "Double Feature"
+      }
+    },
+    {
+      "id": "cartoon-repeated-e-multi-episode",
+      "features": ["multi-episode-cartoon"],
+      "relative_path": "synthetic/inbox/cartoon-ranges/Adventure.Time.S09E07E08.Two.Stories.1080p-SYNTH.mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Adventure Time",
+        "series_year": 2010,
+        "numbering_mode": "aired",
+        "season": 9,
+        "episodes": [7, 8],
+        "absolute_episodes": [],
+        "segments": [],
+        "title": "Two Stories"
+      }
+    },
+    {
+      "id": "spongebob-segment-01a",
+      "features": ["spongebob-segment"],
+      "relative_path": "synthetic/inbox/spongebob/SpongeBob.SquarePants.S01E01a.Help.Wanted.480p-SYNTH.mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "SpongeBob SquarePants",
+        "series_year": 1999,
+        "numbering_mode": "segment",
+        "season": 1,
+        "episodes": [1],
+        "absolute_episodes": [],
+        "segments": ["a"],
+        "title": "Help Wanted"
+      }
+    },
+    {
+      "id": "spongebob-segment-01b",
+      "features": ["spongebob-segment"],
+      "relative_path": "synthetic/inbox/spongebob/SpongeBob.SquarePants.S01E01b.Reef.Blower.480p-SYNTH.mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "SpongeBob SquarePants",
+        "series_year": 1999,
+        "numbering_mode": "segment",
+        "season": 1,
+        "episodes": [1],
+        "absolute_episodes": [],
+        "segments": ["b"],
+        "title": "Reef Blower"
+      }
+    },
+    {
+      "id": "frieren-creditless-opening",
+      "features": ["extra"],
+      "relative_path": "synthetic/inbox/frieren-extras/[SYNTH] Frieren - NCOP [1080p].mkv",
+      "expected": {
+        "classification": "extra",
+        "canonical_series": "Frieren: Beyond Journey's End",
+        "series_year": 2023,
+        "numbering_mode": "extra",
+        "season": null,
+        "episodes": [],
+        "absolute_episodes": [],
+        "segments": [],
+        "extra_type": "creditless-opening",
+        "title": null
+      }
+    },
+    {
+      "id": "frieren-creditless-ending",
+      "features": ["extra"],
+      "relative_path": "synthetic/inbox/frieren-extras/[SYNTH] Frieren - NCED [1080p].mkv",
+      "expected": {
+        "classification": "extra",
+        "canonical_series": "Frieren: Beyond Journey's End",
+        "series_year": 2023,
+        "numbering_mode": "extra",
+        "season": null,
+        "episodes": [],
+        "absolute_episodes": [],
+        "segments": [],
+        "extra_type": "creditless-ending",
+        "title": null
+      }
+    },
+    {
+      "id": "avatar-duplicate-source-a",
+      "features": ["avatar", "duplicate"],
+      "relative_path": "synthetic/inbox/duplicates/source-a/Avatar.The.Last.Airbender.2005.S01E02.The.Avatar.Returns.1080p-SYNTH.mkv",
+      "duplicate_group": "avatar-animated-s01e02",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Avatar: The Last Airbender",
+        "series_year": 2005,
+        "numbering_mode": "aired",
+        "season": 1,
+        "episodes": [2],
+        "absolute_episodes": [],
+        "segments": [],
+        "title": "The Avatar Returns"
+      }
+    },
+    {
+      "id": "avatar-duplicate-source-b",
+      "features": ["avatar", "duplicate"],
+      "relative_path": "synthetic/inbox/duplicates/source-b/Avatar.The.Last.Airbender.S01E02.The.Avatar.Returns.720p-SYNTH.mp4",
+      "duplicate_group": "avatar-animated-s01e02",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Avatar: The Last Airbender",
+        "series_year": 2005,
+        "numbering_mode": "aired",
+        "season": 1,
+        "episodes": [2],
+        "absolute_episodes": [],
+        "segments": [],
+        "title": "The Avatar Returns"
+      }
+    },
+    {
+      "id": "pokemon-mojibake-series",
+      "features": ["mojibake"],
+      "relative_path": "synthetic/inbox/mojibake/PokÃ©mon.S01E01.I.Choose.You.480p-SYNTH.mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Pokémon",
+        "series_year": 1997,
+        "numbering_mode": "aired",
+        "season": 1,
+        "episodes": [1],
+        "absolute_episodes": [],
+        "segments": [],
+        "title": "I Choose You"
+      }
+    },
+    {
+      "id": "frieren-mojibake-title",
+      "features": ["frieren-alias", "mojibake"],
+      "relative_path": "synthetic/inbox/mojibake/Frieren.Beyond.Journeyâ€™s.End.E03.1080p-SYNTH.mkv",
+      "expected": {
+        "classification": "episode",
+        "canonical_series": "Frieren: Beyond Journey's End",
+        "series_year": 2023,
+        "numbering_mode": "absolute",
+        "season": null,
+        "episodes": [],
+        "absolute_episodes": [3],
+        "segments": [],
+        "title": null
+      }
+    }
+  ]
+}
