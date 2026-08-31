@@ -109,14 +109,18 @@ def _device_id(path: Path) -> int:
 def _validate_fingerprint(path: Path, expected: SourceFingerprint) -> SourceFingerprint:
     before = path.stat()
     if before.st_size != expected.size or before.st_mtime_ns != expected.mtime_ns:
-        raise ApplyFilesystemError("source fingerprint size/mtime no longer matches plan")
+        raise ApplyFilesystemError(
+            "source fingerprint size/mtime no longer matches plan"
+        )
 
     sha256: str | None = None
     if expected.sha256 is not None:
         sha256 = _hash_file(path)
         after = path.stat()
         if after.st_size != before.st_size or after.st_mtime_ns != before.st_mtime_ns:
-            raise ApplyFilesystemError("source changed while fingerprint was being verified")
+            raise ApplyFilesystemError(
+                "source changed while fingerprint was being verified"
+            )
         if sha256 != expected.sha256:
             raise ApplyFilesystemError("source SHA-256 no longer matches plan")
 
