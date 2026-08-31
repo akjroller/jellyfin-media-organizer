@@ -25,14 +25,41 @@ class ProviderShow:
         object.__setattr__(self, "title", title)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ProviderEpisode:
     identity: ProviderIdentity
     season: int
     number: int | None
     title: str
-    airdate: str | None = None
-    episode_type: str | None = None
+    airdate: str | None
+    episode_type: str | None
+
+    def __init__(
+        self,
+        identity: ProviderIdentity | None = None,
+        season: int = 0,
+        number: int | None = None,
+        title: str = "",
+        airdate: str | None = None,
+        episode_type: str | None = None,
+        *,
+        tvmaze_episode_id: int | None = None,
+    ) -> None:
+        if identity is None:
+            if tvmaze_episode_id is None:
+                raise ValueError("provider episode identity is required")
+            identity = ProviderIdentity.tvmaze(tvmaze_episode_id)
+        elif tvmaze_episode_id is not None:
+            legacy_identity = ProviderIdentity.tvmaze(tvmaze_episode_id)
+            if identity != legacy_identity:
+                raise ValueError("conflicting provider episode identities")
+        object.__setattr__(self, "identity", identity)
+        object.__setattr__(self, "season", season)
+        object.__setattr__(self, "number", number)
+        object.__setattr__(self, "title", title)
+        object.__setattr__(self, "airdate", airdate)
+        object.__setattr__(self, "episode_type", episode_type)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         title = self.title.strip()

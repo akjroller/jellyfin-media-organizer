@@ -27,9 +27,8 @@ from .duplicate_classifier import (
 )
 from .episode_assignment import (
     AssignmentStatus,
-    ProviderEpisode,
     SourceEpisodeInput,
-    assign_episode_group,
+    assign_episode_group_with_provider,
 )
 from .extra_classifier import ExtraClassification, ExtraDisposition, classify_extra
 from .inventory import (
@@ -58,9 +57,14 @@ from .preflight import (
     authorize_destination_root,
     preflight_plan,
 )
+from .providers import MetadataProvider, ProviderEpisode, TvmazeProviderAdapter
 from .reports import AuditBundle, write_audit_bundle
 from .schema import PLAN_SCHEMA_VERSION, stable_plan_hash
-from .show_resolver import ResolutionStatus, ShowResolution, resolve_show_group
+from .show_resolver import (
+    ResolutionStatus,
+    ShowResolution,
+    resolve_show_group_with_provider,
+)
 from .sidecars import (
     AdjacentFile,
     SidecarDiscovery,
@@ -224,7 +228,7 @@ def _reason(evidence: MatchEvidence) -> str:
 
 def _plan_episode(episode: ProviderEpisode) -> PlanEpisode:
     return PlanEpisode(
-        tvmaze_episode_id=episode.tvmaze_episode_id,
+        provider_identity=episode.identity,
         season=episode.season,
         number=episode.number,
         title=episode.title,
@@ -259,8 +263,7 @@ def _plan_resolved_group(
     sources: tuple[SourceFile, ...],
     classifications: Mapping[str, ExtraClassification],
     resolution: ShowResolution,
-    cache: TrackingTvmazeCatalogCache,
-    getter: JsonGetter,
+    provider: MetadataProvider,
     destination_policy: DestinationPolicy,
 ) -> list[PlanRecord]:
     assert resolution.show is not None
@@ -349,7 +352,9 @@ def _plan_resolved_group(
     if not episode_sources:
         return records
 
-    assignment_group = assign_episode_group(show, episode_sources, cache, getter)
+    assignment_group = assign_episode_group_with_provider(
+        show, episode_sources, provider
+    )
     assignments = {
         assignment.source_key: assignment for assignment in assignment_group.assignments
     }
@@ -420,14 +425,15 @@ def _plan_resolved_group(
 
 def _logical_identity(record: PlanRecord) -> str:
     assert record.show is not None
+    show_identity = record.show.provider_identity.key
     if record.provider_episodes:
         episodes = ",".join(
-            str(episode.tvmaze_episode_id) for episode in record.provider_episodes
+            episode.provider_identity.key for episode in record.provider_episodes
         )
-        return f"tvmaze:{record.show.tvmaze_id}:episodes:{episodes}"
+        return f"{show_identity}:episodes:{episodes}"
     if record.extra is not None:
-        return f"tvmaze:{record.show.tvmaze_id}:extra:{record.extra.kind}"
-    return f"tvmaze:{record.show.tvmaze_id}:source:{record.source.relative_path}"
+        return f"{show_identity}:extra:{record.extra.kind}"
+    return f"{show_identity}:source:{record.source.relative_path}"
 
 
 def _apply_duplicate_decisions(
@@ -627,7 +633,7 @@ def _build_plan(
     config: PlanningConfig,
     overrides: OverrideCatalog,
     cache: TrackingTvmazeCatalogCache,
-    getter: JsonGetter,
+    provider: MetadataProvider,
 ) -> OrganizerPlan:
     inventory = scan_videos(source_root)
     blocked = tuple(
@@ -665,12 +671,11 @@ def _build_plan(
         group = tuple(
             sorted(groups[source_key], key=lambda item: _path_key(item.relative_path))
         )
-        resolution = resolve_show_group(
+        resolution = resolve_show_group_with_provider(
             source_key,
             (classifications[source.relative_path].parse for source in group),
             overrides,
-            cache,
-            getter,
+            provider,
         )
         if resolution.status is not ResolutionStatus.MATCHED:
             records.extend(_unresolved_show_records(group, classifications, resolution))
@@ -680,8 +685,7 @@ def _build_plan(
                 group,
                 classifications,
                 resolution,
-                cache,
-                getter,
+                provider,
                 destination_policy,
             )
         )
@@ -711,7 +715,7 @@ def _numbering_identity(record: PlanRecord) -> str | None:
         return ",".join(
             f"S{episode.season:02d}E{episode.number:02d}"
             if episode.number is not None
-            else f"S{episode.season:02d}:tvmaze:{episode.tvmaze_episode_id}"
+            else f"S{episode.season:02d}:{episode.provider_identity.key}"
             for episode in record.provider_episodes
         )
     if record.extra is not None:
@@ -746,7 +750,7 @@ def _preflight_records(plan: OrganizerPlan) -> tuple[PreflightRecord, ...]:
                 status=_video_preflight_status(record),
                 operation_group_id=record.operation_group_id,
                 provider_identity=(
-                    f"tvmaze:{record.show.tvmaze_id}"
+                    record.show.provider_identity.key
                     if record.show is not None
                     else None
                 ),
@@ -778,7 +782,7 @@ def _preflight_records(plan: OrganizerPlan) -> tuple[PreflightRecord, ...]:
                 status=status,
                 operation_group_id=companion.operation_group_id,
                 provider_identity=(
-                    f"tvmaze:{video.show.tvmaze_id}"
+                    video.show.provider_identity.key
                     if video is not None and video.show is not None
                     else None
                 ),
@@ -827,7 +831,8 @@ def execute_plan(
         refresh=config.refresh,
         clock=clock,
     )
-    plan = _build_plan(source_root, config, overrides, cache, getter)
+    provider = TvmazeProviderAdapter(cache, getter)
+    plan = _build_plan(source_root, config, overrides, cache, provider)
     plan_hash = stable_plan_hash(plan)
     preflight = preflight_plan(
         plan_hash,
