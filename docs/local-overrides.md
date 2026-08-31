@@ -6,7 +6,7 @@ Local override files are **plan-only configuration**. They do not authorize medi
 
 ## Current scope
 
-Schema version 1 supports show-level decisions for:
+Override schema versions 1 and 2 are accepted for the current show-level contract. The packaged synthetic defaults remain schema version 1 for compatibility. Supported show-level decisions include:
 
 - an explicit TVMaze show ID;
 - aliases used to identify the source show group;
@@ -58,14 +58,16 @@ Supported `title_preference` values are:
 
 Validation rejects the entire catalog when it encounters:
 
-- an unsupported schema version;
+- a schema version other than the explicitly supported versions 1 or 2;
 - unknown top-level or show-level fields;
 - malformed field types or invalid enum values;
 - empty or untrimmed keys, aliases, or preferred titles;
 - duplicate aliases after Unicode/case normalization;
-- identities that make two show entries ambiguous after normalization;
+- identities that make two different show entries ambiguous after normalization;
 - one TVMaze ID assigned to multiple override entries;
 - an override title preference without the required preferred title.
+
+An alias may normalize to the same identity as its own entry key. That is not ambiguous because both names select the same show. The loader still rejects equivalent identities that point at different show entries.
 
 The loader uses Unicode NFKC normalization plus case-insensitive identity matching so a catalog cannot become valid on one platform and ambiguous on another merely because of casing or equivalent Unicode forms.
 
