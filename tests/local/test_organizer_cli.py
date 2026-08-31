@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from jellyfin_show_organizer.cli import PLAN_NOT_IMPLEMENTED_EXIT, main
@@ -28,7 +30,7 @@ def test_organizer_exposes_no_apply_command(capsys: pytest.CaptureFixture[str]):
 def test_organizer_plan_scaffold_fails_without_creating_output(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
+    tmp_path: Path,
 ):
     monkeypatch.chdir(tmp_path)
 
@@ -37,7 +39,8 @@ def test_organizer_plan_scaffold_fails_without_creating_output(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "not implemented yet" in captured.err
-    assert "no plan, report, cache, destination directory, or media output was created" in (
-        captured.err
+    assert (
+        "no plan, report, cache, destination directory, or media output was created"
+        in captured.err
     )
     assert list(tmp_path.iterdir()) == []
