@@ -251,13 +251,11 @@ def _observed_aired_coordinates(
 
     coordinates: set[tuple[int, int]] = set()
     for parse in parses:
-        if any(
-            (
-                parse.absolute_episode is not None,
-                parse.special_kind is not None,
-                parse.episode_date is not None,
-                parse.segment_hint is not None,
-            )
+        if (
+            parse.absolute_episode is not None
+            or parse.special_kind is not None
+            or parse.episode_date is not None
+            or parse.segment_hint is not None
         ):
             return ()
         if parse.season is None:
@@ -309,8 +307,12 @@ def _catalog_tiebreak(
                 for episode in catalog.episodes
                 if episode.number is not None
             }
-            matched = tuple(coordinate for coordinate in observed if coordinate in available)
-            missing = tuple(coordinate for coordinate in observed if coordinate not in available)
+            matched = tuple(
+                coordinate for coordinate in observed if coordinate in available
+            )
+            missing = tuple(
+                coordinate for coordinate in observed if coordinate not in available
+            )
             candidate_reasons.append(
                 f"catalog-aired-match:{len(matched)}/{len(observed)}"
             )
@@ -496,8 +498,10 @@ def resolve_show_group(
     contenders = tuple(
         candidate
         for candidate in ranked
-        if candidate.score >= _MATCH_THRESHOLD
-        and top.score - candidate.score < _MINIMUM_MATCH_GAP
+        if (
+            candidate.score >= _MATCH_THRESHOLD
+            and top.score - candidate.score < _MINIMUM_MATCH_GAP
+        )
     )
     catalog_reasons: tuple[str, ...] = ()
     if len(contenders) > 1 and observed:
