@@ -1,11 +1,24 @@
 [project]
 name = "jellyfin-media-organizer"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Plan-first Jellyfin media organizer, currently focused on TV shows."
 readme = "README.md"
 license = { file = "LICENSE.txt" }
 requires-python = ">=3.12"
 dependencies = []
+keywords = ["jellyfin", "media", "organizer", "tv"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Video",
+]
 
 [project.urls]
 Homepage = "https://github.com/akjroller/jellyfin-media-organizer"
@@ -29,6 +42,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["jellyfin_show_organizer"]
+
+[tool.setuptools.dynamic]
+version = { attr = "jellyfin_show_organizer.__version__" }
 
 [tool.setuptools.package-data]
 jellyfin_show_organizer = ["data/*.json", "data/*.toml"]
