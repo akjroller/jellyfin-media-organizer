@@ -93,11 +93,14 @@ def _exact_hash_winner(
 def _preference_winner(
     candidates: tuple[DuplicateCandidate, ...],
 ) -> tuple[DuplicateCandidate | None, tuple[str, ...]]:
-    if any(candidate.preference is None for candidate in candidates):
+    preferred = tuple(
+        candidate for candidate in candidates if candidate.preference is not None
+    )
+    if not preferred:
         return None, ()
 
     ranked = sorted(
-        candidates,
+        preferred,
         key=lambda candidate: (
             candidate.preference.rank if candidate.preference is not None else -1,
             candidate.operation_key.casefold(),
@@ -106,11 +109,12 @@ def _preference_winner(
         reverse=True,
     )
     winner = ranked[0]
-    runner_up = ranked[1]
     assert winner.preference is not None
-    assert runner_up.preference is not None
-    if winner.preference.rank == runner_up.preference.rank:
-        return None, ()
+    if len(ranked) > 1:
+        runner_up = ranked[1]
+        assert runner_up.preference is not None
+        if winner.preference.rank == runner_up.preference.rank:
+            return None, ()
 
     return winner, (
         f"explicit preference rank {winner.preference.rank} selected {winner.operation_key}",
@@ -200,9 +204,9 @@ def classify_duplicate_candidates(
     on one destination are suspicious and never receive a winner.
 
     Winner selection is fail-closed. Exact SHA-256 equality may select a stable
-    representative, and an explicit preference rank may select a unique winner.
-    Size, timestamps, path length, or input order are never used as quality
-    evidence.
+    representative, and a unique highest explicit preference rank may select a
+    winner even when only the preferred source carries explicit evidence. Size,
+    timestamps, path length, or input order are never used as quality evidence.
     """
 
     grouped: dict[str, list[DuplicateCandidate]] = defaultdict(list)
