@@ -168,7 +168,9 @@ def _suspicious_result(
     destination_key: str,
     candidates: tuple[DuplicateCandidate, ...],
 ) -> DuplicateGroupResult:
-    identities = sorted({_normalize_key(candidate.logical_identity) for candidate in candidates})
+    identities = sorted(
+        {_normalize_key(candidate.logical_identity) for candidate in candidates}
+    )
     decision = DuplicateDecision(
         destination_key=destination_key,
         candidates=_decision_candidates(candidates),
