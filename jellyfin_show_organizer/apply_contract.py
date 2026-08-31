@@ -56,7 +56,7 @@ class ApplyApproval:
         if not self.tool_version:
             raise ValueError("approval tool_version cannot be empty")
         ordered = tuple(sorted(self.cache_snapshots, key=_cache_snapshot_key))
-        if len(ordered) != len(set(_cache_snapshot_key(item) for item in ordered)):
+        if len(ordered) != len({_cache_snapshot_key(item) for item in ordered}):
             raise ValueError("approval cache snapshots must be unique")
         object.__setattr__(self, "cache_snapshots", ordered)
 
@@ -471,7 +471,9 @@ def replay_journal(
 
         if entry.event is JournalEvent.MEMBER_COMPLETED:
             if entry.group_id not in active:
-                raise ApplyContractError("journal completes a member outside an active group")
+                raise ApplyContractError(
+                    "journal completes a member outside an active group"
+                )
             assert entry.source_relative_path is not None
             assert entry.destination_relative_path is not None
             member_key = (
@@ -486,7 +488,9 @@ def replay_journal(
                 for member in group.moving_members
             }
             if member_key not in allowed:
-                raise ApplyContractError("journal member is not part of the approved group")
+                raise ApplyContractError(
+                    "journal member is not part of the approved group"
+                )
             if member_key in completed_members:
                 raise ApplyContractError("journal repeats a completed member move")
             completed_members.add(member_key)
