@@ -95,9 +95,7 @@ def test_date_assignment_can_use_valid_date_despite_unrelated_bad_airdate(
 ) -> None:
     result = assign_episode_group(
         _show(NumberingMode.DATE),
-        (
-            SourceEpisodeInput("dated.mkv", ParseResult(episode_date="2024-01-01")),
-        ),
+        (SourceEpisodeInput("dated.mkv", ParseResult(episode_date="2024-01-01")),),
         TvmazeCatalogCache(tmp_path / "cache"),
         StaticGetter(_catalog_with_bad_optional_metadata()),
     )
@@ -113,9 +111,7 @@ def test_date_assignment_fails_closed_when_required_date_is_unavailable(
 ) -> None:
     result = assign_episode_group(
         _show(NumberingMode.DATE),
-        (
-            SourceEpisodeInput("dated.mkv", ParseResult(episode_date="2024-01-02")),
-        ),
+        (SourceEpisodeInput("dated.mkv", ParseResult(episode_date="2024-01-02")),),
         TvmazeCatalogCache(tmp_path / "cache"),
         StaticGetter(_catalog_with_bad_optional_metadata()),
     )
@@ -137,7 +133,7 @@ def test_special_assignment_uses_season_zero_when_type_is_malformed(
             "number": 1,
             "name": "OVA One",
             "type": [],
-        }
+        },
     ]
     result = assign_episode_group(
         _show(NumberingMode.SPECIAL),
@@ -168,7 +164,7 @@ def test_special_assignment_does_not_guess_through_malformed_required_type(
             "number": 1,
             "name": "OVA One",
             "type": [],
-        }
+        },
     ]
     result = assign_episode_group(
         _show(NumberingMode.SPECIAL),
