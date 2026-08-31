@@ -1,99 +1,74 @@
-# Jellyfin Show Organizer architecture and provenance
+# Jellyfin Show Organizer architecture
 
-## Provenance
+## Purpose
 
-This fork is based on upstream `jkwill87/mnamer` `main` at commit
-`4703dfea2d851ef55c4a62af0a1e1b80581fdc0c` ("Adds v3 dev note").
+`jellyfin_show_organizer` is a standalone Python package for building a deterministic, auditable plan for TV-show media organization before any filesystem mutation is allowed.
 
-Private local validation and historical patches helped motivate the organizer
-work. Those materials are evidence only: useful behavior must be reimplemented
-in repository-owned code with regression tests rather than copied blindly or
-treated as authoritative mappings.
+The current project boundary is deliberately narrow:
 
-The upstream MIT license and Git history remain intact.
+1. authorize one Shows root;
+2. inventory eligible video files read-only;
+3. parse filename hints deterministically;
+4. resolve catalog/provider evidence through explicit data and cache layers;
+5. build versioned plan records;
+6. reconcile every expected source into an explained terminal status;
+7. audit the completed plan before any future apply implementation.
 
-## Subsystem boundary
+There is currently no `apply` command.
 
-`jellyfin_show_organizer` is a standalone Python subsystem that lives beside
-the existing `mnamer` package. The existing `mnamer` CLI and its relocation
-behavior are intentionally unchanged.
+## Package layout
 
-The subsystem has its own `organizer` console entry point. During the bootstrap
-milestone, `plan` is the only subcommand. It is deliberately a scaffold: it
-does not scan, inventory, query providers, create destination directories,
-move, rename, copy, or delete media.
+- `cli.py` — command-line surface. Only the plan scaffold is exposed today.
+- `inventory.py` — authorized-root checks and deterministic read-only video inventory.
+- `filename_parser.py` — pure filename/path hint parsing without filesystem or provider access.
+- `models.py` — typed cross-stage contracts.
+- `overrides.py` — data-driven aliases, numbering modes, years, provider IDs, and title preferences.
+- `reconciliation.py` — one explained terminal inventory status per expected path.
+- `schema.py` — versioned manifest validation, serialization, and stable plan hashing.
+- `tvmaze_cache.py` — persistent provider-cache primitives with explicit cache/network/error state.
+- `data/` — versioned JSON/TOML contracts and synthetic default override examples.
 
-Future organizer code must keep planning separate from mutation:
+## Determinism
 
-1. scan an explicitly authorized Shows root read-only,
-2. parse and resolve against versioned models and cached provider evidence,
-3. build one immutable plan,
-4. audit and preflight that whole plan,
-5. require separate human approval before any future apply implementation.
+Equivalent input evidence should produce equivalent typed results and stable plan hashes. Run-local timestamps, machine paths, and other environment-specific metadata do not belong in the immutable plan contract.
 
-No apply command exists at this stage.
+Filename parsing is pure and offline. Provider-backed matching consumes cached/provider-shaped evidence rather than hiding network access inside parsing logic.
 
-## Privacy and safety boundary
+## Safety boundary
 
-Repository code, tests, documentation, issues, pull requests, fixtures, and
-examples must not contain or access real user environment details. This includes
-real absolute media paths, usernames, machine or host names, network addresses,
-share names, directory inventories, account identifiers, private filenames,
-production logs, or other data copied from a contributor's system.
+The organizer is Shows-only. A caller must authorize the exact Shows directory rather than a parent media-library root. Symlinks and junctions are not followed outside that boundary.
 
-Tests use temporary directories and synthetic zero-byte files only. Examples
-must use obviously fabricated paths such as `X:/ExampleMedia/Shows` or
-`/example/media/shows`; those examples must never be copied from a real system.
-Movies are out of scope for this subsystem.
+Inventory is video-only for `.mkv`, `.mp4`, and `.avi`. Subtitles, artwork, metadata, Movies, and unrelated directories are not organizer inputs.
 
-Real inventory exports, audit CSVs/logs, provider caches, manifests, generated
-plan files, copied library roots, and common video files are ignored by Git so
-local evidence cannot be committed accidentally. Any bug discovered from a
-private library must be reduced to the smallest synthetic reproduction before it
-is added to the repository.
+Planning and mutation remain separate. Generating a plan never implies approval, and approval must never be inferred from a successful scan or test run.
 
-## Publishing safety
+## Data-driven exceptions
 
-The inherited PyPI and Docker publishing workflows remain in the repository
-for upstream provenance, but their publishing jobs are owner-guarded to
-`jkwill87/mnamer`. The caller jobs in `push.yml` carry the same guard.
+Show-specific aliases and numbering behavior belong in versioned override data or focused strategy code. Generic parsing code must not accumulate hidden `if show == ...` branches.
 
-The fork can therefore run lint and tests while inherited publishing jobs are
-skipped, including manual dispatch of the reusable publishing workflows.
+Checked-in override examples and regression fixtures are synthetic. Deployment-specific aliases, provider IDs, years, filenames, and mappings belong in local untracked data.
 
-## Development commands
+## Public repository privacy
 
-A clean clone should use the repository lockfile:
+Source, tests, docs, examples, issues, and committed fixtures must not contain real environment details such as personal absolute paths, usernames, machine/host names, network addresses, share names, directory inventories, account identifiers, private filenames, production logs, or copied library metadata.
+
+A problem found against a private library should be reduced to the smallest synthetic reproduction before it is committed.
+
+Generated inventory exports, caches, manifests, plans, reports, copied media roots, and common video files are excluded by `.gitignore`.
+
+## Testing
+
+The committed test suite is deterministic and offline. Tests use synthetic names, temporary directories, zero-byte media stand-ins, and minimal provider-shaped fixtures.
+
+The normal development gate is:
 
 ```bash
-uv sync --frozen --dev
-uv run pytest -m local
-uv run ruff check mnamer jellyfin_show_organizer tests
-uv run ruff format --check mnamer jellyfin_show_organizer tests
-uv run mypy mnamer jellyfin_show_organizer tests
-uv run organizer plan --help
+python -m pytest
+python -m ruff check jellyfin_show_organizer tests
+python -m ruff format --check jellyfin_show_organizer tests
+python -m jellyfin_show_organizer plan --help
 ```
 
-The organizer command can also be run directly from repository code:
+## License
 
-```bash
-uv run python -m jellyfin_show_organizer plan --help
-```
-
-## Versioned organizer contracts
-
-The organizer's cross-stage data contract lives in `jellyfin_show_organizer/models.py`
-and `jellyfin_show_organizer/data/plan-schema-v1.json`. Plans are serialized with
-stable key ordering and compact JSON before SHA-256 hashing; timestamps or other
-run-local metadata are deliberately excluded from the plan model so equivalent
-inputs can produce the same plan hash.
-
-Show-specific aliases and numbering decisions are represented by the versioned
-override format in `jellyfin_show_organizer/data/overrides-v1.toml`. The checked-in
-catalog contains synthetic examples only so the public repository does not encode
-any contributor's private library. Real deployments should use local, untracked
-override data.
-
-Supported numbering modes are `aired`, `absolute`, `parenthesized-absolute`, and
-`segment-title`. Parser code must consume these policies rather than embedding
-show names or one-off decisions.
+The repository retains the MIT license notice required for inherited portions of the codebase. See `LICENSE.txt`.

@@ -4,19 +4,19 @@ import pytest
 
 pytestmark = pytest.mark.local
 ROOT = Path(__file__).parents[2]
+ARCHITECTURE = ROOT / "docs" / "jellyfin-show-organizer-architecture.md"
 RUNBOOK = ROOT / "docs" / "jellyfin-show-organizer-runbook.md"
 
 
-def test_windows_runbook_uses_venv_python_without_activation():
+def test_windows_runbook_uses_venv_python_without_policy_changes():
     text = RUNBOOK.read_text(encoding="utf-8")
 
     assert r".\.venv\Scripts\python.exe" in text
-    assert "Activate.ps1" in text
-    assert "Activate.ps1` is\nnot required" in text
-    assert "Set-ExecutionPolicy" not in text
+    assert "Activate.ps1` is not required" in text
+    assert "Set-ExecutionPolicy` for this project" in text
 
 
-def test_runbook_makes_shows_only_boundary_and_movies_prohibition_explicit():
+def test_runbook_makes_shows_only_boundary_explicit():
     text = RUNBOOK.read_text(encoding="utf-8")
 
     assert "**Shows-only**" in text
@@ -24,7 +24,7 @@ def test_runbook_makes_shows_only_boundary_and_movies_prohibition_explicit():
     assert "Do not point it at a Movies directory" in text
 
 
-def test_runbook_separates_all_operational_stages():
+def test_runbook_separates_operational_stages_and_has_no_apply_command():
     text = RUNBOOK.read_text(encoding="utf-8")
 
     for heading in (
@@ -38,16 +38,17 @@ def test_runbook_separates_all_operational_stages():
     ):
         assert heading in text
 
-    assert "There is intentionally no organizer\n`apply` command" in text
+    assert "There is intentionally no organizer `apply` command" in text
 
 
-def test_runbook_documents_privacy_and_data_driven_extension_points():
-    text = RUNBOOK.read_text(encoding="utf-8")
+def test_docs_keep_privacy_and_data_driven_extension_rules_explicit():
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    architecture = ARCHITECTURE.read_text(encoding="utf-8")
 
-    assert "Public repository privacy rules" in text
-    assert "synthetic paths beneath `tmp_path`" in text
-    assert "overrides-v1.toml" in text
-    assert "checked-in catalog must\nremain synthetic and generic" in text
-    assert "local, untracked override data" in text
-    assert 'Do not add `if show == "..."` branches' in text
-    assert "provider responses should come through the persistent cache layer" in text
+    assert "Public repository privacy rules" in runbook
+    assert "synthetic paths beneath `tmp_path`" in runbook
+    assert "overrides-v1.toml" in runbook
+    assert "persistent cache layer" in runbook
+    assert "standalone Python package" in architecture
+    assert "There is currently no `apply` command" in architecture
+    assert "private library should be reduced" in architecture
