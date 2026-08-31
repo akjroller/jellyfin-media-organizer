@@ -109,8 +109,7 @@ def test_parser_handles_spaced_season_episode_tokens():
 
 def test_parser_handles_episode_token_embedded_in_release_name():
     parsed = parse_video_path(
-        "synthetic/House Calls/House.Calls.S07.1080p/"
-        "release-houses07e02-1080p.mkv"
+        "synthetic/House Calls/House.Calls.S07.1080p/release-houses07e02-1080p.mkv"
     )
 
     assert parsed == ParseResult(
@@ -122,8 +121,7 @@ def test_parser_handles_episode_token_embedded_in_release_name():
 
 def test_parser_handles_legacy_bracketed_segment_notation():
     parsed = parse_video_path(
-        "synthetic/Bubble Borough/"
-        "Bubble Borough [season 01][episod 04a] - Red Kite.avi"
+        "synthetic/Bubble Borough/Bubble Borough [season 01][episod 04a] - Red Kite.avi"
     )
 
     assert parsed == ParseResult(
@@ -161,8 +159,7 @@ def test_parser_recovers_single_unambiguous_ancestor_episode_context():
 
 def test_embedded_episode_token_does_not_consume_resolution_as_episode_range():
     parsed = parse_video_path(
-        "synthetic/House Calls/House.Calls.S07.1080p/"
-        "release-houses07e02-1080p.mkv"
+        "synthetic/House Calls/House.Calls.S07.1080p/release-houses07e02-1080p.mkv"
     )
 
     assert parsed.season == 7
@@ -180,9 +177,7 @@ def test_conflicting_ancestor_episode_context_fails_closed():
 
 
 def test_ambiguous_compact_number_is_not_guessed_as_season_episode():
-    parsed = parse_video_path(
-        "synthetic/Signal Files/Signal.Files.406.Tabula.Rasa.mkv"
-    )
+    parsed = parse_video_path("synthetic/Signal Files/Signal.Files.406.Tabula.Rasa.mkv")
 
     assert parsed.series_hint == "Signal Files"
     assert parsed.season is None
