@@ -15,8 +15,9 @@ def test_organizer_plan_help(capsys: pytest.CaptureFixture[str]):
 
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
+    normalized_output = " ".join(output.split())
     assert "usage: organizer plan" in output
-    assert "not implemented" in output
+    assert "Planning is not implemented yet" in normalized_output
 
 
 def test_organizer_exposes_no_apply_command(capsys: pytest.CaptureFixture[str]):
