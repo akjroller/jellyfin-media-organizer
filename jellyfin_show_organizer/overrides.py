@@ -55,9 +55,7 @@ class ShowOverride:
             if normalized == normalized_key:
                 raise ValueError("override alias duplicates the override key")
             if normalized in normalized_aliases:
-                raise ValueError(
-                    "override aliases must be unique after normalization"
-                )
+                raise ValueError("override aliases must be unique after normalization")
             normalized_aliases.add(normalized)
 
         if self.preferred_title is not None:
