@@ -51,8 +51,12 @@ jobs:
       - name: Lint
         run: python -m ruff check jellyfin_show_organizer tests tools
 
-      - name: Format check
-        run: python -m ruff format --check jellyfin_show_organizer tests tools
+      - name: Formatting diagnostic
+        shell: bash
+        run: |
+          python -m ruff format tools/check_repository_safety.py
+          git diff -- tools/check_repository_safety.py
+          exit 1
 
       - name: Type check
         run: python -m mypy jellyfin_show_organizer tests
