@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 
 
@@ -9,6 +10,8 @@ class NumberingMode(StrEnum):
     ABSOLUTE = "absolute"
     PARENTHESIZED_ABSOLUTE = "parenthesized-absolute"
     SEGMENT_TITLE = "segment-title"
+    SPECIAL = "special"
+    AIRDATE = "airdate"
 
 
 class TitlePreference(StrEnum):
@@ -67,6 +70,9 @@ class ParseResult:
     episodes: tuple[int, ...] = ()
     absolute_episode: int | None = None
     segment_hint: str | None = None
+    special_kind: str | None = None
+    special_number: int | None = None
+    airdate: str | None = None
     year: int | None = None
     embedded_tvmaze_id: int | None = None
     title_hint: str | None = None
@@ -78,6 +84,22 @@ class ParseResult:
             raise ValueError("episodes cannot contain negative values")
         if self.absolute_episode is not None and self.absolute_episode < 0:
             raise ValueError("absolute_episode cannot be negative")
+        if (self.special_kind is None) != (self.special_number is None):
+            raise ValueError("special_kind and special_number must be provided together")
+        if self.special_kind is not None:
+            normalized_kind = self.special_kind.casefold()
+            if normalized_kind not in {"ova", "oad"}:
+                raise ValueError("special_kind must be 'ova' or 'oad'")
+            if self.special_number is None or self.special_number <= 0:
+                raise ValueError("special_number must be positive")
+            object.__setattr__(self, "special_kind", normalized_kind)
+        if self.airdate is not None:
+            try:
+                parsed_airdate = date.fromisoformat(self.airdate)
+            except ValueError as exc:
+                raise ValueError("airdate must be a valid YYYY-MM-DD date") from exc
+            if parsed_airdate.isoformat() != self.airdate:
+                raise ValueError("airdate must use canonical YYYY-MM-DD form")
         if self.year is not None and self.year < 1800:
             raise ValueError("year is outside the supported range")
         if self.embedded_tvmaze_id is not None and self.embedded_tvmaze_id <= 0:

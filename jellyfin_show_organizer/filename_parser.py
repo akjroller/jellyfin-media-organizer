@@ -25,6 +25,14 @@ _LEGACY_BRACKETED = re.compile(
     r"\s*\[\s*episod(?:e)?[ ._-]*(?P<episode>\d{1,3})"
     r"(?P<segment>[A-Za-z])?\s*\]"
 )
+_SPECIAL_NUMBER = re.compile(
+    r"(?i)(?<![A-Za-z0-9])(?P<kind>OVA|OAD)[ ._-]*(?P<number>\d{1,3})"
+    r"(?![A-Za-z0-9])"
+)
+_AIRDATE = re.compile(
+    r"(?<!\d)(?P<airdate>(?:18|19|20|21)\d{2}-"
+    r"(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))(?!\d)"
+)
 _PARENTHESIZED_ABSOLUTE = re.compile(
     r"^(?P<series>.+?)\s*\((?P<episode>\d{1,3})\)(?=$|[ ._\-\[])"
 )
@@ -212,6 +220,11 @@ def parse_video_path(relative_path: str) -> ParseResult:
     path = PurePosixPath(normalized_path)
     stem = path.stem
     embedded_id = _embedded_tvmaze_id(stem)
+    special_match = _SPECIAL_NUMBER.search(stem)
+    special_kind = special_match.group("kind").casefold() if special_match else None
+    special_number = int(special_match.group("number")) if special_match else None
+    airdate_match = _AIRDATE.search(stem)
+    airdate = airdate_match.group("airdate") if airdate_match else None
 
     match = _SXE.search(stem)
     if match is not None:
@@ -221,6 +234,9 @@ def parse_video_path(relative_path: str) -> ParseResult:
             season=int(match.group("season")),
             episodes=_episode_list(int(match.group("episode")), match.group("tail")),
             segment_hint=(match.group("segment") or None),
+            special_kind=special_kind,
+            special_number=special_number,
+            airdate=airdate,
             year=year,
             embedded_tvmaze_id=embedded_id,
             title_hint=_title_hint(stem, match.end()),
@@ -233,6 +249,9 @@ def parse_video_path(relative_path: str) -> ParseResult:
             series_hint=series,
             season=int(match.group("season")),
             episodes=(int(match.group("episode")),),
+            special_kind=special_kind,
+            special_number=special_number,
+            airdate=airdate,
             year=year,
             embedded_tvmaze_id=embedded_id,
             title_hint=_title_hint(stem, match.end()),
@@ -246,9 +265,34 @@ def parse_video_path(relative_path: str) -> ParseResult:
             season=int(match.group("season")),
             episodes=(int(match.group("episode")),),
             segment_hint=(match.group("segment") or None),
+            special_kind=special_kind,
+            special_number=special_number,
+            airdate=airdate,
             year=year,
             embedded_tvmaze_id=embedded_id,
             title_hint=_title_hint(stem, match.end()),
+        )
+
+    if special_match is not None:
+        series, year = _series_for_match(stem, path, special_match)
+        return ParseResult(
+            series_hint=series,
+            special_kind=special_kind,
+            special_number=special_number,
+            airdate=airdate,
+            year=year,
+            embedded_tvmaze_id=embedded_id,
+            title_hint=_title_hint(stem, special_match.end()),
+        )
+
+    if airdate_match is not None:
+        series, year = _series_for_match(stem, path, airdate_match)
+        return ParseResult(
+            series_hint=series,
+            airdate=airdate,
+            year=year,
+            embedded_tvmaze_id=embedded_id,
+            title_hint=_title_hint(stem, airdate_match.end()),
         )
 
     match = _EPISODE_WORD.search(stem)
@@ -305,6 +349,9 @@ def parse_video_path(relative_path: str) -> ParseResult:
             episodes=context.episodes,
             absolute_episode=context.absolute_episode,
             segment_hint=context.segment_hint,
+            special_kind=special_kind,
+            special_number=special_number,
+            airdate=airdate,
             year=context.year,
             embedded_tvmaze_id=embedded_id,
         )
@@ -312,6 +359,9 @@ def parse_video_path(relative_path: str) -> ParseResult:
     series, year = _fallback_series(path)
     return ParseResult(
         series_hint=series,
+        special_kind=special_kind,
+        special_number=special_number,
+        airdate=airdate,
         year=year,
         embedded_tvmaze_id=embedded_id,
     )

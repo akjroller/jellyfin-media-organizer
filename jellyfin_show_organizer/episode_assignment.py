@@ -5,6 +5,7 @@ import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from datetime import date
 from enum import StrEnum
 from typing import Any, cast
 
@@ -24,6 +25,7 @@ class ProviderEpisode:
     season: int
     number: int | None
     title: str
+    airdate: str | None = None
 
     def __post_init__(self) -> None:
         if self.tvmaze_episode_id <= 0:
@@ -34,6 +36,13 @@ class ProviderEpisode:
             raise ValueError("provider episode number cannot be negative")
         if not self.title:
             raise ValueError("provider episode title cannot be empty")
+        if self.airdate is not None:
+            try:
+                parsed_airdate = date.fromisoformat(self.airdate)
+            except ValueError as exc:
+                raise ValueError("provider episode airdate must be YYYY-MM-DD") from exc
+            if parsed_airdate.isoformat() != self.airdate:
+                raise ValueError("provider episode airdate must be canonical YYYY-MM-DD")
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +106,7 @@ def _normalize_catalog(response: object) -> _NormalizedCatalog:
         season = raw.get("season")
         number = raw.get("number")
         title = raw.get("name")
+        airdate = raw.get("airdate")
         if not isinstance(episode_id, int) or episode_id <= 0:
             errors.append(f"invalid-catalog-episode-id:{index}")
             continue
@@ -109,12 +119,27 @@ def _normalize_catalog(response: object) -> _NormalizedCatalog:
         if not isinstance(title, str) or not title.strip():
             errors.append(f"invalid-catalog-title:{index}")
             continue
+        if airdate == "":
+            airdate = None
+        if airdate is not None:
+            if not isinstance(airdate, str):
+                errors.append(f"invalid-catalog-airdate:{index}")
+                continue
+            try:
+                parsed_airdate = date.fromisoformat(airdate)
+            except ValueError:
+                errors.append(f"invalid-catalog-airdate:{index}")
+                continue
+            if parsed_airdate.isoformat() != airdate:
+                errors.append(f"invalid-catalog-airdate:{index}")
+                continue
         episodes.append(
             ProviderEpisode(
                 tvmaze_episode_id=episode_id,
                 season=season,
                 number=number,
                 title=title.strip(),
+                airdate=airdate,
             )
         )
 
@@ -170,15 +195,27 @@ def _assignment(
 def _evidence_family(parse: ParseResult) -> str:
     has_aired = parse.season is not None or bool(parse.episodes)
     has_absolute = parse.absolute_episode is not None
-    if has_aired and has_absolute:
-        return "conflict"
+    has_special = parse.special_kind is not None or parse.special_number is not None
+    has_airdate = parse.airdate is not None
+
     if parse.segment_hint is not None:
+        if has_absolute or has_special or has_airdate:
+            return "conflict"
         return "segment"
-    if has_aired:
-        return "aired"
-    if has_absolute:
-        return "absolute"
-    return "none"
+
+    families = [
+        family
+        for family, present in (
+            ("aired", has_aired),
+            ("absolute", has_absolute),
+            ("special", has_special),
+            ("airdate", has_airdate),
+        )
+        if present
+    ]
+    if len(families) > 1:
+        return "conflict"
+    return families[0] if families else "none"
 
 
 def _expected_family(mode: NumberingMode) -> str:
@@ -186,7 +223,11 @@ def _expected_family(mode: NumberingMode) -> str:
         return "aired"
     if mode in {NumberingMode.ABSOLUTE, NumberingMode.PARENTHESIZED_ABSOLUTE}:
         return "absolute"
-    return "segment"
+    if mode is NumberingMode.SEGMENT_TITLE:
+        return "segment"
+    if mode is NumberingMode.SPECIAL:
+        return "special"
+    return "airdate"
 
 
 def _aired_assignment(
@@ -205,7 +246,12 @@ def _aired_assignment(
             "missing-aired-numbering-evidence",
             f"catalog-request:{request_key}",
         )
-    if parse.absolute_episode is not None or parse.segment_hint is not None:
+    if (
+        parse.absolute_episode is not None
+        or parse.segment_hint is not None
+        or parse.special_number is not None
+        or parse.airdate is not None
+    ):
         return _assignment(
             source.source_key,
             AssignmentStatus.SUSPICIOUS,
@@ -275,7 +321,13 @@ def _absolute_assignment(
             "missing-absolute-numbering-evidence",
             f"catalog-request:{request_key}",
         )
-    if parse.season is not None or parse.episodes or parse.segment_hint is not None:
+    if (
+        parse.season is not None
+        or parse.episodes
+        or parse.segment_hint is not None
+        or parse.special_number is not None
+        or parse.airdate is not None
+    ):
         return _assignment(
             source.source_key,
             AssignmentStatus.SUSPICIOUS,
@@ -309,6 +361,157 @@ def _absolute_assignment(
         f"numbering-mode:{show.numbering_mode.value}",
         f"catalog-request:{request_key}",
         f"absolute-match:{absolute}->S{episode.season:02d}E{episode.number:02d}",
+        f"tvmaze-episode:{episode.tvmaze_episode_id}",
+        episodes=(episode,),
+        confidence=1.0,
+    )
+
+
+def _special_assignment(
+    source: SourceEpisodeInput,
+    show: CanonicalShow,
+    catalog: _NormalizedCatalog,
+    request_key: str,
+) -> SourceEpisodeAssignment:
+    parse = source.parse
+    if parse.special_kind is None or parse.special_number is None:
+        return _assignment(
+            source.source_key,
+            AssignmentStatus.UNRESOLVED,
+            "episode-catalog",
+            f"numbering-mode:{show.numbering_mode.value}",
+            "missing-special-numbering-evidence",
+            f"catalog-request:{request_key}",
+        )
+    if (
+        parse.season is not None
+        or parse.episodes
+        or parse.absolute_episode is not None
+        or parse.segment_hint is not None
+        or parse.airdate is not None
+    ):
+        return _assignment(
+            source.source_key,
+            AssignmentStatus.SUSPICIOUS,
+            "episode-catalog",
+            f"numbering-mode:{show.numbering_mode.value}",
+            "conflicting-numbering-evidence",
+            f"catalog-request:{request_key}",
+        )
+
+    matches = tuple(
+        episode
+        for episode in catalog.episodes
+        if episode.season == 0 and episode.number == parse.special_number
+    )
+    special_token = f"{parse.special_kind}:{parse.special_number}"
+    if not matches:
+        return _assignment(
+            source.source_key,
+            AssignmentStatus.UNRESOLVED,
+            "episode-catalog",
+            f"numbering-mode:{show.numbering_mode.value}",
+            f"special-kind:{parse.special_kind}",
+            f"missing-special-catalog-entry:{special_token}",
+            f"catalog-request:{request_key}",
+        )
+    if len(matches) > 1:
+        return _assignment(
+            source.source_key,
+            AssignmentStatus.SUSPICIOUS,
+            "episode-catalog",
+            f"numbering-mode:{show.numbering_mode.value}",
+            f"special-kind:{parse.special_kind}",
+            f"ambiguous-special-catalog-entry:{special_token}",
+            f"catalog-request:{request_key}",
+        )
+
+    episode = matches[0]
+    return _assignment(
+        source.source_key,
+        AssignmentStatus.MATCHED,
+        "episode-catalog",
+        f"numbering-mode:{show.numbering_mode.value}",
+        f"special-kind:{parse.special_kind}",
+        f"special-match:{special_token}->S00E{parse.special_number:02d}",
+        f"catalog-request:{request_key}",
+        f"tvmaze-episode:{episode.tvmaze_episode_id}",
+        episodes=(episode,),
+        confidence=1.0,
+    )
+
+
+def _airdate_assignment(
+    source: SourceEpisodeInput,
+    show: CanonicalShow,
+    catalog: _NormalizedCatalog,
+    request_key: str,
+) -> SourceEpisodeAssignment:
+    parse = source.parse
+    if parse.airdate is None:
+        return _assignment(
+            source.source_key,
+            AssignmentStatus.UNRESOLVED,
+            "episode-catalog",
+            f"numbering-mode:{show.numbering_mode.value}",
+            "missing-airdate-numbering-evidence",
+            f"catalog-request:{request_key}",
+        )
+    if (
+        parse.season is not None
+        or parse.episodes
+        or parse.absolute_episode is not None
+        or parse.segment_hint is not None
+        or parse.special_number is not None
+    ):
+        return _assignment(
+            source.source_key,
+            AssignmentStatus.SUSPICIOUS,
+            "episode-catalog",
+            f"numbering-mode:{show.numbering_mode.value}",
+            "conflicting-numbering-evidence",
+            f"catalog-request:{request_key}",
+        )
+
+    matches = tuple(
+        episode for episode in catalog.episodes if episode.airdate == parse.airdate
+    )
+    if not matches:
+        return _assignment(
+            source.source_key,
+            AssignmentStatus.UNRESOLVED,
+            "episode-catalog",
+            f"numbering-mode:{show.numbering_mode.value}",
+            f"missing-airdate-catalog-entry:{parse.airdate}",
+            f"catalog-request:{request_key}",
+        )
+    if len(matches) > 1:
+        return _assignment(
+            source.source_key,
+            AssignmentStatus.SUSPICIOUS,
+            "episode-catalog",
+            f"numbering-mode:{show.numbering_mode.value}",
+            f"ambiguous-airdate-catalog-entry:{parse.airdate}",
+            f"catalog-request:{request_key}",
+        )
+
+    episode = matches[0]
+    if episode.number is None:
+        return _assignment(
+            source.source_key,
+            AssignmentStatus.UNRESOLVED,
+            "episode-catalog",
+            f"numbering-mode:{show.numbering_mode.value}",
+            f"airdate-match-provider-number-missing:{parse.airdate}",
+            f"catalog-request:{request_key}",
+        )
+    return _assignment(
+        source.source_key,
+        AssignmentStatus.MATCHED,
+        "episode-catalog",
+        f"numbering-mode:{show.numbering_mode.value}",
+        f"airdate-match:{parse.airdate}->S{episode.season:02d}E{episode.number:02d}",
+        f"catalog-request:{request_key}",
         f"tvmaze-episode:{episode.tvmaze_episode_id}",
         episodes=(episode,),
         confidence=1.0,
@@ -632,6 +835,10 @@ def assign_episode_group(
         matcher = _absolute_assignment
     elif show.numbering_mode is NumberingMode.SEGMENT_TITLE:
         matcher = _segment_assignment
+    elif show.numbering_mode is NumberingMode.SPECIAL:
+        matcher = _special_assignment
+    elif show.numbering_mode is NumberingMode.AIRDATE:
+        matcher = _airdate_assignment
 
     assignments = tuple(
         matcher(source, show, catalog, request_key) for source in source_group
