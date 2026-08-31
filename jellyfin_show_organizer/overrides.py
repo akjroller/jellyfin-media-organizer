@@ -28,7 +28,7 @@ def _normalize_source_reference(value: str) -> str:
             "duplicate preference source must be a non-empty trimmed path"
         )
     normalized = unicodedata.normalize("NFC", value.replace("\\", "/"))
-    if re.match(r"^[A-Za-z]:/", normalized):
+    if re.match(r"^[A-Za-z]:", normalized):
         raise ValueError("duplicate preference source must be relative")
     path = PurePosixPath(normalized)
     if path.is_absolute() or not path.parts:
