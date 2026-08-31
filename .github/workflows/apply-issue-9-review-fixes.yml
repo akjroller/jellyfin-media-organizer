@@ -1,0 +1,79 @@
+name: Apply issue 9 review fixes
+
+on:
+  push:
+    branches: [issue-9-episode-assignment]
+    paths:
+      - .github/workflows/apply-issue-9-review-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: issue-9-episode-assignment
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Apply targeted review fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("jellyfin_show_organizer/episode_assignment.py")
+          text = path.read_text(encoding="utf-8")
+
+          replacements = [
+              (
+                  '''def _evidence_family(parse: ParseResult) -> str:\n    has_aired = parse.season is not None or bool(parse.episodes)\n    has_absolute = parse.absolute_episode is not None\n    if parse.segment_hint is not None:\n        return "segment"\n    if has_aired and has_absolute:\n        return "conflict"\n''',
+                  '''def _evidence_family(parse: ParseResult) -> str:\n    has_aired = parse.season is not None or bool(parse.episodes)\n    has_absolute = parse.absolute_episode is not None\n    if has_aired and has_absolute:\n        return "conflict"\n    if parse.segment_hint is not None:\n        return "segment"\n''',
+              ),
+              (
+                  '''        segment_hints = {\n            parse_by_key[match.source_key].segment_hint.casefold()\n            for match in matches\n            if parse_by_key[match.source_key].segment_hint is not None\n        }\n''',
+                  '''        segment_hints: set[str] = set()\n        for match in matches:\n            segment_hint = parse_by_key[match.source_key].segment_hint\n            if segment_hint is not None:\n                segment_hints.add(segment_hint.casefold())\n''',
+              ),
+              (
+                  '''                evidence=MatchEvidence(\n                    method="episode-catalog",\n                    confidence=0.0,\n                    reasons=("distinct-segments-collapse-to-same-catalog-episode",),\n                ),\n''',
+                  '''                evidence=replace(\n                    assignment.evidence,\n                    confidence=0.0,\n                    reasons=(\n                        *assignment.evidence.reasons,\n                        "distinct-segments-collapse-to-same-catalog-episode",\n                    ),\n                ),\n''',
+              ),
+              (
+                  '''    source_group = tuple(sources)\n    if not source_group:\n''',
+                  '''    source_group = tuple(\n        sorted(\n            sources,\n            key=lambda source: (source.source_key.casefold(), source.source_key),\n        )\n    )\n    if not source_group:\n''',
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f"expected review target not found: {old.splitlines()[0]}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Install development tools
+        run: python -m pip install -e ".[dev]"
+
+      - name: Normalize and verify changed code
+        run: |
+          python -m ruff check --fix jellyfin_show_organizer tests
+          python -m ruff format jellyfin_show_organizer tests
+          python -m pytest tests/local/test_episode_assignment.py tests/local/test_episode_assignment_edge_cases.py
+
+      - name: Commit review fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jellyfin_show_organizer/episode_assignment.py tests/local/test_episode_assignment_edge_cases.py tests/local/test_episode_assignment.py
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Address episode assignment review findings"
+          git push origin HEAD:issue-9-episode-assignment
