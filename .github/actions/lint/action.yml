@@ -17,15 +17,15 @@ runs:
   steps:
     - name: Linting with ruff
       if: inputs.ruff == 'true'
-      run: uv run ruff check mnamer tests
+      run: uv run ruff check mnamer jellyfin_show_organizer tests
       shell: sh
 
     - name: Formatting with ruff
       if: inputs.ruff == 'true'
-      run: uv run ruff format --check mnamer tests
+      run: uv run ruff format --check mnamer jellyfin_show_organizer tests
       shell: sh
 
     - name: Type checking with mypy
       if: inputs.mypy == 'true'
-      run: uv run mypy mnamer tests
+      run: uv run mypy mnamer jellyfin_show_organizer tests
       shell: sh

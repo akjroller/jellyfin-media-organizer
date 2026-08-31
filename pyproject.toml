@@ -6,7 +6,7 @@ maintainers = [{ name = "Jessy Williams", email = "jessy@jessywilliams.com" }]
 license = { file = "LICENSE.txt" }
 requires-python = ">=3.12"
 dynamic = ["version"]
-scripts = { mnamer = "mnamer.__main__:main" }
+scripts = { mnamer = "mnamer.__main__:main", organizer = "jellyfin_show_organizer.cli:main" }
 urls = { repository = "https://github.com/jkwill87/mnamer" }
 readme = "README.md"
 dependencies = [
@@ -21,7 +21,7 @@ dependencies = [
 
 
 [tool.setuptools]
-packages = ["mnamer"]
+packages = ["mnamer", "jellyfin_show_organizer"]
 
 [tool.setuptools.package-data]
 "*" = ["LICENSE.txt", "README.md", "py.typed"]
@@ -75,7 +75,7 @@ line-ending = "auto"
 
 [tool.pyright]
 pythonVersion = "3.12"
-include = ["mnamer"]
+include = ["mnamer", "jellyfin_show_organizer"]
 exclude = ["playground.py", ".venv", "venv", "build", "dist"]
 venvPath = "."
 venv = ".venv"
@@ -97,7 +97,7 @@ reportUnusedCallResult = false
 reportUnusedParameter = false
 
 [tool.ruff.lint.isort]
-known-first-party = ["mnamer"]
+known-first-party = ["mnamer", "jellyfin_show_organizer"]
 combine-as-imports = true
 
 [tool.pylint.messages_control]
