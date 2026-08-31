@@ -7,7 +7,7 @@ from datetime import date
 from typing import Any, Protocol, cast
 
 from .models import ProviderIdentity
-from .tvmaze_cache import JsonGetter, TVMAZE_PROVIDER, TvmazeCatalogCache
+from .tvmaze_cache import TVMAZE_PROVIDER, JsonGetter, TvmazeCatalogCache
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +47,9 @@ class ProviderEpisode:
             try:
                 normalized = date.fromisoformat(self.airdate).isoformat()
             except ValueError as exc:
-                raise ValueError("provider episode airdate must use YYYY-MM-DD") from exc
+                raise ValueError(
+                    "provider episode airdate must use YYYY-MM-DD"
+                ) from exc
             if normalized != self.airdate:
                 raise ValueError("provider episode airdate must be canonical")
         if self.episode_type is not None:
@@ -120,7 +122,9 @@ class ProviderEpisodeCatalog:
         if any(episode.identity.provider != provider for episode in self.episodes):
             raise ValueError("provider catalog contains a foreign episode identity")
         if self.unresolved_reason is not None and (self.episodes or self.errors):
-            raise ValueError("unresolved provider catalogs cannot carry normalized data")
+            raise ValueError(
+                "unresolved provider catalogs cannot carry normalized data"
+            )
 
     @property
     def resolved(self) -> bool:
@@ -174,7 +178,9 @@ def _tvmaze_show_candidates(response: object) -> tuple[ProviderShow, ...]:
             title=title,
             year=year,
         )
-        candidates[(candidate.identity.value, candidate.title, candidate.year)] = candidate
+        candidates[(candidate.identity.value, candidate.title, candidate.year)] = (
+            candidate
+        )
 
     return tuple(
         sorted(
