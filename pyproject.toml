@@ -6,7 +6,7 @@ maintainers = [{ name = "Jessy Williams", email = "jessy@jessywilliams.com" }]
 license = { file = "LICENSE.txt" }
 requires-python = ">=3.12"
 dynamic = ["version"]
-scripts = { mnamer = "mnamer.__main__:main" }
+scripts = { mnamer = "mnamer.__main__:main", jellyfin-show-organizer = "mnamer.organizer.cli:main" }
 urls = { repository = "https://github.com/jkwill87/mnamer" }
 readme = "README.md"
 dependencies = [

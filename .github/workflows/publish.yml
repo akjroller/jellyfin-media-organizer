@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   publish-pypi:
+    if: github.repository == 'jkwill87/mnamer'
     runs-on: ubuntu-latest
 
     steps:

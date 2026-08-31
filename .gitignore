@@ -24,3 +24,15 @@ mnamer/__version__.py
 playground.py
 testing/test_files_*
 venv/
+
+# Jellyfin organizer local evidence and execution artifacts. The fork is public;
+# real media inventories, paths, plans, caches, and journals must never be
+# committed.
+/artifacts/
+/local-data/
+/organizer-cache/
+/shows-inventory.txt
+/shows-*.csv
+/shows-*.txt
+/mnamer-shows-*.txt
+/*.jsonl
