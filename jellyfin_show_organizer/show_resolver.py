@@ -4,7 +4,7 @@ import re
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from enum import StrEnum
 
@@ -195,6 +195,140 @@ def _explicit_conflict_reasons(
     return ("conflicting-explicit-provider-identities",)
 
 
+def _observed_aired_coordinates(
+    parses: tuple[ParseResult, ...],
+    numbering_mode: NumberingMode,
+) -> tuple[tuple[int, int], ...]:
+    if numbering_mode is not NumberingMode.AIRED:
+        return ()
+
+    coordinates: set[tuple[int, int]] = set()
+    for parse in parses:
+        if any(
+            (
+                parse.absolute_episode is not None,
+                parse.special_kind is not None,
+                parse.episode_date is not None,
+                parse.segment_hint is not None,
+            )
+        ):
+            return ()
+        if parse.season is None:
+            if parse.episodes:
+                return ()
+            continue
+        coordinates.update((parse.season, episode) for episode in parse.episodes)
+    return tuple(sorted(coordinates))
+
+
+def _aired_coordinate_label(coordinate: tuple[int, int]) -> str:
+    season, episode = coordinate
+    return f"S{season:02d}E{episode:02d}"
+
+
+def _catalog_tiebreak(
+    contenders: tuple[CandidateEvidence, ...],
+    ranked: tuple[CandidateEvidence, ...],
+    observed: tuple[tuple[int, int], ...],
+    provider: MetadataProvider,
+) -> tuple[
+    ProviderIdentity | None,
+    tuple[CandidateEvidence, ...],
+    tuple[str, ...],
+]:
+    annotated: dict[ProviderIdentity, CandidateEvidence] = {}
+    compatible: list[ProviderIdentity] = []
+    incomplete_reasons: list[str] = []
+
+    for candidate in contenders:
+        identity = candidate.provider_identity
+        catalog = provider.episode_catalog(identity)
+        candidate_reasons = list(candidate.reasons)
+        if not catalog.resolved:
+            detail = catalog.unresolved_reason or "provider-catalog-unresolved"
+            candidate_reasons.append(f"catalog-unresolved:{detail}")
+            incomplete_reasons.append(
+                f"catalog-unresolved:{identity.key}:{detail}"
+            )
+        elif catalog.errors:
+            detail = "|".join(catalog.errors)
+            candidate_reasons.append(f"catalog-invalid:{detail}")
+            incomplete_reasons.append(f"catalog-invalid:{identity.key}:{detail}")
+        elif not catalog.episodes:
+            candidate_reasons.append("catalog-empty")
+            incomplete_reasons.append(f"catalog-empty:{identity.key}")
+        else:
+            available = {
+                (episode.season, episode.number)
+                for episode in catalog.episodes
+                if episode.number is not None
+            }
+            matched = tuple(
+                coordinate for coordinate in observed if coordinate in available
+            )
+            missing = tuple(
+                coordinate for coordinate in observed if coordinate not in available
+            )
+            candidate_reasons.append(
+                f"catalog-aired-match:{len(matched)}/{len(observed)}"
+            )
+            candidate_reasons.extend(
+                f"catalog-missing:{_aired_coordinate_label(coordinate)}"
+                for coordinate in missing
+            )
+            if not missing:
+                compatible.append(identity)
+
+        annotated[identity] = replace(
+            candidate,
+            reasons=tuple(candidate_reasons),
+        )
+
+    updated = tuple(
+        annotated.get(candidate.provider_identity, candidate) for candidate in ranked
+    )
+    observed_reason = f"observed-aired-coordinates:{len(observed)}"
+    if incomplete_reasons:
+        return (
+            None,
+            updated,
+            (
+                "catalog-tiebreak:incomplete-candidate-catalogs",
+                observed_reason,
+                *incomplete_reasons,
+            ),
+        )
+    if len(compatible) != 1:
+        return (
+            None,
+            updated,
+            (
+                "catalog-tiebreak:no-unique-aired-coordinate-match",
+                observed_reason,
+            ),
+        )
+
+    winner = compatible[0]
+    updated = tuple(
+        replace(
+            candidate,
+            reasons=(*candidate.reasons, "catalog-tiebreak-winner"),
+        )
+        if candidate.provider_identity == winner
+        else candidate
+        for candidate in updated
+    )
+    return (
+        winner,
+        updated,
+        (
+            "catalog-tiebreak:unique-aired-coordinate-match",
+            f"catalog-winner:{winner.key}",
+            observed_reason,
+        ),
+    )
+
+
 def resolve_show_group_with_provider(
     source_key: str,
     parses: Iterable[ParseResult],
@@ -337,6 +471,56 @@ def resolve_show_group_with_provider(
             ),
         )
 
+    numbering_mode = _numbering_mode(override)
+    observed = _observed_aired_coordinates(parse_group, numbering_mode)
+    contenders = tuple(
+        candidate
+        for candidate in ranked
+        if candidate.score >= _MATCH_THRESHOLD
+        and top.score - candidate.score < _MINIMUM_MATCH_GAP
+    )
+    catalog_reasons: tuple[str, ...] = ()
+    if len(contenders) > 1 and observed:
+        winner_identity, ranked, catalog_reasons = _catalog_tiebreak(
+            contenders,
+            ranked,
+            observed,
+            provider,
+        )
+        if winner_identity is not None:
+            provider_show = next(
+                candidate
+                for candidate in provider_candidates
+                if candidate.identity == winner_identity
+            )
+            winner_evidence = next(
+                candidate
+                for candidate in ranked
+                if candidate.provider_identity == winner_identity
+            )
+            title = _preferred_title(override, source_title, provider_show.title)
+            assert title is not None
+            return ShowResolution(
+                status=ResolutionStatus.MATCHED,
+                show=CanonicalShow(
+                    source_key=source_key,
+                    provider_identity=provider_show.identity,
+                    title=title,
+                    year=(
+                        provider_show.year
+                        if provider_show.year is not None
+                        else year_hint
+                    ),
+                    numbering_mode=numbering_mode,
+                ),
+                evidence=MatchEvidence(
+                    method=f"{provider_method}+episode-catalog",
+                    confidence=winner_evidence.score,
+                    reasons=(f"candidate-gap:{gap:.3f}", *catalog_reasons),
+                    candidates=ranked,
+                ),
+            )
+
     status = (
         ResolutionStatus.SUSPICIOUS
         if top.score >= _SUSPICIOUS_THRESHOLD
@@ -347,13 +531,14 @@ def resolve_show_group_with_provider(
         if status is ResolutionStatus.SUSPICIOUS
         else "provider-evidence-below-threshold"
     )
+    method = f"{provider_method}+episode-catalog" if catalog_reasons else provider_method
     return ShowResolution(
         status=status,
         show=None,
         evidence=MatchEvidence(
-            method=provider_method,
+            method=method,
             confidence=top.score,
-            reasons=(reason, f"candidate-gap:{gap:.3f}"),
+            reasons=(reason, f"candidate-gap:{gap:.3f}", *catalog_reasons),
             candidates=ranked,
         ),
     )
