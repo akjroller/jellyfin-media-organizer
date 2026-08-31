@@ -1,0 +1,14 @@
+[
+  {
+    "id": 100001,
+    "season": 1,
+    "number": 1,
+    "name": "Example Episode One"
+  },
+  {
+    "id": 100002,
+    "season": 1,
+    "number": 2,
+    "name": "Example Episode Two"
+  }
+]
