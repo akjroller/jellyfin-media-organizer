@@ -106,7 +106,9 @@ def test_provider_identity_is_namespaced_and_normalized() -> None:
     assert identity.key == "fixture-provider:show-17"
 
 
-def test_canonical_show_keeps_tvmaze_compatibility_without_storing_bare_identity() -> None:
+def test_canonical_show_keeps_tvmaze_compatibility_without_storing_bare_identity() -> (
+    None
+):
     show = CanonicalShow(
         source_key="example",
         tvmaze_id=4242,
@@ -229,7 +231,9 @@ def test_episode_assignment_consumes_generic_provider_catalog() -> None:
     assert provider.catalog_calls == [ProviderIdentity("fixture", "show-17")]
 
 
-def test_generic_override_identity_requires_no_provider_specific_field(tmp_path: Path) -> None:
+def test_generic_override_identity_requires_no_provider_specific_field(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "overrides.toml"
     path.write_text(
         """
@@ -253,7 +257,9 @@ numbering_mode = "aired"
     assert override.tvmaze_id is None
 
 
-def test_explicit_generic_override_resolves_without_provider_search(tmp_path: Path) -> None:
+def test_explicit_generic_override_resolves_without_provider_search(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "overrides.toml"
     path.write_text(
         """
@@ -284,7 +290,9 @@ numbering_mode = "aired"
     assert provider.search_calls == []
 
 
-def test_tvmaze_adapter_rejects_foreign_show_identity_without_http(tmp_path: Path) -> None:
+def test_tvmaze_adapter_rejects_foreign_show_identity_without_http(
+    tmp_path: Path,
+) -> None:
     getter = RecordingGetter({})
     adapter = TvmazeProviderAdapter(TvmazeCatalogCache(tmp_path / "cache"), getter)
 

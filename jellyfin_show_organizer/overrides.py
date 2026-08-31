@@ -71,9 +71,7 @@ class ShowOverride:
     @property
     def provider_id(self) -> str | None:
         return (
-            self.provider_identity.value
-            if self.provider_identity is not None
-            else None
+            self.provider_identity.value if self.provider_identity is not None else None
         )
 
     @property

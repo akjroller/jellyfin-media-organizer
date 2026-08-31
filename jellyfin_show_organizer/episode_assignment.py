@@ -7,7 +7,13 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
-from .models import CanonicalShow, MatchEvidence, NumberingMode, ParseResult, ProviderIdentity
+from .models import (
+    CanonicalShow,
+    MatchEvidence,
+    NumberingMode,
+    ParseResult,
+    ProviderIdentity,
+)
 from .providers import (
     MetadataProvider,
     ProviderEpisode,
@@ -165,8 +171,7 @@ def _aired_assignment(
             )
         matches.append(episode)
         reasons.append(
-            f"catalog-match:S{parse.season:02d}E{number:02d}"
-            f"->{episode.identity.key}"
+            f"catalog-match:S{parse.season:02d}E{number:02d}->{episode.identity.key}"
         )
 
     return _assignment(
@@ -318,7 +323,9 @@ def _protect_segment_identity(
     assignments: tuple[SourceEpisodeAssignment, ...],
 ) -> tuple[SourceEpisodeAssignment, ...]:
     parse_by_key = {source.source_key: source.parse for source in sources}
-    by_episode: dict[ProviderIdentity, list[SourceEpisodeAssignment]] = defaultdict(list)
+    by_episode: dict[ProviderIdentity, list[SourceEpisodeAssignment]] = defaultdict(
+        list
+    )
     for assignment in assignments:
         if assignment.status is AssignmentStatus.MATCHED:
             for episode in assignment.episodes:

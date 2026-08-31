@@ -125,7 +125,9 @@ class ProviderEpisodeCatalog:
         if any(episode.identity.provider != self.provider for episode in self.episodes):
             raise ValueError("provider catalog contains a foreign episode identity")
         if self.unresolved_reason is not None and (self.episodes or self.errors):
-            raise ValueError("unresolved provider catalogs cannot carry normalized data")
+            raise ValueError(
+                "unresolved provider catalogs cannot carry normalized data"
+            )
 
     @property
     def resolved(self) -> bool:
@@ -183,7 +185,9 @@ def _tvmaze_show_candidates(response: object) -> tuple[ProviderShow, ...]:
             )
         )
 
-    unique = {(candidate.identity, candidate.title): candidate for candidate in candidates}
+    unique = {
+        (candidate.identity, candidate.title): candidate for candidate in candidates
+    }
     return tuple(
         sorted(
             unique.values(),
@@ -279,7 +283,8 @@ class TvmazeProviderAdapter:
                 provider=self.provider_name,
                 request_key=record.request_key,
                 shows=(),
-                unresolved_reason=record.unresolved_reason or "provider-search-unresolved",
+                unresolved_reason=record.unresolved_reason
+                or "provider-search-unresolved",
                 retrieved_at=record.retrieved_at,
             )
 
@@ -302,8 +307,7 @@ class TvmazeProviderAdapter:
                 show_identity=ProviderIdentity(self.provider_name, show_identity.value),
                 episodes=(),
                 unresolved_reason=(
-                    "provider-identity-not-supported:"
-                    f"{show_identity.provider}"
+                    f"provider-identity-not-supported:{show_identity.provider}"
                 ),
             )
 
@@ -325,7 +329,8 @@ class TvmazeProviderAdapter:
                 request_key=record.request_key,
                 show_identity=show_identity,
                 episodes=(),
-                unresolved_reason=record.unresolved_reason or "provider-catalog-unresolved",
+                unresolved_reason=record.unresolved_reason
+                or "provider-catalog-unresolved",
                 retrieved_at=record.retrieved_at,
             )
 

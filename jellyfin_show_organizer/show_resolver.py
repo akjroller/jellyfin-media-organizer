@@ -314,9 +314,7 @@ def resolve_show_group_with_provider(
                 provider_identity=provider_show.identity,
                 title=title,
                 year=(
-                    provider_show.year
-                    if provider_show.year is not None
-                    else year_hint
+                    provider_show.year if provider_show.year is not None else year_hint
                 ),
                 numbering_mode=_numbering_mode(override),
             ),

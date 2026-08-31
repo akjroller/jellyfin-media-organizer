@@ -404,11 +404,13 @@ def build_episode_destination(
 
     reasons = [
         "jellyfin-series-season-episode-layout",
-        f"canonical-tvmaze-id:{show.tvmaze_id}",
+        f"canonical-provider-identity:{show.provider_identity.key}",
         f"episode-token:{token}",
     ]
+    if show.provider == "tvmaze":
+        reasons.append(f"canonical-tvmaze-id:{show.tvmaze_id}")
     reasons.extend(f"jellyfin-provider-tag:{tag}" for tag in provider_tags)
-    if show.tvmaze_id and not provider_tags:
+    if show.provider == "tvmaze" and not provider_tags:
         reasons.append("tvmaze-id-retained-as-audit-only-identity")
     reasons.extend(path_reasons)
     return _ready(assignment.source_key, relative_path, *reasons)
@@ -462,8 +464,10 @@ def build_extra_destination(
     reasons = [
         "jellyfin-series-extra-folder-layout",
         f"extra-kind:{extra_kind}",
-        f"canonical-tvmaze-id:{show.tvmaze_id}",
+        f"canonical-provider-identity:{show.provider_identity.key}",
     ]
+    if show.provider == "tvmaze":
+        reasons.append(f"canonical-tvmaze-id:{show.tvmaze_id}")
     reasons.extend(f"jellyfin-provider-tag:{tag}" for tag in provider_tags)
     if extra_kind not in _EXTRA_FOLDERS:
         reasons.append("unknown-extra-kind-mapped-to-generic-extras-folder")
