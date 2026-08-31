@@ -52,11 +52,11 @@ def normalize_show_identity(value: str) -> str:
 
 
 def _source_titles(parses: Iterable[ParseResult]) -> tuple[str, ...]:
-    values = {
+    values = [
         parse.series_hint.strip()
         for parse in parses
         if parse.series_hint is not None and parse.series_hint.strip()
-    }
+    ]
     return tuple(
         sorted(values, key=lambda value: (normalize_show_identity(value), value))
     )
@@ -65,14 +65,20 @@ def _source_titles(parses: Iterable[ParseResult]) -> tuple[str, ...]:
 def _representative_title(titles: tuple[str, ...]) -> str | None:
     if not titles:
         return None
-    counts = Counter(normalize_show_identity(title) for title in titles)
+
+    normalized_counts = Counter(normalize_show_identity(title) for title in titles)
+    representative_identity = min(
+        normalized_counts,
+        key=lambda identity: (-normalized_counts[identity], identity),
+    )
+    display_counts = Counter(
+        title
+        for title in titles
+        if normalize_show_identity(title) == representative_identity
+    )
     return min(
-        titles,
-        key=lambda title: (
-            -counts[normalize_show_identity(title)],
-            normalize_show_identity(title),
-            title,
-        ),
+        display_counts,
+        key=lambda title: (-display_counts[title], title.casefold(), title),
     )
 
 
