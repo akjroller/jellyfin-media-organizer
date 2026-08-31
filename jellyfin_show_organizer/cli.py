@@ -9,6 +9,7 @@ from typing import cast
 from .overrides import load_overrides
 
 CommandHandler = Callable[[argparse.Namespace], int]
+PLAN_NOT_IMPLEMENTED_EXIT = 3
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,10 +25,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     plan_parser = subparsers.add_parser(
         "plan",
-        help="Initialize the read-only planning workflow.",
+        help="Report that the planning workflow is not implemented yet.",
         description=(
-            "Initialize the organizer planning workflow. "
-            "Inventory scanning and provider matching are added in later issues."
+            "The organizer plan command is currently a scaffold. "
+            "Planning is not implemented yet, so this command does not produce a plan."
         ),
     )
     plan_parser.set_defaults(handler=_run_plan)
@@ -56,10 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _run_plan(_: argparse.Namespace) -> int:
     print(
-        "Organizer plan scaffold is ready; "
-        "it does not read, move, rename, or delete media files."
+        "Organizer plan is not implemented yet; "
+        "no plan, report, cache, destination directory, or media output was created.",
+        file=sys.stderr,
     )
-    return 0
+    return PLAN_NOT_IMPLEMENTED_EXIT
 
 
 def _run_overrides_validate(args: argparse.Namespace) -> int:
