@@ -194,6 +194,97 @@ def test_weak_provider_candidate_remains_unresolved(tmp_path: Path):
     assert resolution.evidence.candidates[0].score < 0.75
 
 
+def test_representative_title_uses_majority_frequency(tmp_path: Path):
+    getter = FakeGetter(
+        [
+            {
+                "score": 1.0,
+                "show": {
+                    "id": 505,
+                    "name": "Majority Show",
+                    "premiered": "2020-01-01",
+                },
+            }
+        ]
+    )
+    parses = (
+        *(ParseResult(series_hint="Majority Show") for _ in range(5)),
+        ParseResult(series_hint="Alpha Outlier"),
+        ParseResult(series_hint="   "),
+        ParseResult(series_hint=None),
+    )
+
+    resolution = resolve_show_group(
+        "mixed-source-group",
+        parses,
+        load_overrides(),
+        TvmazeCatalogCache(tmp_path / "cache"),
+        getter,
+    )
+
+    assert resolution.status is ResolutionStatus.MATCHED
+    assert getter.calls[0][1]["q"] == "Majority Show"
+
+
+def test_representative_title_tie_break_is_normalized_title_order(tmp_path: Path):
+    parses = (
+        ParseResult(series_hint="Zulu Show"),
+        ParseResult(series_hint="Alpha Show"),
+    )
+    response = [
+        {
+            "score": 1.0,
+            "show": {
+                "id": 606,
+                "name": "Alpha Show",
+                "premiered": "2021-01-01",
+            },
+        }
+    ]
+
+    first_getter = FakeGetter(response)
+    second_getter = FakeGetter(response)
+    first = resolve_show_group(
+        "tie-source-group",
+        parses,
+        load_overrides(),
+        TvmazeCatalogCache(tmp_path / "cache-first"),
+        first_getter,
+    )
+    second = resolve_show_group(
+        "tie-source-group",
+        tuple(reversed(parses)),
+        load_overrides(),
+        TvmazeCatalogCache(tmp_path / "cache-second"),
+        second_getter,
+    )
+
+    assert first.status is ResolutionStatus.MATCHED
+    assert second.status is ResolutionStatus.MATCHED
+    assert first_getter.calls[0][1]["q"] == "Alpha Show"
+    assert second_getter.calls[0][1]["q"] == "Alpha Show"
+
+
+def test_representative_title_uses_stable_display_form(tmp_path: Path):
+    getter = FakeGetter([])
+    resolution = resolve_show_group(
+        "display-form-group",
+        (
+            ParseResult(series_hint="majority-show", embedded_tvmaze_id=707),
+            ParseResult(series_hint="Majority.Show", embedded_tvmaze_id=707),
+            ParseResult(series_hint="Majority Show", embedded_tvmaze_id=707),
+        ),
+        load_overrides(),
+        TvmazeCatalogCache(tmp_path / "cache"),
+        getter,
+    )
+
+    assert getter.calls == []
+    assert resolution.status is ResolutionStatus.MATCHED
+    assert resolution.show is not None
+    assert resolution.show.title == "Majority Show"
+
+
 def test_warmed_group_resolution_replays_without_http(tmp_path: Path):
     cache = TvmazeCatalogCache(tmp_path / "cache")
     cold_getter = FakeGetter(_search_response())
