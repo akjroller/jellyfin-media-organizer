@@ -85,7 +85,7 @@ private_path = "/fabricated/private/path"
 
 
 def test_unsupported_schema_version_is_rejected(tmp_path: Path):
-    path = _write(tmp_path / "future.toml", "schema_version = 2\n")
+    path = _write(tmp_path / "future.toml", "schema_version = 999\n")
 
     with pytest.raises(ValueError, match="unsupported override schema_version"):
         load_overrides(path)
