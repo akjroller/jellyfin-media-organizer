@@ -102,6 +102,10 @@ def _hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _device_id(path: Path) -> int:
+    return path.stat().st_dev
+
+
 def _validate_fingerprint(path: Path, expected: SourceFingerprint) -> SourceFingerprint:
     before = path.stat()
     if before.st_size != expected.size or before.st_mtime_ns != expected.mtime_ns:
@@ -161,8 +165,8 @@ def revalidate_apply_member(
         raise ApplyFilesystemError("destination already exists")
 
     fingerprint = _validate_fingerprint(source, member.fingerprint)
-    source_device = source.stat().st_dev
-    destination_device = destination_parent.stat().st_dev
+    source_device = _device_id(source)
+    destination_device = _device_id(destination_parent)
     if source_device != destination_device:
         raise ApplyFilesystemError("cross-filesystem apply remains disabled")
 
