@@ -13,7 +13,7 @@ from typing import Any, TypeGuard
 from .models import NumberingMode, TitlePreference
 
 OVERRIDES_RESOURCE = "data/overrides-v1.toml"
-SUPPORTED_OVERRIDE_SCHEMA_VERSION = 1
+SUPPORTED_OVERRIDE_SCHEMA_VERSIONS = frozenset({1, 2})
 
 
 def _normalize_identity(value: str) -> str:
@@ -44,7 +44,6 @@ class ShowOverride:
         if self.year is not None and not 1800 <= self.year <= 9999:
             raise ValueError("override year is outside the supported range")
 
-        normalized_key = _normalize_identity(self.key)
         normalized_aliases: set[str] = set()
         for alias in self.aliases:
             if not alias or alias != alias.strip():
@@ -52,8 +51,6 @@ class ShowOverride:
                     "override aliases must contain non-empty trimmed strings"
                 )
             normalized = _normalize_identity(alias)
-            if normalized == normalized_key:
-                raise ValueError("override alias duplicates the override key")
             if normalized in normalized_aliases:
                 raise ValueError("override aliases must be unique after normalization")
             normalized_aliases.add(normalized)
@@ -79,10 +76,13 @@ class OverrideCatalog:
     shows: tuple[ShowOverride, ...]
 
     def __post_init__(self) -> None:
-        if self.schema_version != SUPPORTED_OVERRIDE_SCHEMA_VERSION:
+        if self.schema_version not in SUPPORTED_OVERRIDE_SCHEMA_VERSIONS:
+            supported = ", ".join(
+                str(version) for version in sorted(SUPPORTED_OVERRIDE_SCHEMA_VERSIONS)
+            )
             raise ValueError(
                 "unsupported override schema_version: "
-                f"{self.schema_version}; expected {SUPPORTED_OVERRIDE_SCHEMA_VERSION}"
+                f"{self.schema_version}; supported versions: {supported}"
             )
 
         identities: dict[str, str] = {}
