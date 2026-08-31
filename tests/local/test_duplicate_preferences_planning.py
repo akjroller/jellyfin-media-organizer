@@ -140,7 +140,9 @@ def test_equal_explicit_ranks_remain_suspicious():
 
     assert {record.status for record in planned} == {TerminalStatus.SUSPICIOUS}
     assert all(record.duplicate is not None for record in planned)
-    assert all(record.duplicate.winner is None for record in planned if record.duplicate)
+    assert all(
+        record.duplicate.winner is None for record in planned if record.duplicate
+    )
 
 
 def test_unknown_duplicate_preference_reference_fails_closed():
@@ -167,7 +169,9 @@ def test_preference_for_non_collision_source_fails_closed():
     source = "Example Series/only-source.mkv"
     overrides = _catalog(DuplicatePreferenceOverride(source=source, rank=100))
 
-    with pytest.raises(PlanningConfigurationError, match="not part of a destination collision"):
+    with pytest.raises(
+        PlanningConfigurationError, match="not part of a destination collision"
+    ):
         _apply_duplicate_decisions(
             [_record(source)],
             SidecarDiscovery(companions=(), unresolved=(), ignored=()),
@@ -175,7 +179,9 @@ def test_preference_for_non_collision_source_fails_closed():
         )
 
 
-def test_schema_two_duplicate_preferences_load_and_hash_deterministically(tmp_path: Path):
+def test_schema_two_duplicate_preferences_load_and_hash_deterministically(
+    tmp_path: Path,
+):
     first = tmp_path / "first.toml"
     second = tmp_path / "second.toml"
     first.write_text(
@@ -211,14 +217,14 @@ reasons = ["higher quality source", "reviewed preferred source"]
     second_catalog = load_overrides(second)
 
     assert first_catalog.snapshot_id == second_catalog.snapshot_id
-    preferred = first_catalog.duplicate_preference_for(
-        "example series/RELEASE-B.mkv"
-    )
+    preferred = first_catalog.duplicate_preference_for("example series/RELEASE-B.mkv")
     assert preferred is not None
     assert preferred.rank == 100
 
 
-def test_duplicate_preferences_require_schema_two_and_relative_safe_sources(tmp_path: Path):
+def test_duplicate_preferences_require_schema_two_and_relative_safe_sources(
+    tmp_path: Path,
+):
     schema_one = tmp_path / "schema-one.toml"
     schema_one.write_text(
         """schema_version = 1
@@ -231,6 +237,11 @@ rank = 1
     with pytest.raises(ValueError, match="schema_version 2"):
         load_overrides(schema_one)
 
-    for unsafe in ("../release-a.mkv", "/absolute/release-a.mkv", "C:/Media/release-a.mkv"):
+    for unsafe in (
+        "../release-a.mkv",
+        "/absolute/release-a.mkv",
+        "C:/Media/release-a.mkv",
+        "C:Media/release-a.mkv",
+    ):
         with pytest.raises(ValueError, match="duplicate preference source"):
             DuplicatePreferenceOverride(source=unsafe, rank=1)
