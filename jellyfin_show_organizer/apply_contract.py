@@ -91,7 +91,9 @@ class ApplyOperationGroup:
             raise ValueError("apply group_id cannot be empty")
         if not self.members:
             raise ValueError("apply groups require at least one member")
-        video_count = sum(member.role is ApplyMemberRole.VIDEO for member in self.members)
+        video_count = sum(
+            member.role is ApplyMemberRole.VIDEO for member in self.members
+        )
         if video_count != 1:
             raise ValueError("apply groups require exactly one video member")
         sources = [_path_key(member.source_relative_path) for member in self.members]
@@ -269,7 +271,10 @@ def _validate_approval(manifest: Mapping[str, object], approval: ApplyApproval) 
         overrides_snapshot_id,
         cache_snapshots,
     ) = _manifest_approval_context(manifest)
-    if approval.schema_version != schema_version or schema_version != PLAN_SCHEMA_VERSION:
+    if (
+        approval.schema_version != schema_version
+        or schema_version != PLAN_SCHEMA_VERSION
+    ):
         raise ApplyContractError("approved plan schema context does not match")
     if approval.tool_version != tool_version:
         raise ApplyContractError("approved tool version does not match")
@@ -319,9 +324,7 @@ def _video_member(record: Mapping[str, object], index: int) -> ApplyMember | Non
     source_path = _string(
         source.get("relative_path"), f"records[{index}].source.relative_path"
     )
-    destination = _string(
-        record.get("destination"), f"records[{index}].destination"
-    )
+    destination = _string(record.get("destination"), f"records[{index}].destination")
     return ApplyMember(
         role=ApplyMemberRole.VIDEO,
         source_relative_path=source_path,

@@ -27,7 +27,11 @@ from jellyfin_show_organizer.models import (
     SourceFingerprint,
     TerminalStatus,
 )
-from jellyfin_show_organizer.schema import PLAN_SCHEMA_VERSION, plan_to_manifest, stable_plan_hash
+from jellyfin_show_organizer.schema import (
+    PLAN_SCHEMA_VERSION,
+    plan_to_manifest,
+    stable_plan_hash,
+)
 
 pytestmark = pytest.mark.local
 
@@ -61,8 +65,7 @@ def _plan(*, video_status: TerminalStatus = TerminalStatus.MATCHED) -> Organizer
         ),
         evidence=MatchEvidence(method="synthetic", confidence=1.0),
         destination=(
-            "Example Series (2024)/Season 01/"
-            "Example Series (2024) S01E01 - Pilot.mkv"
+            "Example Series (2024)/Season 01/Example Series (2024) S01E01 - Pilot.mkv"
         ),
         operation_group_id="op-example",
         provider_episodes=(
