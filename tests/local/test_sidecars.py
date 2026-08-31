@@ -143,8 +143,7 @@ def test_adjacent_metadata_artwork_and_unknown_files_have_explicit_policy(
     )
 
     assert {
-        (file.relative_path, file.disposition, file.reason)
-        for file in result.ignored
+        (file.relative_path, file.disposition, file.reason) for file in result.ignored
     } == {
         (
             "Example Series/fanart.PNG",
