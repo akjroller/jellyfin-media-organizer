@@ -113,7 +113,7 @@ class FixtureGetter:
     def __call__(
         self,
         url: str,
-        _params: Mapping[str, str] | None = None,
+        params: Mapping[str, str] | None = None,
     ) -> object:
         if "search/shows" in url:
             return SEARCH_RESPONSE
