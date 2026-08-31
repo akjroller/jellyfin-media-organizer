@@ -36,6 +36,7 @@ env:
 
 jobs:
   publish-docker:
+    if: github.repository == 'jkwill87/mnamer'
     runs-on: ubuntu-latest
 
     permissions:

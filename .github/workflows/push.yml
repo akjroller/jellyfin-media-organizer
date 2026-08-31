@@ -43,6 +43,7 @@ jobs:
   publish-pypi:
     if: >-
       success()
+      && github.repository == 'jkwill87/mnamer'
       && github.event_name == 'push'
       && github.ref == 'refs/heads/main'
 
@@ -61,6 +62,7 @@ jobs:
   publish-docker-main:
     if: >-
       success()
+      && github.repository == 'jkwill87/mnamer'
       && github.event_name == 'push'
       && github.ref == 'refs/heads/main'
 
@@ -82,6 +84,7 @@ jobs:
   publish-docker-release:
     if: >-
       success()
+      && github.repository == 'jkwill87/mnamer'
       && github.event_name == 'release'
       && (
         github.event.action == 'published'

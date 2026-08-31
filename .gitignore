@@ -24,3 +24,26 @@ mnamer/__version__.py
 playground.py
 testing/test_files_*
 venv/
+
+# jellyfin-show-organizer local evidence and generated state
+/.organizer-cache/
+/.organizer-manifests/
+/.organizer-reports/
+/audit/
+/inventory/
+/manifests/
+/reports/
+*audit*.csv
+*inventory*.csv
+*.manifest
+*.manifest.json
+*.plan.json
+
+# Never commit copied real media or library roots.
+/Jellyfin/
+/Movies/
+/Shows/
+/quarantine/
+*.avi
+*.mkv
+*.mp4
