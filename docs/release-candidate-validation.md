@@ -11,7 +11,7 @@ The ready corpus contains 15 video records and four companion records. Its appro
 - tool version: `0.1.0`;
 - plan schema: `1`;
 - provider cache: ten successful synthetic snapshots;
-- immutable plan hash: `7ebbb2b176b9f1b6c8fa4ac1e18b1ae4a07e62d77e2acbed79337c338638b133`.
+- immutable plan hash: `0b23404313c3f2e32c158d8edaf4b48634a589b9e632a038d0d62f141a3456f4`.
 
 The test fixes all synthetic timestamps and the cache clock, regenerates the exact approved hash, and then repeats the plan against the warmed cache in offline mode. Offline replay must make zero provider calls and reproduce identical plan JSON, summary output, provenance, and plan hash. Both source snapshots remain unchanged and the destination roots remain empty.
 

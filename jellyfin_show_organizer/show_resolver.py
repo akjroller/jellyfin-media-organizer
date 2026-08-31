@@ -4,7 +4,7 @@ import re
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from enum import StrEnum
 
@@ -18,7 +18,12 @@ from .models import (
     TitlePreference,
 )
 from .overrides import OverrideCatalog, ShowOverride
-from .providers import MetadataProvider, ProviderShow, TvmazeProviderAdapter
+from .providers import (
+    MetadataProvider,
+    ProviderEpisodeCatalog,
+    ProviderShow,
+    TvmazeProviderAdapter,
+)
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
 _MATCH_THRESHOLD = 0.90
@@ -37,6 +42,19 @@ class ShowResolution:
     status: ResolutionStatus
     show: CanonicalShow | None
     evidence: MatchEvidence
+
+
+@dataclass(frozen=True, slots=True)
+class _ObservedEpisodeEvidence:
+    mode: NumberingMode
+    values: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _CatalogTieBreak:
+    winner: ProviderIdentity | None
+    candidates: tuple[CandidateEvidence, ...]
+    reasons: tuple[str, ...]
 
 
 def normalize_show_identity(value: str) -> str:
@@ -195,6 +213,245 @@ def _explicit_conflict_reasons(
     return ("conflicting-explicit-provider-identities",)
 
 
+def _parse_numbering_family(parse: ParseResult) -> str | None:
+    families = [
+        family
+        for family, present in (
+            ("aired", parse.season is not None or bool(parse.episodes)),
+            ("absolute", parse.absolute_episode is not None),
+            ("special", parse.special_episode is not None),
+            ("date", parse.episode_date is not None),
+            ("segment", parse.segment_hint is not None),
+        )
+        if present
+    ]
+    if len(families) != 1:
+        return None
+    return families[0]
+
+
+def _observed_episode_evidence(
+    parses: tuple[ParseResult, ...],
+    mode: NumberingMode,
+) -> _ObservedEpisodeEvidence | None:
+    expected_family = {
+        NumberingMode.AIRED: "aired",
+        NumberingMode.ABSOLUTE: "absolute",
+        NumberingMode.PARENTHESIZED_ABSOLUTE: "absolute",
+        NumberingMode.SPECIAL: "special",
+        NumberingMode.DATE: "date",
+        NumberingMode.SEGMENT_TITLE: "segment",
+    }[mode]
+    values: set[str] = set()
+
+    for parse in parses:
+        family = _parse_numbering_family(parse)
+        if family is None:
+            if any(
+                (
+                    parse.season is not None,
+                    bool(parse.episodes),
+                    parse.absolute_episode is not None,
+                    parse.special_episode is not None,
+                    parse.episode_date is not None,
+                    parse.segment_hint is not None,
+                )
+            ):
+                return None
+            continue
+        if family != expected_family:
+            return None
+
+        if mode is NumberingMode.AIRED:
+            if parse.season is None or not parse.episodes:
+                return None
+            values.update(
+                f"S{parse.season:02d}E{episode:02d}" for episode in parse.episodes
+            )
+        elif mode in {NumberingMode.ABSOLUTE, NumberingMode.PARENTHESIZED_ABSOLUTE}:
+            if parse.absolute_episode is None or parse.absolute_episode <= 0:
+                return None
+            values.add(str(parse.absolute_episode))
+        elif mode is NumberingMode.SPECIAL:
+            if parse.special_kind is None or parse.special_episode is None:
+                return None
+            values.add(str(parse.special_episode))
+        elif mode is NumberingMode.DATE:
+            if parse.episode_date is None:
+                return None
+            values.add(parse.episode_date)
+        else:
+            if parse.title_hint is None or not parse.title_hint.strip():
+                return None
+            values.add(normalize_show_identity(parse.title_hint))
+
+    if not values:
+        return None
+    return _ObservedEpisodeEvidence(mode=mode, values=tuple(sorted(values)))
+
+
+def _catalog_compatibility_reasons(
+    catalog: ProviderEpisodeCatalog,
+    observed: _ObservedEpisodeEvidence,
+) -> tuple[bool | None, tuple[str, ...]]:
+    request_reason = f"catalog-request:{catalog.request_key}"
+    if not catalog.resolved:
+        return None, (
+            request_reason,
+            "catalog-unresolved:"
+            f"{catalog.unresolved_reason or 'provider-catalog-unresolved'}",
+        )
+    if catalog.errors:
+        return None, (
+            request_reason,
+            *(f"catalog-error:{error}" for error in catalog.errors),
+        )
+
+    episodes = catalog.episodes
+    mode = observed.mode
+
+    if mode is NumberingMode.AIRED:
+        available = {
+            f"S{episode.season:02d}E{episode.number:02d}"
+            for episode in episodes
+            if episode.number is not None
+        }
+    elif mode in {NumberingMode.ABSOLUTE, NumberingMode.PARENTHESIZED_ABSOLUTE}:
+        regular = tuple(
+            sorted(
+                (
+                    episode
+                    for episode in episodes
+                    if episode.season > 0 and episode.number is not None
+                ),
+                key=lambda episode: (
+                    episode.season,
+                    episode.number,
+                    episode.identity.key,
+                ),
+            )
+        )
+        available = {str(index) for index, _episode in enumerate(regular, start=1)}
+    elif mode is NumberingMode.SPECIAL:
+        available = {
+            str(episode.number)
+            for episode in episodes
+            if episode.number is not None
+            and (
+                episode.season == 0
+                or (
+                    episode.episode_type is not None
+                    and episode.episode_type != "regular"
+                )
+            )
+        }
+    elif mode is NumberingMode.DATE:
+        available = {
+            episode.airdate for episode in episodes if episode.airdate is not None
+        }
+    else:
+        available = {normalize_show_identity(episode.title) for episode in episodes}
+
+    missing = tuple(value for value in observed.values if value not in available)
+    compatible = not missing
+    return compatible, (
+        request_reason,
+        f"catalog-compatible:{str(compatible).casefold()}:{mode.value}",
+        *(f"catalog-missing:{value}" for value in missing),
+    )
+
+
+def _catalog_tie_break(
+    parses: tuple[ParseResult, ...],
+    mode: NumberingMode,
+    provider: MetadataProvider,
+    ranked: tuple[CandidateEvidence, ...],
+) -> _CatalogTieBreak | None:
+    if len(ranked) < 2 or ranked[0].score < _SUSPICIOUS_THRESHOLD:
+        return None
+
+    top_score = ranked[0].score
+    contenders = tuple(
+        candidate
+        for candidate in ranked
+        if top_score - candidate.score < _MINIMUM_MATCH_GAP
+    )
+    if len(contenders) < 2:
+        return None
+
+    observed = _observed_episode_evidence(parses, mode)
+    if observed is None:
+        return None
+
+    compatibility: dict[ProviderIdentity, bool | None] = {}
+    catalog_reasons: dict[ProviderIdentity, tuple[str, ...]] = {}
+    for candidate in contenders:
+        catalog = provider.episode_catalog(candidate.provider_identity)
+        compatible, reasons = _catalog_compatibility_reasons(catalog, observed)
+        compatibility[candidate.provider_identity] = compatible
+        catalog_reasons[candidate.provider_identity] = reasons
+
+    enriched = tuple(
+        replace(
+            candidate,
+            reasons=(
+                *candidate.reasons,
+                *catalog_reasons.get(candidate.provider_identity, ()),
+            ),
+        )
+        for candidate in ranked
+    )
+
+    if any(value is None for value in compatibility.values()):
+        return _CatalogTieBreak(
+            winner=None,
+            candidates=enriched,
+            reasons=(
+                f"catalog-tiebreak-mode:{mode.value}",
+                "catalog-tiebreak:indeterminate-candidate-catalog",
+            ),
+        )
+
+    compatible_identities = tuple(
+        identity
+        for identity, value in sorted(
+            compatibility.items(), key=lambda item: item[0].key
+        )
+        if value
+    )
+    if len(compatible_identities) != 1:
+        return _CatalogTieBreak(
+            winner=None,
+            candidates=enriched,
+            reasons=(
+                f"catalog-tiebreak-mode:{mode.value}",
+                "catalog-tiebreak:no-unique-compatible-candidate",
+            ),
+        )
+
+    winner = compatible_identities[0]
+    winner_first = tuple(
+        sorted(
+            enriched,
+            key=lambda candidate: (
+                candidate.provider_identity != winner,
+                -candidate.score,
+                normalize_show_identity(candidate.title),
+                candidate.provider_identity.key,
+            ),
+        )
+    )
+    return _CatalogTieBreak(
+        winner=winner,
+        candidates=winner_first,
+        reasons=(
+            f"catalog-tiebreak-mode:{mode.value}",
+            "catalog-tiebreak:unique-compatible-candidate",
+            f"catalog-tiebreak-winner:{winner.key}",
+        ),
+    )
+
+
 def resolve_show_group_with_provider(
     source_key: str,
     parses: Iterable[ParseResult],
@@ -337,6 +594,38 @@ def resolve_show_group_with_provider(
             ),
         )
 
+    mode = _numbering_mode(override)
+    tie_break = _catalog_tie_break(parse_group, mode, provider, ranked)
+    if tie_break is not None and tie_break.winner is not None:
+        provider_show = next(
+            candidate
+            for candidate in provider_candidates
+            if candidate.identity == tie_break.winner
+        )
+        title = _preferred_title(override, source_title, provider_show.title)
+        assert title is not None
+        return ShowResolution(
+            status=ResolutionStatus.MATCHED,
+            show=CanonicalShow(
+                source_key=source_key,
+                provider_identity=provider_show.identity,
+                title=title,
+                year=(
+                    provider_show.year if provider_show.year is not None else year_hint
+                ),
+                numbering_mode=mode,
+            ),
+            evidence=MatchEvidence(
+                method=f"{provider_method}+catalog-tiebreak",
+                confidence=top.score,
+                reasons=(
+                    *tie_break.reasons,
+                    f"candidate-gap:{gap:.3f}",
+                ),
+                candidates=tie_break.candidates,
+            ),
+        )
+
     status = (
         ResolutionStatus.SUSPICIOUS
         if top.score >= _SUSPICIOUS_THRESHOLD
@@ -353,8 +642,12 @@ def resolve_show_group_with_provider(
         evidence=MatchEvidence(
             method=provider_method,
             confidence=top.score,
-            reasons=(reason, f"candidate-gap:{gap:.3f}"),
-            candidates=ranked,
+            reasons=(
+                reason,
+                *(tie_break.reasons if tie_break is not None else ()),
+                f"candidate-gap:{gap:.3f}",
+            ),
+            candidates=tie_break.candidates if tie_break is not None else ranked,
         ),
     )
 
