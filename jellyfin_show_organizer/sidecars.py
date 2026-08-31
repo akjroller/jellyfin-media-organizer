@@ -333,9 +333,7 @@ def discover_sidecars(
             by_extension.setdefault(file.extension, []).append(file)
 
         duplicate_extensions = {
-            extension
-            for extension, matches in by_extension.items()
-            if len(matches) > 1
+            extension for extension, matches in by_extension.items() if len(matches) > 1
         }
         if duplicate_extensions:
             for file in files:
