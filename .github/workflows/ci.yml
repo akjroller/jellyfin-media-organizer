@@ -64,6 +64,9 @@ jobs:
 
       - name: CLI smoke test
         run: |
+          jmo --version
+          organizer --version
+          python -m jellyfin_show_organizer --version
           jmo plan --help
           organizer plan --help
           python -m jellyfin_show_organizer plan --help
@@ -85,8 +88,8 @@ jobs:
       - name: Check tracked repository content
         run: python tools/check_repository_safety.py
 
-  installed-wheel-smoke:
-    name: Built wheel smoke test
+  installed-artifact-smoke:
+    name: Built wheel and sdist smoke test
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -107,21 +110,43 @@ jobs:
       - name: Build wheel and source distribution
         run: python -m build
 
-      - name: Install built wheel
-        shell: bash
-        run: python -m pip install --force-reinstall --no-deps dist/*.whl
-
-      - name: Verify installed commands and package data outside source tree
+      - name: Verify wheel in a clean environment
         shell: bash
         run: |
+          python -m venv "$RUNNER_TEMP/wheel-venv"
+          "$RUNNER_TEMP/wheel-venv/bin/python" -m pip install --no-deps dist/*.whl
           cd "$RUNNER_TEMP"
-          jmo plan --help
-          organizer plan --help
-          python - <<'PY'
+          "$RUNNER_TEMP/wheel-venv/bin/jmo" --version
+          "$RUNNER_TEMP/wheel-venv/bin/organizer" plan --help
+          "$RUNNER_TEMP/wheel-venv/bin/python" - <<'PY'
+          from importlib.metadata import version
           from importlib.resources import files
+          from jellyfin_show_organizer import __version__
 
+          assert version("jellyfin-media-organizer") == __version__
           data = files("jellyfin_show_organizer").joinpath("data")
           assert data.joinpath("plan-schema-v1.json").is_file()
           assert data.joinpath("overrides-v1.toml").is_file()
-          print("installed package data verified")
+          print("wheel installation verified")
+          PY
+
+      - name: Verify sdist in a separate clean environment
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/sdist-venv"
+          "$RUNNER_TEMP/sdist-venv/bin/python" -m pip install setuptools wheel
+          "$RUNNER_TEMP/sdist-venv/bin/python" -m pip install --no-build-isolation --no-deps "$GITHUB_WORKSPACE"/dist/*.tar.gz
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/sdist-venv/bin/jmo" --version
+          "$RUNNER_TEMP/sdist-venv/bin/organizer" plan --help
+          "$RUNNER_TEMP/sdist-venv/bin/python" - <<'PY'
+          from importlib.metadata import version
+          from importlib.resources import files
+          from jellyfin_show_organizer import __version__
+
+          assert version("jellyfin-media-organizer") == __version__
+          data = files("jellyfin_show_organizer").joinpath("data")
+          assert data.joinpath("plan-schema-v1.json").is_file()
+          assert data.joinpath("overrides-v1.toml").is_file()
+          print("sdist installation verified")
           PY
