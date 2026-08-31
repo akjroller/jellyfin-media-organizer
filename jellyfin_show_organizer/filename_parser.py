@@ -6,18 +6,14 @@ from pathlib import PurePosixPath
 from .models import ParseResult
 
 _LEADING_TAGS = re.compile(r"^(?:\[[^\]]+\][ ._-]*)+")
-_TRAILING_YEAR = re.compile(r"(?:^|\s)(?P<year>(?:18|19|20|21)\d{2})$")
-_TVMAZE_ID = re.compile(
-    r"(?i)(?:\[?tvmaze(?:[ ._-]?id)?[ ._-]?)(?P<id>\d+)\]?"
-)
+_TRAILING_YEAR = re.compile(r"(?:^|[\s(])(?P<year>(?:18|19|20|21)\d{2})\)?$")
+_TVMAZE_ID = re.compile(r"(?i)(?:\[?tvmaze(?:[ ._-]?id)?[ ._-]?)(?P<id>\d+)\]?")
 _SXE = re.compile(
     r"(?i)(?<![A-Za-z0-9])S(?P<season>\d{1,2})E(?P<episode>\d{1,3})"
-    r"(?P<segment>[A-Za-z])?"
+    r"(?P<segment>[A-Za-z](?!\d))?"
     r"(?P<tail>(?:E\d{1,3}|-E?\d{1,3})*)"
 )
-_X_NOTATION = re.compile(
-    r"(?i)(?<!\d)(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?!\d)"
-)
+_X_NOTATION = re.compile(r"(?i)(?<!\d)(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?!\d)")
 _EPISODE_WORD = re.compile(
     r"(?i)(?<![A-Za-z0-9])episode[ ._-]*(?P<episode>\d{1,3})"
     r"(?P<segment>[A-Za-z])?(?![A-Za-z0-9])"
@@ -31,7 +27,8 @@ _ABSOLUTE = re.compile(
 )
 _TECH_SUFFIX = re.compile(
     r"(?i)(?:^|\s)(?:2160p|1080p|720p|576p|480p|webrip|web-dl|web|bluray|"
-    r"bdrip|hdtv|dvdrip|x264|x265|h264|h265|hevc|av1|aac|flac|synth)(?:\s|$)"
+    r"bdrip|hdtv|dvdrip|x264|x265|h264|h265|hevc|av1|aac|flac|synth)"
+    r"(?=[\s._-]|$)"
 )
 
 

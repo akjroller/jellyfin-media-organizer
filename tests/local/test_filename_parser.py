@@ -100,7 +100,9 @@ def test_explicit_filename_hint_wins_over_noisy_parent_folder():
 
 
 def test_parent_folder_is_only_a_fallback_when_filename_has_no_series_prefix():
-    parsed = parse_video_path("synthetic/Bubble Borough (1999)/Episode 01b Blue Boat.mkv")
+    parsed = parse_video_path(
+        "synthetic/Bubble Borough (1999)/Episode 01b Blue Boat.mkv"
+    )
 
     assert parsed == ParseResult(
         series_hint="Bubble Borough",
