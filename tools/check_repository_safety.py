@@ -72,9 +72,13 @@ def main() -> None:
 
         if not _is_synthetic_fixture(relative):
             if relative.name.casefold() in GENERATED_NAMES:
-                problems.append(f"tracked generated organizer artifact: {relative.as_posix()}")
+                problems.append(
+                    f"tracked generated organizer artifact: {relative.as_posix()}"
+                )
             if lowered_parts & GENERATED_PARTS:
-                problems.append(f"tracked generated organizer directory: {relative.as_posix()}")
+                problems.append(
+                    f"tracked generated organizer directory: {relative.as_posix()}"
+                )
 
         if relative == SELF or relative.suffix.casefold() not in PUBLIC_TEXT_SUFFIXES:
             continue
