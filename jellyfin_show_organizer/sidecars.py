@@ -67,7 +67,9 @@ class CompanionGroup:
         if self.kind is CompanionKind.SUBTITLE_PAIR:
             extensions = {file.extension for file in self.files}
             if len(self.files) != 2 or extensions != {".idx", ".sub"}:
-                raise ValueError("subtitle pairs require exactly one .idx and one .sub file")
+                raise ValueError(
+                    "subtitle pairs require exactly one .idx and one .sub file"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +169,9 @@ def discover_sidecars(
     """
 
     if not isinstance(root, AuthorizedShowsRoot):
-        raise TypeError("discover_sidecars requires an explicitly authorized Shows root")
+        raise TypeError(
+            "discover_sidecars requires an explicitly authorized Shows root"
+        )
 
     by_directory: dict[str, list[SourceFile]] = {}
     seen_video_paths: set[str] = set()
@@ -316,7 +320,9 @@ def discover_sidecars(
                 disposition=AdjacentDisposition.ASSOCIATED,
                 reason="deterministic-subtitle-association",
             )
-            subtitle_files.setdefault((video.relative_path, suffix), []).append(adjacent)
+            subtitle_files.setdefault((video.relative_path, suffix), []).append(
+                adjacent
+            )
 
     for (source_video, suffix), files in sorted(
         subtitle_files.items(),
