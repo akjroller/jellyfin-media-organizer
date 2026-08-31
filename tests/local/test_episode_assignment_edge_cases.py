@@ -8,7 +8,6 @@ from jellyfin_show_organizer.episode_assignment import (
 from jellyfin_show_organizer.models import CanonicalShow, NumberingMode, ParseResult
 from jellyfin_show_organizer.tvmaze_cache import TvmazeCatalogCache
 
-
 CATALOG = [
     {"id": 1001, "season": 1, "number": 1, "name": "Part Alpha"},
     {"id": 1002, "season": 1, "number": 2, "name": "Part Beta"},

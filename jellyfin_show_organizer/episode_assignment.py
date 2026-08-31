@@ -170,10 +170,10 @@ def _assignment(
 def _evidence_family(parse: ParseResult) -> str:
     has_aired = parse.season is not None or bool(parse.episodes)
     has_absolute = parse.absolute_episode is not None
-    if parse.segment_hint is not None:
-        return "segment"
     if has_aired and has_absolute:
         return "conflict"
+    if parse.segment_hint is not None:
+        return "segment"
     if has_aired:
         return "aired"
     if has_absolute:
@@ -406,11 +406,11 @@ def _protect_segment_identity(
 
     collapsed_keys: set[str] = set()
     for matches in by_episode.values():
-        segment_hints = {
-            parse_by_key[match.source_key].segment_hint.casefold()
-            for match in matches
-            if parse_by_key[match.source_key].segment_hint is not None
-        }
+        segment_hints: set[str] = set()
+        for match in matches:
+            segment_hint = parse_by_key[match.source_key].segment_hint
+            if segment_hint is not None:
+                segment_hints.add(segment_hint.casefold())
         if len(segment_hints) > 1:
             collapsed_keys.update(match.source_key for match in matches)
 
@@ -427,10 +427,13 @@ def _protect_segment_identity(
                 assignment,
                 status=AssignmentStatus.SUSPICIOUS,
                 episodes=(),
-                evidence=MatchEvidence(
-                    method="episode-catalog",
+                evidence=replace(
+                    assignment.evidence,
                     confidence=0.0,
-                    reasons=("distinct-segments-collapse-to-same-catalog-episode",),
+                    reasons=(
+                        *assignment.evidence.reasons,
+                        "distinct-segments-collapse-to-same-catalog-episode",
+                    ),
                 ),
             )
         )
@@ -450,7 +453,12 @@ def assign_episode_group(
     lookups. Callers must remove extra videos before invoking this layer.
     """
 
-    source_group = tuple(sources)
+    source_group = tuple(
+        sorted(
+            sources,
+            key=lambda source: (source.source_key.casefold(), source.source_key),
+        )
+    )
     if not source_group:
         raise ValueError("episode assignment requires at least one source")
     source_keys = [source.source_key for source in source_group]

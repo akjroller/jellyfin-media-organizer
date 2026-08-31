@@ -71,15 +71,13 @@ def test_aired_assignment_preserves_specials_and_multi_episode_order(
 
     assert result.status is AssignmentStatus.MATCHED
     assert len(result.assignments) == 2
-    assert [episode.season for episode in result.assignments[0].episodes] == [0]
+    by_source = {assignment.source_key: assignment for assignment in result.assignments}
+    assert [episode.season for episode in by_source["special.mkv"].episodes] == [0]
     assert [
-        episode.tvmaze_episode_id for episode in result.assignments[1].episodes
-    ] == [
-        1001,
-        1002,
-    ]
+        episode.tvmaze_episode_id for episode in by_source["double.mkv"].episodes
+    ] == [1001, 1002]
     assert len(getter.calls) == 1
-    assert "numbering-mode:aired" in result.assignments[1].evidence.reasons
+    assert "numbering-mode:aired" in by_source["double.mkv"].evidence.reasons
 
 
 def test_absolute_assignment_uses_regular_catalog_order_and_skips_specials(
