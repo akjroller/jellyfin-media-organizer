@@ -22,7 +22,8 @@ There is currently no `apply` command.
 
 ## Package layout
 
-- `cli.py` — command-line surface. Only the plan scaffold is exposed today.
+- `cli.py` — operational plan-only command surface and configuration precedence.
+- `planner.py` — end-to-end inventory, resolution, assignment, duplicate, companion, provenance, preflight, and audit orchestration.
 - `inventory.py` — authorized-root checks and deterministic read-only video inventory.
 - `filename_parser.py` — pure filename/path hint parsing without filesystem or provider access.
 - `extra_classifier.py` — deterministic pre-assignment extra classification with fail-closed ambiguity handling.
@@ -33,6 +34,9 @@ There is currently no `apply` command.
 - `overrides.py` — data-driven aliases, numbering modes, years, provider IDs, and title preferences.
 - `reconciliation.py` — one explained terminal inventory status per expected path.
 - `schema.py` — versioned manifest validation, serialization, and stable plan hashing.
+- `reports.py` — atomic immutable audit-bundle serialization from the canonical plan.
+- `preflight.py` — whole-plan safety validation before any future mutation stage.
+- `sidecars.py` — read-only adjacent companion discovery and destination derivation.
 - `tvmaze_cache.py` — persistent provider-cache primitives with explicit cache/network/error state.
 - `data/` — versioned JSON/TOML contracts and synthetic default override examples.
 
@@ -107,7 +111,7 @@ The destination layer performs no filesystem access, creates no directories, and
 
 The current implementation is Shows-only. A caller must authorize the exact Shows directory rather than a parent media-library root. Symlinks and junctions are not followed outside that boundary.
 
-Inventory is video-only for `.mkv`, `.mp4`, and `.avi`. Subtitles, artwork, metadata, Movies, and unrelated directories are not primary organizer inputs at this stage. Sidecar discovery is tracked separately and must remain non-destructive.
+Inventory is video-led for `.mkv`, `.mp4`, and `.avi`. Supported subtitle companions are discovered separately, joined to their video operation groups, and included in preflight. Artwork, metadata, Movies, and unrelated directories are not primary organizer inputs at this stage.
 
 Planning and mutation remain separate. Generating a plan never implies approval, and approval must never be inferred from a successful scan or test run.
 

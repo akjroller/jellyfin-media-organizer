@@ -1,14 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:mnamer:jellyfin-show-organizer:plan:v1",
+  "$id": "urn:jmo:jellyfin-show-organizer:plan:v1",
   "title": "Jellyfin Show Organizer Plan v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "overrides_version", "records"],
+  "required": ["schema_version", "overrides_version", "provenance", "records", "companions"],
   "properties": {
     "schema_version": {"const": 1},
     "overrides_version": {"type": "integer", "minimum": 1},
-    "records": {"type": "array", "items": {"$ref": "#/$defs/planRecord"}}
+    "provenance": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/provenance"}]},
+    "records": {"type": "array", "items": {"$ref": "#/$defs/planRecord"}},
+    "companions": {"type": "array", "items": {"$ref": "#/$defs/companion"}}
   },
   "$defs": {
     "fingerprint": {
@@ -105,10 +107,61 @@
         "evidence": {"type": "array", "items": {"type": "string"}}
       }
     },
+    "providerEpisode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tvmaze_episode_id", "season", "number", "title", "airdate"],
+      "properties": {
+        "tvmaze_episode_id": {"type": "integer", "minimum": 1},
+        "season": {"type": "integer", "minimum": 0},
+        "number": {"type": ["integer", "null"], "minimum": 0},
+        "title": {"type": "string", "minLength": 1},
+        "airdate": {"type": ["string", "null"]}
+      }
+    },
+    "cacheSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "kind", "request_key", "snapshot_id", "state"],
+      "properties": {
+        "provider": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "request_key": {"type": "string", "minLength": 1},
+        "snapshot_id": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+        "state": {"type": "string", "minLength": 1}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_version", "config_snapshot_id", "overrides_snapshot_id", "cache_snapshots"],
+      "properties": {
+        "tool_version": {"type": "string", "minLength": 1},
+        "config_snapshot_id": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+        "overrides_snapshot_id": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+        "cache_snapshots": {"type": "array", "items": {"$ref": "#/$defs/cacheSnapshot"}}
+      }
+    },
+    "companion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "extension", "fingerprint", "status", "reason", "source_video", "operation_group_id", "destination", "kind"],
+      "properties": {
+        "relative_path": {"type": "string", "minLength": 1},
+        "extension": {"type": "string", "pattern": "^\\."},
+        "fingerprint": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/fingerprint"}]},
+        "status": {"enum": ["associated", "duplicate", "ignored", "unresolved"]},
+        "reason": {"type": "string", "minLength": 1},
+        "source_video": {"type": ["string", "null"]},
+        "operation_group_id": {"type": ["string", "null"]},
+        "destination": {"type": ["string", "null"]},
+        "kind": {"type": ["string", "null"]}
+      }
+    },
     "planRecord": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source", "status", "parse", "show", "evidence", "destination", "extra", "duplicate"],
+      "required": ["source", "status", "parse", "show", "evidence", "destination", "extra", "duplicate", "operation_group_id", "provider_episodes", "reason"],
       "properties": {
         "source": {"$ref": "#/$defs/source"},
         "status": {"enum": ["matched", "extra", "duplicate", "suspicious", "unresolved"]},
@@ -117,7 +170,10 @@
         "evidence": {"$ref": "#/$defs/evidence"},
         "destination": {"type": ["string", "null"]},
         "extra": {"$ref": "#/$defs/extra"},
-        "duplicate": {"$ref": "#/$defs/duplicate"}
+        "duplicate": {"$ref": "#/$defs/duplicate"},
+        "operation_group_id": {"type": ["string", "null"]},
+        "provider_episodes": {"type": "array", "items": {"$ref": "#/$defs/providerEpisode"}},
+        "reason": {"type": ["string", "null"]}
       },
       "allOf": [
         {"if": {"properties": {"status": {"const": "matched"}}}, "then": {"properties": {"parse": {"type": "object"}, "show": {"type": "object"}, "evidence": {"type": "object"}, "destination": {"type": "string", "minLength": 1}}}},

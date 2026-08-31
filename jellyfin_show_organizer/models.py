@@ -28,6 +28,13 @@ class TerminalStatus(StrEnum):
     UNRESOLVED = "unresolved"
 
 
+class CompanionStatus(StrEnum):
+    ASSOCIATED = "associated"
+    DUPLICATE = "duplicate"
+    IGNORED = "ignored"
+    UNRESOLVED = "unresolved"
+
+
 @dataclass(frozen=True, slots=True)
 class SourceFingerprint:
     size: int
@@ -188,6 +195,113 @@ class DuplicateDecision:
 
 
 @dataclass(frozen=True, slots=True)
+class PlanEpisode:
+    tvmaze_episode_id: int
+    season: int
+    number: int | None
+    title: str
+    airdate: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.tvmaze_episode_id <= 0:
+            raise ValueError("plan episode tvmaze_episode_id must be positive")
+        if self.season < 0:
+            raise ValueError("plan episode season cannot be negative")
+        if self.number is not None and self.number < 0:
+            raise ValueError("plan episode number cannot be negative")
+        if not self.title:
+            raise ValueError("plan episode title cannot be empty")
+        if self.airdate is not None:
+            try:
+                normalized_date = date.fromisoformat(self.airdate).isoformat()
+            except ValueError as exc:
+                raise ValueError(
+                    "plan episode airdate must use a valid YYYY-MM-DD date"
+                ) from exc
+            if normalized_date != self.airdate:
+                raise ValueError("plan episode airdate must be canonical")
+
+
+@dataclass(frozen=True, slots=True)
+class CacheSnapshot:
+    provider: str
+    kind: str
+    request_key: str
+    snapshot_id: str
+    state: str
+
+    def __post_init__(self) -> None:
+        if not all((self.provider, self.kind, self.request_key, self.state)):
+            raise ValueError("cache snapshot identity fields cannot be empty")
+        if len(self.snapshot_id) != 64:
+            raise ValueError("cache snapshot_id must contain 64 hex characters")
+        try:
+            int(self.snapshot_id, 16)
+        except ValueError as exc:
+            raise ValueError(
+                "cache snapshot_id must contain 64 hex characters"
+            ) from exc
+
+
+@dataclass(frozen=True, slots=True)
+class PlanProvenance:
+    tool_version: str
+    config_snapshot_id: str
+    overrides_snapshot_id: str
+    cache_snapshots: tuple[CacheSnapshot, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.tool_version:
+            raise ValueError("plan provenance tool_version cannot be empty")
+        for field_name, value in (
+            ("config_snapshot_id", self.config_snapshot_id),
+            ("overrides_snapshot_id", self.overrides_snapshot_id),
+        ):
+            if len(value) != 64:
+                raise ValueError(f"{field_name} must contain 64 hex characters")
+            try:
+                int(value, 16)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{field_name} must contain 64 hex characters"
+                ) from exc
+
+
+@dataclass(frozen=True, slots=True)
+class CompanionPlanRecord:
+    relative_path: str
+    extension: str
+    fingerprint: SourceFingerprint | None
+    status: CompanionStatus
+    reason: str
+    source_video: str | None = None
+    operation_group_id: str | None = None
+    destination: str | None = None
+    kind: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.relative_path:
+            raise ValueError("companion relative_path cannot be empty")
+        if not self.extension.startswith("."):
+            raise ValueError("companion extension must start with '.'")
+        if not self.reason:
+            raise ValueError("companion reason cannot be empty")
+        if self.status is CompanionStatus.ASSOCIATED:
+            required = (
+                self.fingerprint,
+                self.source_video,
+                self.operation_group_id,
+                self.destination,
+                self.kind,
+            )
+            if any(value is None for value in required):
+                raise ValueError(
+                    "associated companions require fingerprint, video, group, "
+                    "destination, and kind"
+                )
+
+
+@dataclass(frozen=True, slots=True)
 class PlanRecord:
     source: SourceFile
     status: TerminalStatus
@@ -197,6 +311,9 @@ class PlanRecord:
     destination: str | None = None
     extra: ExtraDecision | None = None
     duplicate: DuplicateDecision | None = None
+    operation_group_id: str | None = None
+    provider_episodes: tuple[PlanEpisode, ...] = ()
+    reason: str | None = None
 
     def __post_init__(self) -> None:
         if self.status is TerminalStatus.MATCHED:
@@ -216,6 +333,8 @@ class OrganizerPlan:
     schema_version: int
     overrides_version: int
     records: tuple[PlanRecord, ...]
+    provenance: PlanProvenance | None = None
+    companions: tuple[CompanionPlanRecord, ...] = ()
 
     def __post_init__(self) -> None:
         if self.schema_version <= 0:

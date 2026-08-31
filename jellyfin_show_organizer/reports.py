@@ -2,14 +2,27 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import os
 import shutil
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import OrganizerPlan, PlanRecord, TerminalStatus
-from .schema import canonical_manifest_bytes, canonical_records, stable_plan_hash
+from .models import (
+    CompanionPlanRecord,
+    CompanionStatus,
+    OrganizerPlan,
+    PlanRecord,
+    TerminalStatus,
+)
+from .preflight import PreflightResult, summarize_preflight
+from .schema import (
+    canonical_companions,
+    canonical_manifest_bytes,
+    canonical_records,
+    stable_plan_hash,
+)
 
 CSV_HEADER = (
     "source",
@@ -26,6 +39,19 @@ CSV_HEADER = (
     "reasons",
     "extra_kind",
     "duplicate_winner",
+    "operation_group_id",
+    "provider_episode_ids",
+    "reason",
+)
+
+COMPANION_CSV_HEADER = (
+    "source",
+    "status",
+    "source_video",
+    "operation_group_id",
+    "destination",
+    "kind",
+    "reason",
 )
 
 
@@ -37,14 +63,29 @@ class AuditBundle:
     mapping_csv: bytes
     summary_txt: bytes
     plan_sha256: bytes
+    unresolved_csv: bytes
+    extras_csv: bytes
+    duplicates_csv: bytes
+    sidecars_csv: bytes
+    preflight_json: bytes | None = None
+    preflight_txt: bytes | None = None
 
     def files(self) -> tuple[tuple[str, bytes], ...]:
-        return (
+        files = [
             ("mapping.csv", self.mapping_csv),
+            ("unresolved.csv", self.unresolved_csv),
+            ("extras.csv", self.extras_csv),
+            ("duplicates.csv", self.duplicates_csv),
+            ("sidecars.csv", self.sidecars_csv),
             ("summary.txt", self.summary_txt),
             ("plan.sha256", self.plan_sha256),
-            ("plan.json", self.plan_json),
-        )
+        ]
+        if self.preflight_json is not None:
+            files.append(("preflight.json", self.preflight_json))
+        if self.preflight_txt is not None:
+            files.append(("preflight.txt", self.preflight_txt))
+        files.append(("plan.json", self.plan_json))
+        return tuple(files)
 
 
 def _record_row(record: PlanRecord) -> dict[str, str]:
@@ -82,21 +123,58 @@ def _record_row(record: PlanRecord) -> dict[str, str]:
             if record.duplicate is not None and record.duplicate.winner is not None
             else ""
         ),
+        "operation_group_id": record.operation_group_id or "",
+        "provider_episode_ids": "|".join(
+            str(episode.tvmaze_episode_id) for episode in record.provider_episodes
+        ),
+        "reason": record.reason or "",
     }
+
+
+def _render_record_csv(records: tuple[PlanRecord, ...]) -> bytes:
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=CSV_HEADER, lineterminator="\n")
+    writer.writeheader()
+    for record in records:
+        writer.writerow(_record_row(record))
+    return ("\ufeff" + stream.getvalue()).encode("utf-8")
+
+
+def _companion_row(record: CompanionPlanRecord) -> dict[str, str]:
+    return {
+        "source": record.relative_path,
+        "status": record.status.value,
+        "source_video": record.source_video or "",
+        "operation_group_id": record.operation_group_id or "",
+        "destination": record.destination or "",
+        "kind": record.kind or "",
+        "reason": record.reason,
+    }
+
+
+def render_sidecars_csv(plan: OrganizerPlan) -> bytes:
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        stream,
+        fieldnames=COMPANION_CSV_HEADER,
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for record in canonical_companions(plan):
+        writer.writerow(_companion_row(record))
+    return ("\ufeff" + stream.getvalue()).encode("utf-8")
 
 
 def render_mapping_csv(plan: OrganizerPlan) -> bytes:
     """Render a stable UTF-8-with-BOM spreadsheet-friendly mapping report."""
 
-    stream = io.StringIO(newline="")
-    writer = csv.DictWriter(stream, fieldnames=CSV_HEADER, lineterminator="\n")
-    writer.writeheader()
-    for record in canonical_records(plan):
-        writer.writerow(_record_row(record))
-    return ("\ufeff" + stream.getvalue()).encode("utf-8")
+    return _render_record_csv(canonical_records(plan))
 
 
-def render_summary(plan: OrganizerPlan) -> bytes:
+def render_summary(
+    plan: OrganizerPlan,
+    preflight: PreflightResult | None = None,
+) -> bytes:
     """Render a concise, path-free status summary tied to the exact plan hash."""
 
     counts = Counter(record.status for record in plan.records)
@@ -105,18 +183,58 @@ def render_summary(plan: OrganizerPlan) -> bytes:
         f"records={len(plan.records)}",
     ]
     lines.extend(f"{status.value}={counts[status]}" for status in TerminalStatus)
+    companion_counts = Counter(record.status for record in plan.companions)
+    lines.append(f"companions={len(plan.companions)}")
+    lines.extend(
+        f"companion_{status.value}={companion_counts[status]}"
+        for status in CompanionStatus
+    )
+    if preflight is not None:
+        lines.append(f"preflight_ready={str(preflight.ready).lower()}")
+        lines.append(f"preflight_findings={len(preflight.findings)}")
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
-def render_audit_bundle(plan: OrganizerPlan) -> AuditBundle:
+def render_audit_bundle(
+    plan: OrganizerPlan,
+    preflight: PreflightResult | None = None,
+) -> AuditBundle:
     """Render every public audit artifact from the same immutable plan object."""
 
     plan_hash = stable_plan_hash(plan)
+    records = canonical_records(plan)
+    unresolved = tuple(
+        record
+        for record in records
+        if record.status in {TerminalStatus.SUSPICIOUS, TerminalStatus.UNRESOLVED}
+    )
+    extras = tuple(record for record in records if record.extra is not None)
+    duplicates = tuple(record for record in records if record.duplicate is not None)
+    preflight_json = None
+    preflight_txt = None
+    if preflight is not None:
+        preflight_json = (
+            json.dumps(
+                preflight.to_dict(),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n"
+        )
+        preflight_txt = (summarize_preflight(preflight) + "\n").encode("utf-8")
+
     return AuditBundle(
         plan_json=canonical_manifest_bytes(plan) + b"\n",
-        mapping_csv=render_mapping_csv(plan),
-        summary_txt=render_summary(plan),
+        mapping_csv=_render_record_csv(records),
+        unresolved_csv=_render_record_csv(unresolved),
+        extras_csv=_render_record_csv(extras),
+        duplicates_csv=_render_record_csv(duplicates),
+        sidecars_csv=render_sidecars_csv(plan),
+        summary_txt=render_summary(plan, preflight),
         plan_sha256=f"{plan_hash}\n".encode("ascii"),
+        preflight_json=preflight_json,
+        preflight_txt=preflight_txt,
     )
 
 
@@ -129,7 +247,11 @@ def _atomic_write(path: Path, data: bytes) -> None:
     os.replace(temporary, path)
 
 
-def write_audit_bundle(output_dir: Path, plan: OrganizerPlan) -> AuditBundle:
+def write_audit_bundle(
+    output_dir: Path,
+    plan: OrganizerPlan,
+    preflight: PreflightResult | None = None,
+) -> AuditBundle:
     """Publish an audit bundle without leaving a half-valid plan on failure.
 
     The output directory is created with ``exist_ok=False``. Report files are
@@ -137,12 +259,12 @@ def write_audit_bundle(output_dir: Path, plan: OrganizerPlan) -> AuditBundle:
     marker. Any ordinary exception removes the newly created output directory.
     """
 
-    bundle = render_audit_bundle(plan)
+    bundle = render_audit_bundle(plan, preflight)
     output_dir.mkdir(parents=False, exist_ok=False)
     try:
         for name, data in bundle.files():
             _atomic_write(output_dir / name, data)
-    except BaseException:
+    except Exception:
         shutil.rmtree(output_dir, ignore_errors=True)
         raise
     return bundle

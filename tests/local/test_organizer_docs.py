@@ -42,14 +42,15 @@ def test_runbook_separates_operational_stages_and_has_no_apply_command():
     assert "There is intentionally no organizer `apply` command" in text
 
 
-def test_scaffold_plan_is_documented_as_nonzero_and_non_producing():
+def test_operational_plan_is_documented_as_non_mutating_and_auditable():
     readme = README.read_text(encoding="utf-8")
     runbook = RUNBOOK.read_text(encoding="utf-8")
 
     for text in (readme, runbook):
-        assert "exits nonzero" in text
-        assert "planning is not implemented" in text
-        assert "destination directory" in text
+        assert "jmo plan" in text
+        assert "plan.json" in text
+        assert "preflight" in text
+        assert "never moves" in text
 
 
 def test_runbook_documents_current_non_mutating_surfaces():
