@@ -9,9 +9,10 @@ _LEADING_TAGS = re.compile(r"^(?:\[[^\]]+\][ ._-]*)+")
 _TRAILING_YEAR = re.compile(r"(?:^|[\s(])(?P<year>(?:18|19|20|21)\d{2})\)?$")
 _TVMAZE_ID = re.compile(r"(?i)(?:\[?tvmaze(?:[ ._-]?id)?[ ._-]?)(?P<id>\d+)\]?")
 _SXE = re.compile(
-    r"(?i)S(?P<season>\d{1,2})[ ._-]*E(?P<episode>\d{1,3})"
+    r"(?i)S(?P<season>\d{1,2})[ ._-]*E(?P<episode>\d{1,3})(?!\d)"
     r"(?P<segment>[A-Za-z](?!\d))?"
-    r"(?P<tail>(?:(?:[ ._-]*E\d{1,3})|(?:[ ._-]*-[ ._-]*E?\d{1,3}))*)"
+    r"(?P<tail>(?:(?:[ ._-]*E\d{1,3}(?!\d))|"
+    r"(?:[ ._-]*-[ ._-]*E?\d{1,3}(?!\d)))*)"
 )
 _X_NOTATION = re.compile(r"(?i)(?<!\d)(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?!\d)")
 _EPISODE_WORD = re.compile(
@@ -101,11 +102,7 @@ def _title_hint(stem: str, start: int) -> str | None:
 
     suffix = _TECH_SUFFIX.search(value)
     checksum = _CHECKSUM.search(value)
-    cut_points = [
-        match.start()
-        for match in (suffix, checksum)
-        if match is not None
-    ]
+    cut_points = [match.start() for match in (suffix, checksum) if match is not None]
     if cut_points:
         value = value[: min(cut_points)].strip(" -_.[]()")
     return value or None
