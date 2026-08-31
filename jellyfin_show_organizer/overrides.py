@@ -8,7 +8,7 @@ import unicodedata
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from .models import NumberingMode, TitlePreference
 
@@ -22,7 +22,7 @@ def _normalize_identity(value: str) -> str:
     return " ".join(normalized.split())
 
 
-def _is_plain_int(value: object) -> bool:
+def _is_plain_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
