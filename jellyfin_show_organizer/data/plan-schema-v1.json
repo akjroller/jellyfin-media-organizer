@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:mnamer:jellyfin-show-organizer:plan:v1",
-  "title": "Jellyfin Show Organizer Plan v1",
+  "$id": "urn:jmo:jellyfin-media-organizer:plan:v1",
+  "title": "Jellyfin Media Organizer Plan v1",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "overrides_version", "records"],
@@ -11,6 +11,18 @@
     "records": {"type": "array", "items": {"$ref": "#/$defs/planRecord"}}
   },
   "$defs": {
+    "providerIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "value"],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "value": {"type": "string", "minLength": 1}
+      }
+    },
     "fingerprint": {
       "type": "object",
       "additionalProperties": false,
@@ -34,7 +46,17 @@
     "parse": {
       "type": ["object", "null"],
       "additionalProperties": false,
-      "required": ["series_hint", "season", "episodes", "absolute_episode", "segment_hint", "year", "embedded_tvmaze_id", "title_hint"],
+      "required": [
+        "series_hint",
+        "season",
+        "episodes",
+        "absolute_episode",
+        "segment_hint",
+        "year",
+        "embedded_tvmaze_id",
+        "title_hint",
+        "embedded_provider_identity"
+      ],
       "properties": {
         "series_hint": {"type": ["string", "null"]},
         "season": {"type": ["integer", "null"], "minimum": 0},
@@ -43,27 +65,41 @@
         "segment_hint": {"type": ["string", "null"]},
         "year": {"type": ["integer", "null"], "minimum": 1800},
         "embedded_tvmaze_id": {"type": ["integer", "null"], "minimum": 1},
-        "title_hint": {"type": ["string", "null"]}
+        "title_hint": {"type": ["string", "null"]},
+        "embedded_provider_identity": {
+          "anyOf": [
+            {"$ref": "#/$defs/providerIdentity"},
+            {"type": "null"}
+          ]
+        }
       }
     },
     "show": {
       "type": ["object", "null"],
       "additionalProperties": false,
-      "required": ["source_key", "tvmaze_id", "title", "year", "numbering_mode"],
+      "required": [
+        "source_key",
+        "provider_identity",
+        "title",
+        "year",
+        "numbering_mode"
+      ],
       "properties": {
         "source_key": {"type": "string", "minLength": 1},
-        "tvmaze_id": {"type": "integer", "minimum": 1},
+        "provider_identity": {"$ref": "#/$defs/providerIdentity"},
         "title": {"type": "string", "minLength": 1},
         "year": {"type": ["integer", "null"], "minimum": 1800},
-        "numbering_mode": {"enum": ["aired", "absolute", "parenthesized-absolute", "segment-title"]}
+        "numbering_mode": {
+          "enum": ["aired", "absolute", "parenthesized-absolute", "segment-title"]
+        }
       }
     },
     "candidateEvidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tvmaze_id", "title", "score", "reasons"],
+      "required": ["provider_identity", "title", "score", "reasons"],
       "properties": {
-        "tvmaze_id": {"type": "integer", "minimum": 1},
+        "provider_identity": {"$ref": "#/$defs/providerIdentity"},
         "title": {"type": "string"},
         "score": {"type": "number", "minimum": 0, "maximum": 1},
         "reasons": {"type": "array", "items": {"type": "string"}}
@@ -117,9 +153,25 @@
         "duplicate": {"$ref": "#/$defs/duplicate"}
       },
       "allOf": [
-        {"if": {"properties": {"status": {"const": "matched"}}}, "then": {"properties": {"parse": {"type": "object"}, "show": {"type": "object"}, "evidence": {"type": "object"}, "destination": {"type": "string", "minLength": 1}}}},
-        {"if": {"properties": {"status": {"const": "extra"}}}, "then": {"properties": {"extra": {"type": "object"}}}},
-        {"if": {"properties": {"status": {"const": "duplicate"}}}, "then": {"properties": {"duplicate": {"type": "object"}}}}
+        {
+          "if": {"properties": {"status": {"const": "matched"}}},
+          "then": {
+            "properties": {
+              "parse": {"type": "object"},
+              "show": {"type": "object"},
+              "evidence": {"type": "object"},
+              "destination": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "extra"}}},
+          "then": {"properties": {"extra": {"type": "object"}}}
+        },
+        {
+          "if": {"properties": {"status": {"const": "duplicate"}}},
+          "then": {"properties": {"duplicate": {"type": "object"}}}
+        }
       ]
     }
   }
