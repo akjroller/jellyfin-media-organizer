@@ -393,6 +393,55 @@ def _group_status(assignments: Iterable[SourceEpisodeAssignment]) -> AssignmentS
     return AssignmentStatus.UNRESOLVED
 
 
+def _protect_provider_episode_identity(
+    assignments: tuple[SourceEpisodeAssignment, ...],
+) -> tuple[SourceEpisodeAssignment, ...]:
+    by_episode: dict[int, list[SourceEpisodeAssignment]] = defaultdict(list)
+    for assignment in assignments:
+        if assignment.status is not AssignmentStatus.MATCHED:
+            continue
+        for episode in assignment.episodes:
+            by_episode[episode.tvmaze_episode_id].append(assignment)
+
+    reasons_by_source: dict[str, list[str]] = defaultdict(list)
+    for episode_id, matches in sorted(by_episode.items()):
+        source_keys = sorted(
+            {match.source_key for match in matches},
+            key=lambda source_key: (source_key.casefold(), source_key),
+        )
+        if len(source_keys) <= 1:
+            continue
+        reason = f"duplicate-provider-episode-assignment:tvmaze-episode:{episode_id}"
+        for source_key in source_keys:
+            reasons_by_source[source_key].append(reason)
+
+    if not reasons_by_source:
+        return assignments
+
+    protected: list[SourceEpisodeAssignment] = []
+    for assignment in assignments:
+        duplicate_reasons = reasons_by_source.get(assignment.source_key)
+        if not duplicate_reasons:
+            protected.append(assignment)
+            continue
+        protected.append(
+            replace(
+                assignment,
+                status=AssignmentStatus.SUSPICIOUS,
+                episodes=(),
+                evidence=replace(
+                    assignment.evidence,
+                    confidence=0.0,
+                    reasons=(
+                        *assignment.evidence.reasons,
+                        *duplicate_reasons,
+                    ),
+                ),
+            )
+        )
+    return tuple(protected)
+
+
 def _protect_segment_identity(
     sources: tuple[SourceEpisodeInput, ...],
     assignments: tuple[SourceEpisodeAssignment, ...],
@@ -589,6 +638,8 @@ def assign_episode_group(
     )
     if show.numbering_mode is NumberingMode.SEGMENT_TITLE:
         assignments = _protect_segment_identity(source_group, assignments)
+    else:
+        assignments = _protect_provider_episode_identity(assignments)
 
     return EpisodeGroupAssignment(
         show=show,
