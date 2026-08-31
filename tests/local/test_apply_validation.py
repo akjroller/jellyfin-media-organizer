@@ -26,7 +26,9 @@ pytestmark = pytest.mark.local
 def _fingerprint(path: Path, *, with_hash: bool = False) -> SourceFingerprint:
     stat = path.stat()
     sha256 = hashlib.sha256(path.read_bytes()).hexdigest() if with_hash else None
-    return SourceFingerprint(size=stat.st_size, mtime_ns=stat.st_mtime_ns, sha256=sha256)
+    return SourceFingerprint(
+        size=stat.st_size, mtime_ns=stat.st_mtime_ns, sha256=sha256
+    )
 
 
 def _member(
@@ -52,7 +54,9 @@ def _roots(tmp_path: Path) -> tuple[Path, Path, Path]:
     return source_root, destination_root, source
 
 
-def test_revalidation_accepts_matching_source_without_creating_destinations(tmp_path: Path):
+def test_revalidation_accepts_matching_source_without_creating_destinations(
+    tmp_path: Path,
+):
     source_root, destination_root, source = _roots(tmp_path)
     member = _member(
         "Example Series/episode.mkv",
@@ -68,7 +72,9 @@ def test_revalidation_accepts_matching_source_without_creating_destinations(tmp_
 
     assert validation.plan_sha256 == contract.plan_sha256
     assert len(validation.observations) == 1
-    assert validation.observations[0].source_relative_path == member.source_relative_path
+    assert (
+        validation.observations[0].source_relative_path == member.source_relative_path
+    )
     assert not (destination_root / "Example Series (2024)").exists()
 
 
@@ -100,7 +106,9 @@ def test_revalidation_rejects_destination_race(tmp_path: Path):
     assert source.exists()
 
 
-def test_sha256_detects_content_change_even_when_size_and_mtime_are_restored(tmp_path: Path):
+def test_sha256_detects_content_change_even_when_size_and_mtime_are_restored(
+    tmp_path: Path,
+):
     source_root, destination_root, source = _roots(tmp_path)
     source.write_bytes(b"abc")
     planned = _fingerprint(source, with_hash=True)
