@@ -131,13 +131,11 @@ def test_equal_catalog_compatibility_remains_suspicious(tmp_path: Path) -> None:
 
     assert resolution.status is ResolutionStatus.SUSPICIOUS
     assert resolution.show is None
-    assert (
-        "catalog-tiebreak:no-unique-aired-coordinate-match"
-        in resolution.evidence.reasons
-    )
+    reasons = resolution.evidence.reasons
+    assert "catalog-tiebreak:no-unique-aired-coordinate-match" in reasons
 
 
-def test_empty_or_malformed_candidate_catalog_remains_suspicious(tmp_path: Path) -> None:
+def test_invalid_candidate_catalog_remains_suspicious(tmp_path: Path) -> None:
     malformed = [
         {
             "id": 100101,
@@ -162,10 +160,8 @@ def test_empty_or_malformed_candidate_catalog_remains_suspicious(tmp_path: Path)
 
         assert resolution.status is ResolutionStatus.SUSPICIOUS
         assert resolution.show is None
-        assert (
-            "catalog-tiebreak:incomplete-candidate-catalogs"
-            in resolution.evidence.reasons
-        )
+        reasons = resolution.evidence.reasons
+        assert "catalog-tiebreak:incomplete-candidate-catalogs" in reasons
 
 
 def test_provider_failure_during_catalog_tiebreak_remains_suspicious(
@@ -210,10 +206,8 @@ def test_conflicting_catalog_coordinates_do_not_create_a_winner(tmp_path: Path) 
 
     assert resolution.status is ResolutionStatus.SUSPICIOUS
     assert resolution.show is None
-    assert (
-        "catalog-tiebreak:no-unique-aired-coordinate-match"
-        in resolution.evidence.reasons
-    )
+    reasons = resolution.evidence.reasons
+    assert "catalog-tiebreak:no-unique-aired-coordinate-match" in reasons
 
 
 def test_catalog_tiebreak_replays_from_warm_cache_without_http(tmp_path: Path) -> None:
