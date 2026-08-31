@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pathlib import Path
 
 
@@ -16,7 +14,7 @@ def test_installable_metadata_uses_standalone_project_identity() -> None:
     text = _project_text()
 
     assert 'name = "jellyfin-media-organizer"' in text
-    assert 'dependencies = []' in text
+    assert "dependencies = []" in text
     assert f'Homepage = "{REPOSITORY_URL}"' in text
     assert f'Repository = "{REPOSITORY_URL}"' in text
     assert f'Issues = "{REPOSITORY_URL}/issues"' in text
