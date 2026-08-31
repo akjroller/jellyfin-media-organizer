@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -33,6 +35,55 @@ class CompanionStatus(StrEnum):
     DUPLICATE = "duplicate"
     IGNORED = "ignored"
     UNRESOLVED = "unresolved"
+
+
+_PROVIDER_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderIdentity:
+    """Namespaced identity for one metadata-provider object."""
+
+    provider: str
+    value: str
+
+    def __post_init__(self) -> None:
+        provider = self.normalize_provider(self.provider)
+        value = unicodedata.normalize("NFKC", str(self.value)).strip()
+        if not provider or _PROVIDER_NAME.fullmatch(provider) is None:
+            raise ValueError("provider name must be a normalized identifier")
+        if not value:
+            raise ValueError("provider identity value cannot be empty")
+        object.__setattr__(self, "provider", provider)
+        object.__setattr__(self, "value", value)
+
+    @staticmethod
+    def normalize_provider(provider: str) -> str:
+        return unicodedata.normalize("NFKC", provider).strip().casefold()
+
+    @classmethod
+    def tvmaze(cls, value: int) -> ProviderIdentity:
+        if value <= 0:
+            raise ValueError("TVMaze identity must be positive")
+        return cls("tvmaze", str(value))
+
+    @property
+    def key(self) -> str:
+        return f"{self.provider}:{self.value}"
+
+    def require_positive_int(self, provider: str) -> int:
+        expected = self.normalize_provider(provider)
+        if self.provider != expected:
+            raise ValueError(
+                f"provider identity is {self.provider!r}, expected {expected!r}"
+            )
+        try:
+            value = int(self.value)
+        except ValueError as exc:
+            raise ValueError("provider identity must be a positive integer") from exc
+        if value <= 0 or str(value) != self.value:
+            raise ValueError("provider identity must be a canonical positive integer")
+        return value
 
 
 @dataclass(frozen=True, slots=True)
