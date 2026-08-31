@@ -54,8 +54,18 @@ jobs:
               if old not in text:
                   raise SystemExit(f"expected review target not found: {old.splitlines()[0]}")
               text = text.replace(old, new, 1)
-
           path.write_text(text, encoding="utf-8")
+
+          test_path = Path("tests/local/test_episode_assignment.py")
+          test_text = test_path.read_text(encoding="utf-8")
+          old_assertions = '''    assert result.status is AssignmentStatus.MATCHED\n    assert len(result.assignments) == 2\n    assert [episode.season for episode in result.assignments[0].episodes] == [0]\n    assert [episode.tvmaze_episode_id for episode in result.assignments[1].episodes] == [\n        1001,\n        1002,\n    ]\n    assert len(getter.calls) == 1\n    assert "numbering-mode:aired" in result.assignments[1].evidence.reasons\n'''
+          new_assertions = '''    assert result.status is AssignmentStatus.MATCHED\n    assert len(result.assignments) == 2\n    by_source = {assignment.source_key: assignment for assignment in result.assignments}\n    assert [episode.season for episode in by_source["special.mkv"].episodes] == [0]\n    assert [\n        episode.tvmaze_episode_id for episode in by_source["double.mkv"].episodes\n    ] == [1001, 1002]\n    assert len(getter.calls) == 1\n    assert "numbering-mode:aired" in by_source["double.mkv"].evidence.reasons\n'''
+          if old_assertions not in test_text:
+              raise SystemExit("expected order-sensitive assertion block not found")
+          test_path.write_text(
+              test_text.replace(old_assertions, new_assertions, 1),
+              encoding="utf-8",
+          )
           PY
 
       - name: Install development tools
