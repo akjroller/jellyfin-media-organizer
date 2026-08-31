@@ -7,6 +7,11 @@ license = { file = "LICENSE.txt" }
 requires-python = ">=3.12"
 dependencies = []
 
+[project.urls]
+Homepage = "https://github.com/akjroller/jellyfin-media-organizer"
+Repository = "https://github.com/akjroller/jellyfin-media-organizer"
+Issues = "https://github.com/akjroller/jellyfin-media-organizer/issues"
+
 [project.scripts]
 jmo = "jellyfin_show_organizer.cli:main"
 organizer = "jellyfin_show_organizer.cli:main"
