@@ -21,10 +21,11 @@ dependencies = [
 
 
 [tool.setuptools]
-packages = ["mnamer"]
+packages = ["mnamer", "mnamer.organizer"]
 
 [tool.setuptools.package-data]
 "*" = ["LICENSE.txt", "README.md", "py.typed"]
+"mnamer.organizer" = ["show-overrides.v1.json"]
 
 [build-system]
 requires = ["setuptools >= 61.0.0", "setuptools_scm[toml] >= 6.2", "wheel"]

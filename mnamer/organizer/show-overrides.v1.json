@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "shows": [
+    {
+      "canonical_title": "Frieren: Beyond Journey's End",
+      "aliases": [
+        "Sousou no Frieren",
+        "Frieren Beyond Journeys End"
+      ],
+      "tvmaze_id": 69956,
+      "year": 2023,
+      "numbering_mode": "aired",
+      "title_preference": "number-first"
+    },
+    {
+      "canonical_title": "Fairy Tail",
+      "aliases": [],
+      "tvmaze_id": 2069,
+      "year": 2009,
+      "numbering_mode": "absolute",
+      "title_preference": "number-first"
+    },
+    {
+      "canonical_title": "Naruto",
+      "aliases": [],
+      "tvmaze_id": null,
+      "year": 2002,
+      "numbering_mode": "parenthesized-absolute",
+      "title_preference": "number-first"
+    },
+    {
+      "canonical_title": "SpongeBob SquarePants",
+      "aliases": [
+        "Sponge Bob"
+      ],
+      "tvmaze_id": null,
+      "year": 1999,
+      "numbering_mode": "segment-title",
+      "title_preference": "title-first"
+    },
+    {
+      "canonical_title": "Avatar: The Last Airbender",
+      "aliases": [
+        "Avatar The Last Airbender"
+      ],
+      "tvmaze_id": null,
+      "year": 2005,
+      "numbering_mode": "aired",
+      "title_preference": "number-first"
+    },
+    {
+      "canonical_title": "Star Trek: The Next Generation",
+      "aliases": [
+        "Star Trek TNG"
+      ],
+      "tvmaze_id": null,
+      "year": 1987,
+      "numbering_mode": "aired",
+      "title_preference": "number-first"
+    }
+  ]
+}

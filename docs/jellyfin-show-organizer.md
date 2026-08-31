@@ -46,3 +46,19 @@ Sanitized fixtures should retain only the filename grammar required for a test.
 The existing `mnamer` CLI and its tests remain intact. The organizer will use a
 separate package boundary and command entry point so upstream updates can still
 be compared and integrated deliberately.
+
+## Organizer data contracts
+
+`mnamer.organizer.models` contains immutable, typed boundaries for discovered
+videos, local parse results, canonical TVMaze shows, explainable match evidence,
+extras, duplicate proposals, plan rows, and source fingerprints. Plans use
+schema version 1 and carry a SHA-256 derived from canonical JSON. Array ordering
+which has no semantic meaning is normalized before hashing, so identical plan
+content produces the same manifest and hash on repeated runs.
+
+`mnamer/organizer/show-overrides.v1.json` is the single visible home for aliases
+and show-specific policies. Each record can provide a canonical title, aliases,
+TVMaze ID, release year, numbering mode, and episode-title preference. Supported
+numbering modes are `aired`, `absolute`, `parenthesized-absolute`, and
+`segment-title`. Parser and matcher implementations must consume this catalog
+instead of embedding show names or provider IDs in code.
