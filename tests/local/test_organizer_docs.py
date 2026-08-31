@@ -14,9 +14,7 @@ def test_readme_documents_source_install_without_claiming_registry_release():
 
     assert "## Install from source" in text
     assert "JMO is not documented as a package-registry install yet" in text
-    assert (
-        "git clone https://github.com/akjroller/jellyfin-media-organizer.git" in text
-    )
+    assert "git clone https://github.com/akjroller/jellyfin-media-organizer.git" in text
     assert "python3 -m venv .venv" in text
     assert r".\.venv\Scripts\python.exe -m pip install ." in text
 
@@ -43,9 +41,7 @@ def test_runbook_makes_shows_only_boundary_explicit():
 
     assert "**Shows-only**" in text
     assert "Movies/      <- out of scope; never authorize or inspect" in text
-    assert "Do not point it at a Movies directory" in README.read_text(
-        encoding="utf-8"
-    )
+    assert "Do not point it at a Movies directory" in README.read_text(encoding="utf-8")
 
 
 def test_docs_do_not_pretend_plan_root_or_apply_are_implemented():
