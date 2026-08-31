@@ -12,9 +12,10 @@ The current project boundary is deliberately narrow:
 4. resolve each source show to one canonical provider identity;
 5. resolve catalog/provider evidence through explicit data and cache layers;
 6. classify explicit video extras before episode assignment;
-7. build versioned plan records;
-8. reconcile every expected source into an explained terminal status;
-9. audit the completed plan before any future apply implementation.
+7. assign episode identities from one canonical cached catalog per source-show group;
+8. build versioned plan records;
+9. reconcile every expected source into an explained terminal status;
+10. audit the completed plan before any future apply implementation.
 
 There is currently no `apply` command.
 
@@ -25,6 +26,7 @@ There is currently no `apply` command.
 - `filename_parser.py` — pure filename/path hint parsing without filesystem or provider access.
 - `extra_classifier.py` — deterministic pre-assignment extra classification with fail-closed ambiguity handling.
 - `show_resolver.py` — conservative show-level canonical TVMaze resolution with explicit ambiguity states.
+- `episode_assignment.py` — deterministic show-level episode mapping from one normalized cached provider catalog using explicit numbering policies.
 - `models.py` — typed cross-stage contracts.
 - `overrides.py` — data-driven aliases, numbering modes, years, provider IDs, and title preferences.
 - `reconciliation.py` — one explained terminal inventory status per expected path.
@@ -55,6 +57,20 @@ Explicit video extras are isolated before provider-backed episode assignment. Th
 The classifier uses explicit filename markers and recognized immediate extra-folder names. Strong explicit extra markers may classify a file even when its name also contains unrelated numeric noise. Strong episode evidence combined with explicit extra evidence is not guessed in either direction; it becomes suspicious for review. Conflicting extra kinds are also suspicious. Ambiguous words such as `bonus`, `special`, or `ova` remain unresolved unless later pipeline evidence can handle them safely.
 
 Classification returns its parsed filename evidence, normalized extra decision when one exists, and stable textual reasons so later plan/report stages can preserve why the decision was made. The classifier performs no filesystem or network access.
+
+## Episode assignment contract
+
+Episode assignment runs only after a source-show group has one canonical provider identity and explicit video extras have been removed from ordinary episode matching. The whole group consumes one cached episode catalog; assignment never performs an independent show search or provider lookup per source file.
+
+Supported numbering policies are explicit:
+
+- `aired` maps exact season/episode coordinates, including season zero without rewriting specials into season one;
+- `absolute` and `parenthesized-absolute` map through deterministic regular-episode catalog order while leaving specials outside that sequence;
+- `segment-title` preserves segment hints and requires exact normalized catalog-title evidence.
+
+Multi-episode sources preserve every requested episode in deterministic source order and remain one source assignment. A missing member prevents a partial match. Mixed numbering evidence, configured-policy conflicts, conflicting provider identities, malformed or duplicate catalog entries, and distinct segments that collapse to the same provider episode fail closed as suspicious or unresolved with stable reasons.
+
+Assignment evidence records the active numbering policy, cached catalog request identity, and provider episode mappings so later immutable plans and audit reports can explain the decision without rerunning provider discovery.
 
 ## Safety boundary
 
