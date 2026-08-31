@@ -143,12 +143,14 @@ def test_unique_coordinate_compatible_candidate_breaks_exact_title_tie() -> None
         candidate.provider_identity: candidate
         for candidate in resolution.evidence.candidates
     }
-    assert "catalog-missing:S08E12" in by_identity[
-        ProviderIdentity("fixture", "alpha")
-    ].reasons
-    assert "catalog-compatible:true:aired" in by_identity[
-        ProviderIdentity("fixture", "beta")
-    ].reasons
+    assert (
+        "catalog-missing:S08E12"
+        in by_identity[ProviderIdentity("fixture", "alpha")].reasons
+    )
+    assert (
+        "catalog-compatible:true:aired"
+        in by_identity[ProviderIdentity("fixture", "beta")].reasons
+    )
 
 
 def test_equal_catalog_compatibility_remains_suspicious() -> None:
@@ -168,8 +170,7 @@ def test_equal_catalog_compatibility_remains_suspicious() -> None:
     assert resolution.status is ResolutionStatus.SUSPICIOUS
     assert resolution.show is None
     assert (
-        "catalog-tiebreak:no-unique-compatible-candidate"
-        in resolution.evidence.reasons
+        "catalog-tiebreak:no-unique-compatible-candidate" in resolution.evidence.reasons
     )
 
 
@@ -190,8 +191,7 @@ def test_missing_coordinates_for_every_candidate_remain_suspicious() -> None:
     assert resolution.status is ResolutionStatus.SUSPICIOUS
     assert resolution.show is None
     assert (
-        "catalog-tiebreak:no-unique-compatible-candidate"
-        in resolution.evidence.reasons
+        "catalog-tiebreak:no-unique-compatible-candidate" in resolution.evidence.reasons
     )
 
 
