@@ -65,6 +65,36 @@ EPISODES = {
             "type": "regular",
         }
     ],
+    404: [
+        {
+            "id": 4001,
+            "season": 1,
+            "number": 1,
+            "name": "One",
+            "airdate": "2024-04-01",
+            "type": "regular",
+        }
+    ],
+    405: [
+        {
+            "id": 5001,
+            "season": 1,
+            "number": 1,
+            "name": "Collision",
+            "airdate": "2024-05-01",
+            "type": "regular",
+        }
+    ],
+    406: [
+        {
+            "id": 6001,
+            "season": 1,
+            "number": 1,
+            "name": "Collision",
+            "airdate": "2024-05-01",
+            "type": "regular",
+        }
+    ],
 }
 
 SEARCHES = {
@@ -159,6 +189,22 @@ def _build_stress_library(tmp_path: Path) -> tuple[Path, Path, Path]:
         shows / "Unmatched Harbor" / "Unmatched Harbor S01E01 Pilot.mkv",
         b"unmatched-show",
     )
+    _touch(
+        shows / "Duplicate Guard" / "Duplicate Guard S01E01 Release A.mkv",
+        b"duplicate-a",
+    )
+    _touch(
+        shows / "Duplicate Guard" / "Duplicate Guard S01E01 Release B.mkv",
+        b"duplicate-b",
+    )
+    _touch(
+        shows / "Collision A" / "Collision Show S01E01 [tvmaze id 405].mkv",
+        b"collision-a",
+    )
+    _touch(
+        shows / "Collision B" / "Collision Show S01E01 [tvmaze id 406].mkv",
+        b"collision-b",
+    )
 
     overrides = tmp_path / "overrides.toml"
     overrides.write_text(
@@ -187,6 +233,13 @@ year = 2024
 numbering_mode = "date"
 title_preference = "override"
 preferred_title = "Date Desk"
+
+[[shows]]
+key = "Duplicate Guard"
+tvmaze_id = 404
+numbering_mode = "aired"
+title_preference = "override"
+preferred_title = "Duplicate Guard"
 """,
         encoding="utf-8",
     )
@@ -239,10 +292,10 @@ def test_synthetic_release_candidate_accounts_for_every_video_and_replays_offlin
     )
 
     counts = Counter(record.status for record in first.plan.records)
-    assert len(first.plan.records) == 8
+    assert len(first.plan.records) == 12
     assert counts[TerminalStatus.MATCHED] == 4
     assert counts[TerminalStatus.EXTRA] == 1
-    assert counts[TerminalStatus.SUSPICIOUS] + counts[TerminalStatus.UNRESOLVED] == 3
+    assert counts[TerminalStatus.SUSPICIOUS] + counts[TerminalStatus.UNRESOLVED] == 7
     blocked = {TerminalStatus.SUSPICIOUS, TerminalStatus.UNRESOLVED}
     status_by_source = {
         record.source.relative_path: record.status for record in first.plan.records
@@ -256,10 +309,26 @@ def test_synthetic_release_candidate_accounts_for_every_video_and_replays_offlin
         status_by_source["Unmatched Harbor/Unmatched Harbor S01E01 Pilot.mkv"]
         in blocked
     )
+    assert (
+        status_by_source["Duplicate Guard/Duplicate Guard S01E01 Release A.mkv"]
+        in blocked
+    )
+    assert (
+        status_by_source["Duplicate Guard/Duplicate Guard S01E01 Release B.mkv"]
+        in blocked
+    )
+    assert (
+        status_by_source["Collision A/Collision Show S01E01 [tvmaze id 405].mkv"]
+        in blocked
+    )
+    assert (
+        status_by_source["Collision B/Collision Show S01E01 [tvmaze id 406].mkv"]
+        in blocked
+    )
     assert all(record.status in TerminalStatus for record in first.plan.records)
     assert not first.preflight.ready
     assert first.provider_failure
-    assert len(getter.calls) == 5
+    assert len(getter.calls) == 8
 
     companion_counts = Counter(record.status for record in first.plan.companions)
     assert companion_counts == Counter(

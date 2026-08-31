@@ -102,6 +102,7 @@ Repository examples and tests use synthetic paths and fixtures. Real library inv
 - [Troubleshooting safely](docs/troubleshooting.md)
 - [Contributor workflow](docs/contributing.md)
 - [Architecture](docs/jellyfin-show-organizer-architecture.md)
+- [Plan-only release-candidate validation](docs/release-candidate-validation.md)
 - [Local overrides](docs/local-overrides.md)
 - [Provider cache and offline policy](docs/provider-cache-policy.md)
 - [Numbering policies](docs/numbering-policies.md)

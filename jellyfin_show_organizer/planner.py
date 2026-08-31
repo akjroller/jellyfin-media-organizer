@@ -69,6 +69,7 @@ from .sidecars import (
 from .tvmaze_cache import (
     CacheRecord,
     CacheState,
+    Clock,
     JsonGetter,
     TvmazeCatalogCache,
 )
@@ -135,8 +136,18 @@ class PlanningOutcome:
 
 
 class TrackingTvmazeCatalogCache(TvmazeCatalogCache):
-    def __init__(self, root: Path, *, offline: bool, refresh: bool) -> None:
-        super().__init__(root, offline=offline, refresh=refresh)
+    def __init__(
+        self,
+        root: Path,
+        *,
+        offline: bool,
+        refresh: bool,
+        clock: Clock | None = None,
+    ) -> None:
+        if clock is None:
+            super().__init__(root, offline=offline, refresh=refresh)
+        else:
+            super().__init__(root, offline=offline, refresh=refresh, clock=clock)
         self.records: dict[tuple[str, str], CacheRecord] = {}
 
     def _track(self, record: CacheRecord) -> CacheRecord:
@@ -753,6 +764,8 @@ def _external_state_path(path: Path, roots: tuple[Path, ...], label: str) -> Pat
 def execute_plan(
     config: PlanningConfig,
     getter: JsonGetter = http_json_getter,
+    *,
+    clock: Clock | None = None,
 ) -> PlanningOutcome:
     source_root = authorize_shows_root(config.shows_root)
     destination_root = authorize_destination_root(config.destination_root)
@@ -769,6 +782,7 @@ def execute_plan(
         cache_dir,
         offline=config.offline,
         refresh=config.refresh,
+        clock=clock,
     )
     plan = _build_plan(source_root, config, overrides, cache, getter)
     plan_hash = stable_plan_hash(plan)

@@ -16,7 +16,9 @@ from jellyfin_show_organizer.tvmaze_cache import JsonGetter
 
 pytestmark = pytest.mark.local
 FIXED_MTIME_NS = 1_700_000_000_000_000_000
-APPROVED_PLAN_SHA256 = "pending"
+APPROVED_PLAN_SHA256 = (
+    "7ebbb2b176b9f1b6c8fa4ac1e18b1ae4a07e62d77e2acbed79337c338638b133"
+)
 
 
 def _clock() -> datetime:
@@ -229,6 +231,13 @@ def test_complete_ready_candidate_has_stable_approved_hash_and_zero_mutation(
 
     assert first.preflight.ready
     assert first.preflight.plan_hash == APPROVED_PLAN_SHA256
+    assert first.plan.schema_version == 1
+    assert first.plan.provenance is not None
+    assert first.plan.provenance.tool_version == "0.1.0"
+    assert len(first.plan.provenance.cache_snapshots) == 10
+    assert all(
+        snapshot.state == "ok" for snapshot in first.plan.provenance.cache_snapshots
+    )
     assert Counter(record.status for record in first.plan.records) == {
         TerminalStatus.MATCHED: 14,
         TerminalStatus.EXTRA: 1,
@@ -270,6 +279,7 @@ def test_complete_ready_candidate_has_stable_approved_hash_and_zero_mutation(
 
     assert second.preflight.ready
     assert second.preflight.plan_hash == first.preflight.plan_hash
+    assert second.plan.provenance == first.plan.provenance
     assert second.bundle.plan_json == first.bundle.plan_json
     assert second.bundle.summary_txt == first.bundle.summary_txt
     assert list(destination.iterdir()) == []
