@@ -137,7 +137,9 @@ def test_equal_catalog_compatibility_remains_suspicious(tmp_path: Path) -> None:
     )
 
 
-def test_empty_or_malformed_candidate_catalog_remains_suspicious(tmp_path: Path) -> None:
+def test_empty_or_malformed_candidate_catalog_remains_suspicious(
+    tmp_path: Path,
+) -> None:
     malformed = [
         {
             "id": 100101,
