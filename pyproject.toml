@@ -25,6 +25,7 @@ packages = ["mnamer", "jellyfin_show_organizer"]
 
 [tool.setuptools.package-data]
 "*" = ["LICENSE.txt", "README.md", "py.typed"]
+"jellyfin_show_organizer" = ["data/*.json", "data/*.toml"]
 
 [build-system]
 requires = ["setuptools >= 61.0.0", "setuptools_scm[toml] >= 6.2", "wheel"]

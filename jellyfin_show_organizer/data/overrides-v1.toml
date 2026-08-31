@@ -1,0 +1,21 @@
+schema_version = 1
+
+# Public defaults are synthetic examples only. Real library-specific overrides
+# belong in local, untracked configuration.
+[[shows]]
+key = "example-aired"
+aliases = ["Example Aired Series"]
+numbering_mode = "aired"
+title_preference = "provider"
+
+[[shows]]
+key = "example-parenthesized"
+aliases = ["Example Parenthesized Series"]
+numbering_mode = "parenthesized-absolute"
+title_preference = "provider"
+
+[[shows]]
+key = "example-segment"
+aliases = ["Example Segment Series"]
+numbering_mode = "segment-title"
+title_preference = "provider"

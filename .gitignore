@@ -47,3 +47,6 @@ venv/
 *.avi
 *.mkv
 *.mp4
+
+# Checked-in organizer contracts are source, not generated evidence.
+!jellyfin_show_organizer/data/*.json
