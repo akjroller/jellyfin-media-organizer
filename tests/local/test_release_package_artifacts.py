@@ -73,9 +73,7 @@ def test_release_package_artifacts_are_ignored_but_unknown_files_fail_closed(
     assert companion.suffix == ".en"
 
     ignored_paths = {file.relative_path for file in result.ignored}
-    expected_paths = {
-        f"Fabricated Series/{name}" for name in RELEASE_ARTIFACT_NAMES
-    }
+    expected_paths = {f"Fabricated Series/{name}" for name in RELEASE_ARTIFACT_NAMES}
     assert ignored_paths == expected_paths
     assert all(
         file.disposition is AdjacentDisposition.IGNORED
@@ -157,14 +155,10 @@ def test_release_package_artifacts_are_audited_without_blocking_preflight(
         if record.status is CompanionStatus.IGNORED
     ]
     assert len(ignored) == 5
-    assert all(
-        record.reason == "known-release-package-artifact" for record in ignored
-    )
+    assert all(record.reason == "known-release-package-artifact" for record in ignored)
 
     rendered = outcome.bundle.sidecars_csv.decode("utf-8-sig")
     rows = list(csv.DictReader(io.StringIO(rendered)))
     ignored_rows = [row for row in rows if row["status"] == "ignored"]
     assert len(ignored_rows) == 5
-    assert {row["reason"] for row in ignored_rows} == {
-        "known-release-package-artifact"
-    }
+    assert {row["reason"] for row in ignored_rows} == {"known-release-package-artifact"}
