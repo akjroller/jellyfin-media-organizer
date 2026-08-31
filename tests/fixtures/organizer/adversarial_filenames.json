@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "description": "Fabricated filename grammars for offline organizer regression tests.",
+  "cases": [
+    {
+      "id": "edition-2005-s01e01",
+      "features": ["edition-ambiguity", "aired"],
+      "relative_path": "synthetic/edition-a/Mirror.City.2005.S01E01.First.Light.1080p-SYNTH.mkv",
+      "expected": {"series": "Mirror City", "year": 2005, "numbering_mode": "aired", "season": 1, "episodes": [1], "absolute_episode": null, "segment": null, "title": "First Light", "classification": "episode"}
+    },
+    {
+      "id": "edition-2024-s01e01",
+      "features": ["edition-ambiguity", "aired"],
+      "relative_path": "synthetic/edition-b/Mirror.City.2024.S01E01.New.Dawn.1080p-SYNTH.mp4",
+      "expected": {"series": "Mirror City", "year": 2024, "numbering_mode": "aired", "season": 1, "episodes": [1], "absolute_episode": null, "segment": null, "title": "New Dawn", "classification": "episode"}
+    },
+    {
+      "id": "alias-absolute-01",
+      "features": ["alias", "absolute"],
+      "relative_path": "synthetic/aliases/[SYNTH] Clockwork Isles - 01 [1080p].mkv",
+      "expected": {"series": "The Clockwork Isles", "year": 2022, "numbering_mode": "absolute", "season": null, "episodes": [], "absolute_episode": 1, "segment": null, "title": null, "classification": "episode"}
+    },
+    {
+      "id": "parenthesized-absolute-135",
+      "features": ["parenthesized-absolute"],
+      "relative_path": "synthetic/parenthesized/[SYNTH] Moonblade (135) [1080p].mkv",
+      "expected": {"series": "Moonblade", "year": 2003, "numbering_mode": "parenthesized-absolute", "season": null, "episodes": [], "absolute_episode": 135, "segment": null, "title": null, "classification": "episode"}
+    },
+    {
+      "id": "absolute-027",
+      "features": ["absolute"],
+      "relative_path": "synthetic/absolute/[SYNTH] Starforge Academy - 027 [1080p].mkv",
+      "expected": {"series": "Starforge Academy", "year": 2011, "numbering_mode": "absolute", "season": null, "episodes": [], "absolute_episode": 27, "segment": null, "title": null, "classification": "episode"}
+    },
+    {
+      "id": "multi-episode-range",
+      "features": ["multi-episode", "aired"],
+      "relative_path": "synthetic/ranges/River.Patrol.S01E03-E04.Double.Current.1080p-SYNTH.mkv",
+      "expected": {"series": "River Patrol", "year": 2018, "numbering_mode": "aired", "season": 1, "episodes": [3, 4], "absolute_episode": null, "segment": null, "title": "Double Current", "classification": "episode"}
+    },
+    {
+      "id": "multi-episode-repeated-e",
+      "features": ["multi-episode", "aired"],
+      "relative_path": "synthetic/ranges/Signal.Ridge.S02E07E08.Twin.Beacons.720p-SYNTH.mp4",
+      "expected": {"series": "Signal Ridge", "year": 2016, "numbering_mode": "aired", "season": 2, "episodes": [7, 8], "absolute_episode": null, "segment": null, "title": "Twin Beacons", "classification": "episode"}
+    },
+    {
+      "id": "segment-a",
+      "features": ["segment", "segment-title"],
+      "relative_path": "synthetic/segments/Bubble.Borough.S01E01a.Red.Kite.480p-SYNTH.mkv",
+      "expected": {"series": "Bubble Borough", "year": 1999, "numbering_mode": "segment-title", "season": 1, "episodes": [1], "absolute_episode": null, "segment": "a", "title": "Red Kite", "classification": "episode"}
+    },
+    {
+      "id": "segment-b",
+      "features": ["segment", "segment-title"],
+      "relative_path": "synthetic/segments/Bubble.Borough.S01E01b.Blue.Boat.480p-SYNTH.mkv",
+      "expected": {"series": "Bubble Borough", "year": 1999, "numbering_mode": "segment-title", "season": 1, "episodes": [1], "absolute_episode": null, "segment": "b", "title": "Blue Boat", "classification": "episode"}
+    },
+    {
+      "id": "creditless-opening-extra",
+      "features": ["extra"],
+      "relative_path": "synthetic/extras/[SYNTH] Starforge Academy - NCOP [1080p].mkv",
+      "expected": {"series": "Starforge Academy", "year": 2011, "numbering_mode": null, "season": null, "episodes": [], "absolute_episode": null, "segment": null, "title": null, "classification": "extra"}
+    },
+    {
+      "id": "trailer-extra",
+      "features": ["extra"],
+      "relative_path": "synthetic/extras/Clockwork.Isles.[TRAILER-Harbor.Teaser].1080p-SYNTH.mp4",
+      "expected": {"series": "The Clockwork Isles", "year": 2022, "numbering_mode": null, "season": null, "episodes": [], "absolute_episode": null, "segment": null, "title": "Harbor Teaser", "classification": "extra"}
+    },
+    {
+      "id": "duplicate-source-a",
+      "features": ["duplicate", "aired"],
+      "duplicate_group": "mirror-city-s01e02",
+      "relative_path": "synthetic/duplicates/source-a/Mirror.City.2005.S01E02.Second.Light.1080p-SYNTH.mkv",
+      "expected": {"series": "Mirror City", "year": 2005, "numbering_mode": "aired", "season": 1, "episodes": [2], "absolute_episode": null, "segment": null, "title": "Second Light", "classification": "episode"}
+    },
+    {
+      "id": "duplicate-source-b",
+      "features": ["duplicate", "aired"],
+      "duplicate_group": "mirror-city-s01e02",
+      "relative_path": "synthetic/duplicates/source-b/Mirror.City.S01E02.Second.Light.720p-SYNTH.mp4",
+      "expected": {"series": "Mirror City", "year": 2005, "numbering_mode": "aired", "season": 1, "episodes": [2], "absolute_episode": null, "segment": null, "title": "Second Light", "classification": "episode"}
+    },
+    {
+      "id": "mojibake-series",
+      "features": ["mojibake", "aired"],
+      "relative_path": "synthetic/mojibake/CafÃ©.Cosmos.S01E01.Orbit.480p-SYNTH.mkv",
+      "expected": {"series": "Café Cosmos", "year": 2014, "numbering_mode": "aired", "season": 1, "episodes": [1], "absolute_episode": null, "segment": null, "title": "Orbit", "classification": "episode"}
+    },
+    {
+      "id": "embedded-id-title-hint",
+      "features": ["embedded-id", "title-hint", "aired"],
+      "relative_path": "synthetic/ids/Northstar.Files.S03E05.The.Signal.tvmaze-12345.1080p-SYNTH.mkv",
+      "expected": {"series": "Northstar Files", "year": 2020, "numbering_mode": "aired", "season": 3, "episodes": [5], "absolute_episode": null, "segment": null, "title": "The Signal", "classification": "episode", "embedded_tvmaze_id": 12345}
+    }
+  ]
+}
