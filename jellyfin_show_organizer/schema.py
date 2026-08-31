@@ -49,6 +49,101 @@ def canonical_companions(plan: OrganizerPlan) -> tuple[CompanionPlanRecord, ...]
     )
 
 
+def _legacy_tvmaze_id(value: object, field: str) -> int:
+    if not isinstance(value, Mapping):
+        raise ManifestValidationError(f"{field} must be a provider identity")
+    identity = cast(Mapping[str, object], value)
+    if set(identity) != {"provider", "value"}:
+        raise ManifestValidationError(f"{field} has unexpected fields")
+    if identity["provider"] != "tvmaze":
+        raise ManifestValidationError(
+            f"{field} cannot be represented by plan schema v1"
+        )
+    raw_value = identity["value"]
+    if not isinstance(raw_value, str):
+        raise ManifestValidationError(f"{field}.value must be a string")
+    try:
+        numeric = int(raw_value)
+    except ValueError as exc:
+        raise ManifestValidationError(
+            f"{field}.value must be a canonical positive integer"
+        ) from exc
+    if numeric <= 0 or str(numeric) != raw_value:
+        raise ManifestValidationError(
+            f"{field}.value must be a canonical positive integer"
+        )
+    return numeric
+
+
+def _serialize_record_v1(record: PlanRecord) -> dict[str, Any]:
+    payload = cast(dict[str, Any], asdict(record))
+
+    parse = payload.get("parse")
+    if isinstance(parse, dict):
+        embedded = parse.pop("embedded_provider_identity", None)
+        if embedded is not None:
+            numeric = _legacy_tvmaze_id(
+                embedded,
+                "parse.embedded_provider_identity",
+            )
+            existing = parse.get("embedded_tvmaze_id")
+            if existing is not None and existing != numeric:
+                raise ManifestValidationError(
+                    "parse contains conflicting provider identities"
+                )
+            parse["embedded_tvmaze_id"] = numeric
+
+    show = payload.get("show")
+    if isinstance(show, dict):
+        identity = show.pop("provider_identity", None)
+        if identity is None:
+            raise ManifestValidationError("show provider identity is required")
+        show["tvmaze_id"] = _legacy_tvmaze_id(
+            identity,
+            "show.provider_identity",
+        )
+
+    evidence = payload.get("evidence")
+    if isinstance(evidence, dict):
+        candidates = evidence.get("candidates", [])
+        if not isinstance(candidates, list | tuple):
+            raise ManifestValidationError("evidence.candidates must be an array")
+        for index, candidate in enumerate(candidates):
+            if not isinstance(candidate, dict):
+                raise ManifestValidationError(
+                    f"evidence.candidates[{index}] must be an object"
+                )
+            identity = candidate.pop("provider_identity", None)
+            if identity is None:
+                raise ManifestValidationError(
+                    f"evidence.candidates[{index}] provider identity is required"
+                )
+            candidate["tvmaze_id"] = _legacy_tvmaze_id(
+                identity,
+                f"evidence.candidates[{index}].provider_identity",
+            )
+
+    provider_episodes = payload.get("provider_episodes", [])
+    if not isinstance(provider_episodes, list | tuple):
+        raise ManifestValidationError("provider_episodes must be an array")
+    for index, episode in enumerate(provider_episodes):
+        if not isinstance(episode, dict):
+            raise ManifestValidationError(
+                f"provider_episodes[{index}] must be an object"
+            )
+        identity = episode.pop("provider_identity", None)
+        if identity is None:
+            raise ManifestValidationError(
+                f"provider_episodes[{index}] provider identity is required"
+            )
+        episode["tvmaze_episode_id"] = _legacy_tvmaze_id(
+            identity,
+            f"provider_episodes[{index}].provider_identity",
+        )
+
+    return payload
+
+
 def plan_to_manifest(plan: OrganizerPlan) -> dict[str, Any]:
     provenance = asdict(plan.provenance) if plan.provenance is not None else None
     if provenance is not None:
@@ -69,7 +164,10 @@ def plan_to_manifest(plan: OrganizerPlan) -> dict[str, Any]:
                     "schema_version": plan.schema_version,
                     "overrides_version": plan.overrides_version,
                     "provenance": provenance,
-                    "records": [asdict(record) for record in canonical_records(plan)],
+                    "records": [
+                        _serialize_record_v1(record)
+                        for record in canonical_records(plan)
+                    ],
                     "companions": [
                         asdict(record) for record in canonical_companions(plan)
                     ],
