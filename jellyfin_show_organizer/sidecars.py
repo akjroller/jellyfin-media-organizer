@@ -203,9 +203,7 @@ def discover_sidecars(
                     key=lambda entry: (entry.name.casefold(), entry.name),
                 )
         except OSError as exc:
-            raise RuntimeError(
-                "cannot enumerate authorized sidecar directory"
-            ) from exc
+            raise RuntimeError("cannot enumerate authorized sidecar directory") from exc
 
         for entry in entries:
             path = Path(entry.path)
