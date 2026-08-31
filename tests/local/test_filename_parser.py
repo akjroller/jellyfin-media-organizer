@@ -72,72 +72,91 @@ def test_parser_handles_supported_numbering_grammars(
     assert parse_video_path(relative_path) == expected
 
 
-@pytest.mark.parametrize(
-    ("relative_path", "expected"),
-    [
-        (
-            "synthetic/Revision Rangers/Revision Rangers - 01v2 [1080p].mkv",
-            ParseResult(series_hint="Revision Rangers", absolute_episode=1),
-        ),
-        (
-            "synthetic/Orbit Quest (2024)/Orbit Quest (2024) 068 (1080p).mkv",
-            ParseResult(
-                series_hint="Orbit Quest",
-                absolute_episode=68,
-                year=2024,
-            ),
-        ),
-        (
-            "synthetic/Fair Weather/Season 2/Fair Weather S02 E03.avi",
-            ParseResult(
-                series_hint="Fair Weather",
-                season=2,
-                episodes=(3,),
-            ),
-        ),
-        (
-            "synthetic/House Calls/House.Calls.S07.1080p/"
-            "release-houses07e02-1080p.mkv",
-            ParseResult(
-                series_hint="House Calls",
-                season=7,
-                episodes=(2,),
-            ),
-        ),
-        (
-            "synthetic/Bubble Borough/"
-            "Bubble Borough [season 01][episod 04a] - Red Kite.avi",
-            ParseResult(
-                series_hint="Bubble Borough",
-                season=1,
-                episodes=(4,),
-                segment_hint="a",
-                title_hint="Red Kite",
-            ),
-        ),
-        (
-            "synthetic/Mnemonic Garden/Mnemonic Garden 02 Green Door.mkv",
-            ParseResult(
-                series_hint="Mnemonic Garden",
-                absolute_episode=2,
-                title_hint="Green Door",
-            ),
-        ),
-        (
-            "synthetic/Titan School/Titan.School.S02E03.INTERNAL/release203.avi",
-            ParseResult(
-                series_hint="Titan School",
-                season=2,
-                episodes=(3,),
-            ),
-        ),
-    ],
-)
-def test_parser_handles_release_and_legacy_patterns(
-    relative_path: str,
-    expected: ParseResult,
-):
-    assert parse_video_path(relative_path) == expected
+def test_parser_handles_version_suffixed_absolute_episode():
+    parsed = parse_video_path(
+        "synthetic/Revision Rangers/Revision Rangers - 01v2 [1080p].mkv"
+    )
+
+    assert parsed == ParseResult(
+        series_hint="Revision Rangers",
+        absolute_episode=1,
+    )
+
+
+def test_parser_handles_guarded_bare_absolute_episode():
+    parsed = parse_video_path(
+        "synthetic/Orbit Quest (2024)/Orbit Quest (2024) 068 (1080p).mkv"
+    )
+
+    assert parsed == ParseResult(
+        series_hint="Orbit Quest",
+        absolute_episode=68,
+        year=2024,
+    )
+
+
+def test_parser_handles_spaced_season_episode_tokens():
+    parsed = parse_video_path(
+        "synthetic/Fair Weather/Season 2/Fair Weather S02 E03.avi"
+    )
+
+    assert parsed == ParseResult(
+        series_hint="Fair Weather",
+        season=2,
+        episodes=(3,),
+    )
+
+
+def test_parser_handles_episode_token_embedded_in_release_name():
+    parsed = parse_video_path(
+        "synthetic/House Calls/House.Calls.S07.1080p/"
+        "release-houses07e02-1080p.mkv"
+    )
+
+    assert parsed == ParseResult(
+        series_hint="House Calls",
+        season=7,
+        episodes=(2,),
+    )
+
+
+def test_parser_handles_legacy_bracketed_segment_notation():
+    parsed = parse_video_path(
+        "synthetic/Bubble Borough/"
+        "Bubble Borough [season 01][episod 04a] - Red Kite.avi"
+    )
+
+    assert parsed == ParseResult(
+        series_hint="Bubble Borough",
+        season=1,
+        episodes=(4,),
+        segment_hint="a",
+        title_hint="Red Kite",
+    )
+
+
+def test_parser_handles_bare_absolute_with_matching_parent_series():
+    parsed = parse_video_path(
+        "synthetic/Mnemonic Garden/Mnemonic Garden 02 Green Door.mkv"
+    )
+
+    assert parsed == ParseResult(
+        series_hint="Mnemonic Garden",
+        absolute_episode=2,
+        title_hint="Green Door",
+    )
+
+
+def test_parser_recovers_single_unambiguous_ancestor_episode_context():
+    parsed = parse_video_path(
+        "synthetic/Titan School/Titan.School.S02E03.INTERNAL/release203.avi"
+    )
+
+    assert parsed == ParseResult(
+        series_hint="Titan School",
+        season=2,
+        episodes=(3,),
+    )
 
 
 def test_embedded_episode_token_does_not_consume_resolution_as_episode_range():
