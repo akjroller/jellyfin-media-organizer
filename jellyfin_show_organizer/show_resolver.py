@@ -228,6 +228,14 @@ def resolve_show_group_with_provider(
         )
     if explicit_identities:
         identity = explicit_identities[0]
+        active_provider = ProviderIdentity.normalize_provider(provider.provider_name)
+        if identity.provider != active_provider:
+            return _unresolved(
+                "explicit-provider-id",
+                "explicit-provider-does-not-match-active-provider",
+                f"provider-identity:{identity.key}",
+                f"active-provider:{active_provider}",
+            )
         title = _preferred_title(override, source_title, None)
         if title is None:
             return _unresolved("explicit-provider-id", "missing-canonical-title")
@@ -267,16 +275,11 @@ def resolve_show_group_with_provider(
         return _unresolved(
             provider_method,
             snapshot.unresolved_reason or "provider-search-unresolved",
-            f"provider-snapshot:{snapshot.snapshot_identity}",
         )
 
     provider_candidates = snapshot.shows
     if not provider_candidates:
-        return _unresolved(
-            provider_method,
-            "no-valid-provider-candidates",
-            f"provider-snapshot:{snapshot.snapshot_identity}",
-        )
+        return _unresolved(provider_method, "no-valid-provider-candidates")
 
     identities = {normalize_show_identity(title) for title in titles}
     identities.add(normalize_show_identity(source_key))
@@ -329,10 +332,7 @@ def resolve_show_group_with_provider(
             evidence=MatchEvidence(
                 method=provider_method,
                 confidence=top.score,
-                reasons=(
-                    f"candidate-gap:{gap:.3f}",
-                    f"provider-snapshot:{snapshot.snapshot_identity}",
-                ),
+                reasons=(f"candidate-gap:{gap:.3f}",),
                 candidates=ranked,
             ),
         )
@@ -353,11 +353,7 @@ def resolve_show_group_with_provider(
         evidence=MatchEvidence(
             method=provider_method,
             confidence=top.score,
-            reasons=(
-                reason,
-                f"candidate-gap:{gap:.3f}",
-                f"provider-snapshot:{snapshot.snapshot_identity}",
-            ),
+            reasons=(reason, f"candidate-gap:{gap:.3f}"),
             candidates=ranked,
         ),
     )
