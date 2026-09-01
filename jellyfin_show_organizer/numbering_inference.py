@@ -263,17 +263,19 @@ def infer_group_numbering_mode(
                 "numbering-inference:independent-families-deferred-to-assignment",
             )
     elif aired_only and absolute_only:
-        reasons = [
+        primary_reasons = [
             "numbering-inference:mixed-independent-families",
             "numbering-primary:aired",
             "numbering-selected:aired",
         ]
         if invalid:
-            reasons.append("numbering-inference:invalid-records-deferred-to-assignment")
+            primary_reasons.append(
+                "numbering-inference:invalid-records-deferred-to-assignment"
+            )
         return NumberingModeInference(
             attempted=True,
             mode=NumberingMode.AIRED,
-            reasons=tuple(reasons),
+            reasons=tuple(primary_reasons),
         )
     elif aired_only:
         # Aired is the product default and these sources already carry explicit
