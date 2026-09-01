@@ -80,6 +80,19 @@ def _initialism_equivalent(source: str, candidate: str) -> bool:
     )
 
 
+def _provider_subtitle_prefix(source: str, candidate_title: str) -> bool:
+    """Return true when a multi-token source exactly prefixes a colon subtitle."""
+
+    candidate = unicodedata.normalize("NFKC", candidate_title)
+    head, separator, tail = candidate.partition(":")
+    if not separator or not tail.strip():
+        return False
+    source_normalized = _normalize(source)
+    if len(source_normalized.split()) < 2:
+        return False
+    return _normalize(head) == source_normalized
+
+
 def structural_title_score(
     identities: tuple[str, ...],
     candidate_title: str,
@@ -96,6 +109,9 @@ def structural_title_score(
             return 0.90, ("token-initialism-equivalent",)
 
         source_tokens = normalized.split()
+        if _provider_subtitle_prefix(normalized, candidate_title):
+            return 0.78, ("provider-subtitle-prefix",)
+
         compact_source = "".join(source_tokens)
         compact_candidate = "".join(candidate_tokens)
         if (
