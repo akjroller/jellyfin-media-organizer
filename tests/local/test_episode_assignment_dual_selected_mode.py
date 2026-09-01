@@ -87,7 +87,10 @@ def test_aired_selected_mode_accepts_complete_dual_evidence(tmp_path: Path) -> N
     assignment = result.assignments[0]
     assert assignment.episodes[0].tvmaze_episode_id == 1001
     assert "numbering-mode:aired" in assignment.evidence.reasons
-    assert "dual-numbering-evidence:secondary-absolute:99" in assignment.evidence.reasons
+    assert (
+        "dual-numbering-evidence:secondary-absolute:99"
+        in assignment.evidence.reasons
+    )
 
 
 def test_dual_evidence_remains_conflicting_for_unrelated_selected_mode(
