@@ -187,6 +187,7 @@ def select_unique_release_quality_winner(
 
     winner_index = winners[0]
     winner = evidence[winner_index]
+    assert winner.resolution is not None
     dimensions: list[str] = []
     if any(
         other.resolution is not None and winner.resolution > other.resolution
