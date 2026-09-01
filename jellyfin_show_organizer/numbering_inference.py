@@ -263,33 +263,27 @@ def infer_group_numbering_mode(
                 "numbering-inference:independent-families-deferred-to-assignment",
             )
     elif aired_only and absolute_only:
-        primary_reasons = [
-            "numbering-inference:mixed-independent-families",
-            "numbering-primary:aired",
-            "numbering-selected:aired",
-        ]
-        if invalid:
-            primary_reasons.append(
-                "numbering-inference:invalid-records-deferred-to-assignment"
-            )
         return NumberingModeInference(
             attempted=True,
             mode=NumberingMode.AIRED,
-            reasons=tuple(primary_reasons),
+            reasons=(
+                "numbering-inference:mixed-independent-families",
+                "numbering-primary:aired",
+                "numbering-selected:aired",
+                *(
+                    ("numbering-inference:invalid-records-deferred-to-assignment",)
+                    if invalid
+                    else ()
+                ),
+            ),
         )
     elif aired_only:
-        # Aired is the product default and these sources already carry explicit
-        # SxxEyy evidence. Any malformed sibling is isolated during assignment.
-        if invalid:
-            return NumberingModeInference(
-                attempted=True,
-                mode=NumberingMode.AIRED,
-                reasons=(
-                    "numbering-inference:primary-aired-with-isolated-invalid-records",
-                    "numbering-selected:aired",
-                ),
-            )
-        return NumberingModeInference(attempted=False, mode=None)
+        observations, observation_reasons = _candidate_observations(aired_only)
+        context_reasons = (
+            ("numbering-inference:invalid-records-deferred-to-assignment",)
+            if invalid
+            else ()
+        )
     elif absolute_only:
         observations, observation_reasons = _candidate_observations(absolute_only)
         context_reasons = (
