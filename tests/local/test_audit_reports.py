@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from jellyfin_show_organizer import reports
+from jellyfin_show_organizer.decision_hash import stable_decision_hash
 from jellyfin_show_organizer.models import (
     CanonicalShow,
     MatchEvidence,
@@ -75,6 +76,7 @@ def test_canonical_plan_and_reports_ignore_record_insertion_order():
 
     assert canonical_manifest_bytes(forward) == canonical_manifest_bytes(reversed_plan)
     assert stable_plan_hash(forward) == stable_plan_hash(reversed_plan)
+    assert stable_decision_hash(forward) == stable_decision_hash(reversed_plan)
     assert render_audit_bundle(forward) == render_audit_bundle(reversed_plan)
 
 
@@ -96,7 +98,7 @@ def test_audit_bundle_uses_utf8_json_and_bom_csv():
     assert "Épisode" in bundle.mapping_csv.decode("utf-8-sig")
 
 
-def test_summary_is_path_free_and_tied_to_plan_hash():
+def test_summary_is_path_free_and_tied_to_plan_hashes():
     plan = _plan(
         _matched_record(
             "Private Looking Folder/Example Series S01E01.mkv",
@@ -112,6 +114,7 @@ def test_summary_is_path_free_and_tied_to_plan_hash():
     summary = render_audit_bundle(plan).summary_txt.decode("utf-8")
 
     assert f"plan_sha256={stable_plan_hash(plan)}" in summary
+    assert f"decision_sha256={stable_decision_hash(plan)}" in summary
     assert "records=2" in summary
     assert "matched=1" in summary
     assert "unresolved=1" in summary
@@ -136,6 +139,7 @@ def test_write_audit_bundle_publishes_plan_json_last_and_matches_rendered_bytes(
     assert (output_dir / "mapping.csv").read_bytes() == bundle.mapping_csv
     assert (output_dir / "summary.txt").read_bytes() == bundle.summary_txt
     assert (output_dir / "plan.sha256").read_bytes() == bundle.plan_sha256
+    assert (output_dir / "decision.sha256").read_bytes() == bundle.decision_sha256
     assert (output_dir / "plan.json").read_bytes() == bundle.plan_json
 
 
