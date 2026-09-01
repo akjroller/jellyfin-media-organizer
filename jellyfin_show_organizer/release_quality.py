@@ -41,9 +41,7 @@ class ReleaseQualityEvidence:
         )
 
 
-_RESOLUTION_RE = re.compile(
-    r"(?<!\d)(2160|1080|720|576|540|480)p(?!\d)", re.IGNORECASE
-)
+_RESOLUTION_RE = re.compile(r"(?<!\d)(2160|1080|720|576|540|480)p(?!\d)", re.IGNORECASE)
 _VERSION_RE = re.compile(
     r"(?<![a-z0-9])v([2-9]\d*)(?![a-z0-9])",
     re.IGNORECASE,
