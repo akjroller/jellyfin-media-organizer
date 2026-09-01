@@ -181,6 +181,50 @@ def enrich_provider_alias_evidence(
     )
 
 
+def _catalog_rescue_mode(parses: tuple[ParseResult, ...]) -> NumberingMode | None:
+    """Return one already-unambiguous numbering family suitable for show rescue.
+
+    Low-confidence show identity rescue must not use the provider catalog to decide
+    two things at once. Dual aired/absolute evidence belongs to the #109 numbering
+    inference path after the show is already resolved; here every source must carry
+    one complete, consistent aired or absolute family before any catalog is fetched.
+    """
+
+    if not parses:
+        return None
+
+    modes: list[NumberingMode] = []
+    for parse in parses:
+        has_aired = parse.season is not None or bool(parse.episodes)
+        has_absolute = parse.absolute_episode is not None
+        has_other = any(
+            (
+                parse.special_episode is not None,
+                parse.episode_date is not None,
+                parse.segment_hint is not None,
+            )
+        )
+        if sum((has_aired, has_absolute, has_other)) != 1:
+            return None
+
+        if has_aired:
+            if parse.season is None or not parse.episodes:
+                return None
+            modes.append(NumberingMode.AIRED)
+            continue
+        if has_absolute:
+            if parse.absolute_episode is None or parse.absolute_episode <= 0:
+                return None
+            modes.append(NumberingMode.ABSOLUTE)
+            continue
+        return None
+
+    first = modes[0]
+    if any(mode is not first for mode in modes[1:]):
+        return None
+    return first
+
+
 def catalog_group_rescue(
     provider: MetadataProvider,
     parses: tuple[ParseResult, ...],
@@ -190,32 +234,31 @@ def catalog_group_rescue(
 
     Every provider-search candidate is evaluated so a low textual score cannot hide
     a catalog-compatible competitor. Any incomplete candidate catalog blocks the
-    rescue. A candidate itself is compatible only when the group's numbering mode
-    is uniquely compatible with that candidate's catalog.
+    rescue. A candidate itself is compatible only when the group's already-
+    unambiguous numbering family is uniquely compatible with that candidate's
+    catalog.
     """
 
-    if not ranked:
+    expected_mode = _catalog_rescue_mode(parses)
+    if not ranked or expected_mode is None:
         return None
 
     outcomes: dict[ProviderIdentity, NumberingMode | None] = {}
     candidate_reasons: dict[ProviderIdentity, tuple[str, ...]] = {}
     indeterminate = False
-    attempted = False
 
     for candidate in sorted(ranked, key=lambda item: item.provider_identity.key):
         catalog = provider.episode_catalog(candidate.provider_identity)
         inference = infer_group_numbering_mode(parses, catalog)
-        attempted = attempted or inference.attempted
         candidate_reasons[candidate.provider_identity] = (
             f"catalog-rescue-request:{catalog.request_key}",
             *inference.reasons,
         )
         if "numbering-inference:indeterminate-catalog" in inference.reasons:
             indeterminate = True
-        outcomes[candidate.provider_identity] = inference.mode
-
-    if not attempted:
-        return None
+        outcomes[candidate.provider_identity] = (
+            inference.mode if inference.mode is expected_mode else None
+        )
 
     enriched = tuple(
         replace(
