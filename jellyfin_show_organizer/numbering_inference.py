@@ -32,37 +32,72 @@ def _has_other_numbering(parse: ParseResult) -> bool:
     )
 
 
+def _has_complete_aired(parse: ParseResult) -> bool:
+    return parse.season is not None and bool(parse.episodes)
+
+
+def _has_any_aired(parse: ParseResult) -> bool:
+    return parse.season is not None or bool(parse.episodes)
+
+
+def _has_complete_absolute(parse: ParseResult) -> bool:
+    return parse.absolute_episode is not None and parse.absolute_episode > 0
+
+
+def _usable_numbering_parses(parses: tuple[ParseResult, ...]) -> tuple[ParseResult, ...]:
+    """Return aired/absolute evidence that can participate in primary-mode choice.
+
+    Specials, dates, and segment-title records are independent accessory families.
+    They are assigned separately after the show identity is resolved and must not
+    poison the primary aired/absolute decision for unrelated files in the group.
+    """
+
+    return tuple(
+        parse
+        for parse in parses
+        if not _has_other_numbering(parse)
+        and (_has_any_aired(parse) or parse.absolute_episode is not None)
+    )
+
+
+def _partition_numbering_parses(
+    parses: tuple[ParseResult, ...],
+) -> tuple[
+    tuple[ParseResult, ...],
+    tuple[ParseResult, ...],
+    tuple[ParseResult, ...],
+    tuple[ParseResult, ...],
+]:
+    dual: list[ParseResult] = []
+    aired_only: list[ParseResult] = []
+    absolute_only: list[ParseResult] = []
+    invalid: list[ParseResult] = []
+    for parse in parses:
+        has_aired = _has_any_aired(parse)
+        aired_complete = _has_complete_aired(parse)
+        absolute_complete = _has_complete_absolute(parse)
+        has_absolute = parse.absolute_episode is not None
+
+        if aired_complete and absolute_complete:
+            dual.append(parse)
+        elif aired_complete and not has_absolute:
+            aired_only.append(parse)
+        elif not has_aired and absolute_complete:
+            absolute_only.append(parse)
+        else:
+            invalid.append(parse)
+    return tuple(dual), tuple(aired_only), tuple(absolute_only), tuple(invalid)
+
+
 def _candidate_observations(
     parses: tuple[ParseResult, ...],
 ) -> tuple[tuple[_ObservedMode, ...], tuple[str, ...]]:
-    relevant = tuple(
-        parse
-        for parse in parses
-        if (
-            parse.season is not None
-            or bool(parse.episodes)
-            or parse.absolute_episode is not None
-            or _has_other_numbering(parse)
-        )
-    )
-    if not any(
-        parse.season is not None
-        or bool(parse.episodes)
-        or parse.absolute_episode is not None
-        for parse in relevant
-    ):
+    relevant = _usable_numbering_parses(parses)
+    if not relevant:
         return (), ()
 
-    if any(_has_other_numbering(parse) for parse in relevant):
-        return (), ("numbering-inference:mixed-or-unsupported-group-evidence",)
-
-    aired_complete = all(
-        parse.season is not None and bool(parse.episodes) for parse in relevant
-    )
-    absolute_complete = all(
-        parse.absolute_episode is not None and parse.absolute_episode > 0
-        for parse in relevant
-    )
+    aired_complete = all(_has_complete_aired(parse) for parse in relevant)
+    absolute_complete = all(_has_complete_absolute(parse) for parse in relevant)
 
     observations: list[_ObservedMode] = []
     if aired_complete:
@@ -202,22 +237,74 @@ def infer_group_numbering_mode(
     parses: tuple[ParseResult, ...],
     catalog: ProviderEpisodeCatalog,
 ) -> NumberingModeInference:
-    """Infer aired versus absolute only when one complete interpretation wins.
+    """Infer a primary aired/absolute mode without poisoning independent families.
 
-    The decision is evaluated for the source group as a whole. A mode is considered
-    only when every source carrying aired/absolute evidence supplies the evidence
-    required by that mode. Dual evidence is therefore supported without guessing,
-    while separately mixed aired-only and absolute-only files fail closed.
+    Dual aired+absolute evidence still requires one unique catalog-compatible mode.
+    Separately aired-only and absolute-only files are independent, self-describing
+    families; aired remains the deterministic primary while assignment validates
+    each family separately. Accessory special/date/segment records are excluded from
+    primary-mode inference and cannot make unrelated regular episodes suspicious.
     """
 
-    observations, observation_reasons = _candidate_observations(parses)
+    usable = _usable_numbering_parses(parses)
+    if not usable:
+        return NumberingModeInference(attempted=False, mode=None)
+
+    dual, aired_only, absolute_only, invalid = _partition_numbering_parses(usable)
+
+    if dual:
+        observations, observation_reasons = _candidate_observations(dual)
+        context_reasons: tuple[str, ...] = ()
+        if len(dual) != len(usable):
+            context_reasons = (
+                "numbering-inference:dual-evidence-subgroup",
+                "numbering-inference:independent-families-deferred-to-assignment",
+            )
+    elif aired_only and absolute_only:
+        reasons = [
+            "numbering-inference:mixed-independent-families",
+            "numbering-primary:aired",
+            "numbering-selected:aired",
+        ]
+        if invalid:
+            reasons.append("numbering-inference:invalid-records-deferred-to-assignment")
+        return NumberingModeInference(
+            attempted=True,
+            mode=NumberingMode.AIRED,
+            reasons=tuple(reasons),
+        )
+    elif aired_only:
+        # Aired is the product default and these sources already carry explicit
+        # SxxEyy evidence. Any malformed sibling is isolated during assignment.
+        if invalid:
+            return NumberingModeInference(
+                attempted=True,
+                mode=NumberingMode.AIRED,
+                reasons=(
+                    "numbering-inference:primary-aired-with-isolated-invalid-records",
+                    "numbering-selected:aired",
+                ),
+            )
+        return NumberingModeInference(attempted=False, mode=None)
+    elif absolute_only:
+        observations, observation_reasons = _candidate_observations(absolute_only)
+        context_reasons = (
+            "numbering-inference:invalid-records-deferred-to-assignment",
+        ) if invalid else ()
+    else:
+        return NumberingModeInference(
+            attempted=True,
+            mode=None,
+            reasons=("numbering-inference:mixed-or-incomplete-group-evidence",),
+        )
+
     if not observations and not observation_reasons:
         return NumberingModeInference(attempted=False, mode=None)
     if not observations:
         return NumberingModeInference(
             attempted=True,
             mode=None,
-            reasons=observation_reasons,
+            reasons=(*context_reasons, *observation_reasons),
         )
 
     candidate_reasons = tuple(
@@ -229,6 +316,7 @@ def infer_group_numbering_mode(
             attempted=True,
             mode=None,
             reasons=(
+                *context_reasons,
                 *candidate_reasons,
                 request_reason,
                 "numbering-inference:indeterminate-catalog",
@@ -241,6 +329,7 @@ def infer_group_numbering_mode(
             attempted=True,
             mode=None,
             reasons=(
+                *context_reasons,
                 *candidate_reasons,
                 request_reason,
                 "numbering-inference:indeterminate-catalog",
@@ -249,7 +338,7 @@ def infer_group_numbering_mode(
         )
 
     compatibility: dict[NumberingMode, bool | None] = {}
-    reasons: list[str] = [*candidate_reasons, request_reason]
+    reasons: list[str] = [*context_reasons, *candidate_reasons, request_reason]
     for observed in observations:
         if observed.mode is NumberingMode.AIRED:
             compatible, mode_reasons = _aired_compatibility(catalog, observed)
