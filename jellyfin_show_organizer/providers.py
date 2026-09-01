@@ -25,14 +25,41 @@ class ProviderShow:
         object.__setattr__(self, "title", title)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ProviderEpisode:
     identity: ProviderIdentity
     season: int
     number: int | None
     title: str
-    airdate: str | None = None
-    episode_type: str | None = None
+    airdate: str | None
+    episode_type: str | None
+
+    def __init__(
+        self,
+        identity: ProviderIdentity | None = None,
+        season: int = 0,
+        number: int | None = None,
+        title: str = "",
+        airdate: str | None = None,
+        episode_type: str | None = None,
+        *,
+        tvmaze_episode_id: int | None = None,
+    ) -> None:
+        if identity is None:
+            if tvmaze_episode_id is None:
+                raise ValueError("provider episode identity is required")
+            identity = ProviderIdentity.tvmaze(tvmaze_episode_id)
+        elif tvmaze_episode_id is not None:
+            legacy_identity = ProviderIdentity.tvmaze(tvmaze_episode_id)
+            if identity != legacy_identity:
+                raise ValueError("conflicting provider episode identities")
+        object.__setattr__(self, "identity", identity)
+        object.__setattr__(self, "season", season)
+        object.__setattr__(self, "number", number)
+        object.__setattr__(self, "title", title)
+        object.__setattr__(self, "airdate", airdate)
+        object.__setattr__(self, "episode_type", episode_type)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         title = self.title.strip()
@@ -108,6 +135,7 @@ class ProviderEpisodeCatalog:
     show_identity: ProviderIdentity
     episodes: tuple[ProviderEpisode, ...]
     errors: tuple[str, ...] = ()
+    diagnostics: tuple[str, ...] = ()
     unresolved_reason: str | None = None
     retrieved_at: str | None = None
 
@@ -121,7 +149,9 @@ class ProviderEpisodeCatalog:
             raise ValueError("provider catalog show identity is foreign")
         if any(episode.identity.provider != provider for episode in self.episodes):
             raise ValueError("provider catalog contains a foreign episode identity")
-        if self.unresolved_reason is not None and (self.episodes or self.errors):
+        if self.unresolved_reason is not None and (
+            self.episodes or self.errors or self.diagnostics
+        ):
             raise ValueError(
                 "unresolved provider catalogs cannot carry normalized data"
             )
@@ -195,14 +225,51 @@ def _tvmaze_show_candidates(response: object) -> tuple[ProviderShow, ...]:
     )
 
 
+def _normalize_optional_airdate(
+    value: object,
+    index: int,
+    diagnostics: list[str],
+) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        diagnostics.append(f"invalid-catalog-airdate:{index}")
+        return None
+    try:
+        if date.fromisoformat(value).isoformat() != value:
+            raise ValueError
+    except ValueError:
+        diagnostics.append(f"invalid-catalog-airdate:{index}")
+        return None
+    return value
+
+
+def _normalize_optional_episode_type(
+    value: object,
+    index: int,
+    diagnostics: list[str],
+) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        diagnostics.append(f"invalid-catalog-type:{index}")
+        return None
+    return value
+
+
 def _tvmaze_episode_catalog(
     response: object,
-) -> tuple[tuple[ProviderEpisode, ...], tuple[str, ...]]:
+) -> tuple[
+    tuple[ProviderEpisode, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+]:
     if not isinstance(response, list):
-        return (), ("episode-catalog-is-not-a-list",)
+        return (), ("episode-catalog-is-not-a-list",), ()
 
     episodes: list[ProviderEpisode] = []
     errors: list[str] = []
+    diagnostics: list[str] = []
     for index, item in enumerate(response):
         if not isinstance(item, dict):
             errors.append(f"invalid-catalog-entry:{index}")
@@ -212,36 +279,29 @@ def _tvmaze_episode_catalog(
         season = raw.get("season")
         number = raw.get("number")
         title = raw.get("name")
-        airdate = raw.get("airdate")
-        episode_type = raw.get("type")
-        if not isinstance(episode_id, int) or episode_id <= 0:
+        if (
+            not isinstance(episode_id, int)
+            or isinstance(episode_id, bool)
+            or episode_id <= 0
+        ):
             errors.append(f"invalid-catalog-episode-id:{index}")
             continue
-        if not isinstance(season, int) or season < 0:
+        if not isinstance(season, int) or isinstance(season, bool) or season < 0:
             errors.append(f"invalid-catalog-season:{index}")
             continue
-        if number is not None and (not isinstance(number, int) or number < 0):
+        if number is not None and (
+            not isinstance(number, int) or isinstance(number, bool) or number < 0
+        ):
             errors.append(f"invalid-catalog-number:{index}")
             continue
         if not isinstance(title, str) or not title.strip():
             errors.append(f"invalid-catalog-title:{index}")
             continue
-        if airdate is not None:
-            if not isinstance(airdate, str):
-                errors.append(f"invalid-catalog-airdate:{index}")
-                continue
-            try:
-                if date.fromisoformat(airdate).isoformat() != airdate:
-                    raise ValueError
-            except ValueError:
-                errors.append(f"invalid-catalog-airdate:{index}")
-                continue
-        if episode_type is not None and (
-            not isinstance(episode_type, str) or not episode_type.strip()
-        ):
-            errors.append(f"invalid-catalog-type:{index}")
-            continue
 
+        airdate = _normalize_optional_airdate(raw.get("airdate"), index, diagnostics)
+        episode_type = _normalize_optional_episode_type(
+            raw.get("type"), index, diagnostics
+        )
         episodes.append(
             ProviderEpisode(
                 identity=ProviderIdentity.tvmaze(episode_id),
@@ -274,11 +334,12 @@ def _tvmaze_episode_catalog(
                 key=lambda episode: (
                     episode.season,
                     episode.number if episode.number is not None else 10**9,
-                    episode.identity.value,
+                    episode.identity.key,
                 ),
             )
         ),
         tuple(errors),
+        tuple(diagnostics),
     )
 
 
@@ -333,7 +394,7 @@ class TvmazeProviderAdapter:
                 or "provider-catalog-unresolved",
                 retrieved_at=record.retrieved_at,
             )
-        episodes, errors = _tvmaze_episode_catalog(record.response)
+        episodes, errors, diagnostics = _tvmaze_episode_catalog(record.response)
         return ProviderEpisodeCatalog(
             provider=self.provider_name,
             request_key=record.request_key,
@@ -341,5 +402,6 @@ class TvmazeProviderAdapter:
             show_identity=show_identity,
             episodes=episodes,
             errors=errors,
+            diagnostics=diagnostics,
             retrieved_at=record.retrieved_at,
         )

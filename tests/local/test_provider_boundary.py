@@ -1,12 +1,45 @@
 from __future__ import annotations
 
+import csv
+import io
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
-from jellyfin_show_organizer.models import ProviderIdentity
-from jellyfin_show_organizer.providers import TvmazeProviderAdapter
+from jellyfin_show_organizer.destination import (
+    DestinationStatus,
+    build_episode_destination,
+)
+from jellyfin_show_organizer.episode_assignment import (
+    AssignmentStatus,
+    SourceEpisodeInput,
+    assign_episode_group_with_provider,
+)
+from jellyfin_show_organizer.models import (
+    MatchEvidence,
+    OrganizerPlan,
+    ParseResult,
+    PlanEpisode,
+    PlanRecord,
+    ProviderIdentity,
+    SourceFile,
+    SourceFingerprint,
+    TerminalStatus,
+)
+from jellyfin_show_organizer.overrides import load_overrides
+from jellyfin_show_organizer.providers import (
+    ProviderEpisode,
+    ProviderEpisodeCatalog,
+    ProviderSearchSnapshot,
+    ProviderShow,
+    TvmazeProviderAdapter,
+)
+from jellyfin_show_organizer.reports import render_mapping_csv
+from jellyfin_show_organizer.show_resolver import (
+    ResolutionStatus,
+    resolve_show_group_with_provider,
+)
 from jellyfin_show_organizer.tvmaze_cache import (
     TVMAZE_EPISODES_URL,
     TVMAZE_SEARCH_URL,
@@ -28,6 +61,49 @@ class RecordingGetter:
     ) -> object:
         self.calls.append((url, params))
         return self.responses[url]
+
+
+class FixtureProvider:
+    provider_name = "fixture"
+
+    def __init__(self) -> None:
+        self.search_calls: list[str] = []
+        self.catalog_calls: list[ProviderIdentity] = []
+
+    def search_shows(self, title: str) -> ProviderSearchSnapshot:
+        self.search_calls.append(title)
+        return ProviderSearchSnapshot(
+            provider=self.provider_name,
+            request_key=f"search:{title.casefold()}",
+            cache_snapshot_id="a" * 64,
+            shows=(
+                ProviderShow(
+                    identity=ProviderIdentity("fixture", "show-alpha"),
+                    title="Fixture Harbor",
+                    year=2026,
+                ),
+            ),
+        )
+
+    def episode_catalog(
+        self,
+        show_identity: ProviderIdentity,
+    ) -> ProviderEpisodeCatalog:
+        self.catalog_calls.append(show_identity)
+        return ProviderEpisodeCatalog(
+            provider=self.provider_name,
+            request_key=f"episodes:{show_identity.value}",
+            cache_snapshot_id="b" * 64,
+            show_identity=show_identity,
+            episodes=(
+                ProviderEpisode(
+                    identity=ProviderIdentity("fixture", "episode-one"),
+                    season=1,
+                    number=1,
+                    title="Pilot",
+                ),
+            ),
+        )
 
 
 def test_provider_identity_is_namespaced_and_normalized() -> None:
@@ -117,3 +193,126 @@ def test_duplicate_provider_coordinates_are_normalized_as_catalog_errors(
     catalog = adapter.episode_catalog(ProviderIdentity.tvmaze(101))
 
     assert "duplicate-aired-coordinate:S01E01" in catalog.errors
+
+
+class WrongShowCatalogProvider(FixtureProvider):
+    def episode_catalog(
+        self,
+        show_identity: ProviderIdentity,
+    ) -> ProviderEpisodeCatalog:
+        self.catalog_calls.append(show_identity)
+        return ProviderEpisodeCatalog(
+            provider=self.provider_name,
+            request_key="episodes:wrong-show",
+            cache_snapshot_id="c" * 64,
+            show_identity=ProviderIdentity("fixture", "show-beta"),
+            episodes=(
+                ProviderEpisode(
+                    identity=ProviderIdentity("fixture", "episode-wrong"),
+                    season=1,
+                    number=1,
+                    title="Wrong Pilot",
+                ),
+            ),
+        )
+
+
+def test_assignment_rejects_catalog_for_wrong_show_identity() -> None:
+    provider = WrongShowCatalogProvider()
+    resolution = resolve_show_group_with_provider(
+        "fixture-harbor",
+        (ParseResult(series_hint="Fixture Harbor", season=1, episodes=(1,)),),
+        load_overrides(),
+        provider,
+    )
+    assert resolution.status is ResolutionStatus.MATCHED
+    assert resolution.show is not None
+
+    assignment = assign_episode_group_with_provider(
+        resolution.show,
+        (
+            SourceEpisodeInput(
+                "Fixture Harbor S01E01.mkv",
+                ParseResult(series_hint="Fixture Harbor", season=1, episodes=(1,)),
+            ),
+        ),
+        provider,
+    )
+
+    assert assignment.status is AssignmentStatus.SUSPICIOUS
+    assert assignment.assignments[0].status is AssignmentStatus.SUSPICIOUS
+    assert (
+        "provider-catalog-show-identity-mismatch"
+        in assignment.assignments[0].evidence.reasons
+    )
+
+
+def test_non_tvmaze_provider_flows_through_planning_consumers() -> None:
+    provider = FixtureProvider()
+    parse = ParseResult(series_hint="Fixture Harbor", season=1, episodes=(1,))
+
+    resolution = resolve_show_group_with_provider(
+        "fixture-harbor",
+        (parse,),
+        load_overrides(),
+        provider,
+    )
+
+    assert resolution.status is ResolutionStatus.MATCHED
+    assert resolution.show is not None
+    assert resolution.show.provider_identity == ProviderIdentity(
+        "fixture", "show-alpha"
+    )
+
+    assignment_group = assign_episode_group_with_provider(
+        resolution.show,
+        (SourceEpisodeInput("Fixture Harbor S01E01.mkv", parse),),
+        provider,
+    )
+
+    assert assignment_group.status is AssignmentStatus.MATCHED
+    assignment = assignment_group.assignments[0]
+    assert assignment.episodes[0].identity == ProviderIdentity(
+        "fixture",
+        "episode-one",
+    )
+
+    destination = build_episode_destination(resolution.show, assignment, ".mkv")
+    assert destination.status is DestinationStatus.READY
+    assert "canonical-provider-identity:fixture:show-alpha" in destination.reasons
+
+    plan_episode = PlanEpisode(
+        provider_identity=assignment.episodes[0].identity,
+        season=1,
+        number=1,
+        title="Pilot",
+    )
+    plan = OrganizerPlan(
+        schema_version=1,
+        overrides_version=1,
+        records=(
+            PlanRecord(
+                source=SourceFile(
+                    relative_path="Fixture Harbor S01E01.mkv",
+                    extension=".mkv",
+                    fingerprint=SourceFingerprint(size=1, mtime_ns=1),
+                ),
+                status=TerminalStatus.MATCHED,
+                parse=parse,
+                show=resolution.show,
+                evidence=MatchEvidence(method="fixture-provider", confidence=1.0),
+                destination=destination.relative_path,
+                provider_episodes=(plan_episode,),
+            ),
+        ),
+    )
+    rows = tuple(
+        csv.DictReader(io.StringIO(render_mapping_csv(plan).decode("utf-8-sig")))
+    )
+    assert rows[0]["provider"] == "fixture"
+    assert rows[0]["provider_id"] == "show-alpha"
+    assert rows[0]["tvmaze_id"] == ""
+    assert rows[0]["provider_episode_ids"] == "episode-one"
+
+    assert provider.search_calls == ["Fixture Harbor"]
+    assert provider.catalog_calls == [ProviderIdentity("fixture", "show-alpha")]
