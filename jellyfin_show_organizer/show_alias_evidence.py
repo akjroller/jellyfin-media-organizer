@@ -247,6 +247,15 @@ def _catalog_rescue_mode(parses: tuple[ParseResult, ...]) -> NumberingMode | Non
     first = modes[0]
     if any(mode is not first for mode in modes[1:]):
         return None
+    if first is NumberingMode.AIRED:
+        coordinates = {
+            (parse.season, episode)
+            for parse in parses
+            if parse.season is not None
+            for episode in parse.episodes
+        }
+        if len(coordinates) < 2:
+            return None
     return first
 
 
