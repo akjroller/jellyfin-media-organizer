@@ -78,7 +78,9 @@ class BackoffProvider:
             shows=self.searches.get(title, ()),
         )
 
-    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
         self.catalog_calls.append(show_identity)
         return self.catalogs[show_identity]
 
