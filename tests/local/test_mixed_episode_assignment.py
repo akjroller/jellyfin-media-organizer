@@ -48,7 +48,9 @@ class Provider:
     def search_shows(self, title: str):
         raise AssertionError(title)
 
-    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
         assert show_identity == SHOW_ID
         self.catalog_calls += 1
         return ProviderEpisodeCatalog(
@@ -92,12 +94,9 @@ def test_mixed_aired_absolute_and_segment_families_assign_independently() -> Non
         "fixture", "three"
     )
     assert (
-        "mixed-numbering-family:absolute"
-        in by_source["absolute.mkv"].evidence.reasons
+        "mixed-numbering-family:absolute" in by_source["absolute.mkv"].evidence.reasons
     )
-    assert (
-        "mixed-numbering-family:segment" in by_source["segment.mkv"].evidence.reasons
-    )
+    assert "mixed-numbering-family:segment" in by_source["segment.mkv"].evidence.reasons
     assert provider.catalog_calls == 3
 
 
@@ -118,9 +117,7 @@ def test_bad_alternate_family_does_not_poison_primary_aired_source() -> None:
         "fixture", "one"
     )
     assert by_source["segment.mkv"].status is AssignmentStatus.UNRESOLVED
-    assert (
-        "missing-segment-title-evidence" in by_source["segment.mkv"].evidence.reasons
-    )
+    assert "missing-segment-title-evidence" in by_source["segment.mkv"].evidence.reasons
 
 
 def test_cross_family_provider_episode_collision_stays_suspicious() -> None:
