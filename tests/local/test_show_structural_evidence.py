@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from jellyfin_show_organizer.models import CandidateEvidence, ParseResult, ProviderIdentity
-from jellyfin_show_organizer.providers import ProviderEpisode, ProviderEpisodeCatalog, ProviderShow
+from jellyfin_show_organizer.models import (
+    CandidateEvidence,
+    ParseResult,
+    ProviderIdentity,
+)
+from jellyfin_show_organizer.providers import ProviderEpisode, ProviderEpisodeCatalog
 from jellyfin_show_organizer.show_structural_evidence import (
     aired_catalog_rescue,
     structural_title_score,
