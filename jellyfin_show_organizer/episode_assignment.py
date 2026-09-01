@@ -740,10 +740,7 @@ def assign_episode_group_with_provider(
     families = {
         family
         for source in source_group
-        if (
-            family := _evidence_family(source.parse, show.numbering_mode)
-        )
-        != "none"
+        if (family := _evidence_family(source.parse, show.numbering_mode)) != "none"
     }
     if "conflict" in families or len(families) > 1:
         reason = "mixed-numbering-evidence:" + ",".join(sorted(families))
