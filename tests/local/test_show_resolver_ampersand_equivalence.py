@@ -42,13 +42,13 @@ class Provider:
         assert show_identity in {FIRST_ID, SECOND_ID}
         return ProviderEpisodeCatalog(
             provider="fixture",
-            request_key=f"episodes:{show_identity.provider_id}",
-            cache_snapshot_id=f"episodes:{show_identity.provider_id}:v1",
+            request_key=f"episodes:{show_identity.value}",
+            cache_snapshot_id=f"episodes:{show_identity.value}:v1",
             show_identity=show_identity,
             episodes=(
                 ProviderEpisode(
                     identity=ProviderIdentity(
-                        "fixture", f"{show_identity.provider_id}-episode-1"
+                        "fixture", f"{show_identity.value}-episode-1"
                     ),
                     season=1,
                     number=1,
