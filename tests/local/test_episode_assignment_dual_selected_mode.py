@@ -148,7 +148,6 @@ def test_separate_aired_and_absolute_sources_are_independent(tmp_path: Path) -> 
     assert by_source["aired.mkv"].episodes[0].tvmaze_episode_id == 1001
     assert by_source["absolute.mkv"].episodes[0].tvmaze_episode_id == 1002
     assert (
-        "mixed-numbering-family:absolute"
-        in by_source["absolute.mkv"].evidence.reasons
+        "mixed-numbering-family:absolute" in by_source["absolute.mkv"].evidence.reasons
     )
     assert len(getter.calls) == 1
