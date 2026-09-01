@@ -240,20 +240,49 @@ def _aired_assignment(
     if dual_reason is not None:
         reasons.append(dual_reason)
     for number in parse.episodes:
+        coordinate = f"S{parse.season:02d}E{number:02d}"
         episode = by_coordinate.get((parse.season, number))
         if episode is None:
-            return _assignment(
-                source.source_key,
-                AssignmentStatus.UNRESOLVED,
-                "episode-catalog",
-                *reasons,
-                f"missing-aired-catalog-entry:S{parse.season:02d}E{number:02d}",
-            )
+            if len(parse.episodes) == 1 and parse.title_hint is not None:
+                normalized_title = _normalize_title(parse.title_hint)
+                title_matches = tuple(
+                    candidate
+                    for candidate in catalog.episodes
+                    if candidate.number is not None
+                    and _normalize_title(candidate.title) == normalized_title
+                )
+                if len(title_matches) == 1:
+                    episode = title_matches[0]
+                    reasons.extend(
+                        (
+                            f"catalog-coordinate-missing:{coordinate}",
+                            f"catalog-title-fallback:unique:{normalized_title}",
+                            f"catalog-title-match:{normalized_title}"
+                            f"->{_episode_identity_reason(episode)}",
+                        )
+                    )
+                elif len(title_matches) > 1:
+                    return _assignment(
+                        source.source_key,
+                        AssignmentStatus.SUSPICIOUS,
+                        "episode-catalog",
+                        *reasons,
+                        f"catalog-coordinate-missing:{coordinate}",
+                        f"catalog-title-fallback:ambiguous:{normalized_title}",
+                    )
+            if episode is None:
+                return _assignment(
+                    source.source_key,
+                    AssignmentStatus.UNRESOLVED,
+                    "episode-catalog",
+                    *reasons,
+                    f"missing-aired-catalog-entry:{coordinate}",
+                )
         matches.append(episode)
-        reasons.append(
-            f"catalog-match:S{parse.season:02d}E{number:02d}"
-            f"->{_episode_identity_reason(episode)}"
-        )
+        if by_coordinate.get((parse.season, number)) is episode:
+            reasons.append(
+                f"catalog-match:{coordinate}->{_episode_identity_reason(episode)}"
+            )
 
     return _assignment(
         source.source_key,
