@@ -17,6 +17,7 @@ from .models import (
     ProviderIdentity,
     TitlePreference,
 )
+from .numbering_inference import infer_group_numbering_mode
 from .overrides import OverrideCatalog, ShowOverride
 from .providers import (
     MetadataProvider,
@@ -452,6 +453,84 @@ def _catalog_tie_break(
     )
 
 
+def _has_auto_numbering_evidence(parses: tuple[ParseResult, ...]) -> bool:
+    return any(parse.absolute_episode is not None for parse in parses)
+
+
+def _numbering_for_resolved_show(
+    parses: tuple[ParseResult, ...],
+    override: ShowOverride | None,
+    provider: MetadataProvider,
+    identity: ProviderIdentity,
+) -> tuple[NumberingMode | None, tuple[str, ...], bool]:
+    if override is not None:
+        return override.numbering_mode, (), False
+    if not _has_auto_numbering_evidence(parses):
+        return NumberingMode.AIRED, (), False
+
+    inference = infer_group_numbering_mode(
+        parses,
+        provider.episode_catalog(identity),
+    )
+    if not inference.attempted:
+        return NumberingMode.AIRED, (), False
+    return inference.mode, inference.reasons, True
+
+
+def _resolved_show_result(
+    *,
+    source_key: str,
+    parse_group: tuple[ParseResult, ...],
+    override: ShowOverride | None,
+    provider: MetadataProvider,
+    provider_identity: ProviderIdentity,
+    title: str,
+    year: int | None,
+    method: str,
+    confidence: float,
+    reasons: tuple[str, ...],
+    candidates: tuple[CandidateEvidence, ...] = (),
+) -> ShowResolution:
+    mode, numbering_reasons, attempted = _numbering_for_resolved_show(
+        parse_group,
+        override,
+        provider,
+        provider_identity,
+    )
+    if mode is None:
+        return ShowResolution(
+            status=ResolutionStatus.SUSPICIOUS,
+            show=None,
+            evidence=MatchEvidence(
+                method=(f"{method}+numbering-inference" if attempted else method),
+                confidence=confidence,
+                reasons=(
+                    "resolved-show-numbering-mode-not-unique",
+                    *reasons,
+                    *numbering_reasons,
+                ),
+                candidates=candidates,
+            ),
+        )
+
+    return ShowResolution(
+        status=ResolutionStatus.MATCHED,
+        show=CanonicalShow(
+            source_key=source_key,
+            provider_identity=provider_identity,
+            title=title,
+            year=year,
+            numbering_mode=mode,
+        ),
+        evidence=MatchEvidence(
+            method=f"{method}+numbering-inference" if attempted else method,
+            confidence=confidence,
+            reasons=(*reasons, *numbering_reasons),
+            candidates=candidates,
+        ),
+    )
+
+
 def resolve_show_group_with_provider(
     source_key: str,
     parses: Iterable[ParseResult],
@@ -501,22 +580,19 @@ def resolve_show_group_with_provider(
             if identity.provider == "tvmaze"
             else "explicit-provider-id"
         )
-        return ShowResolution(
-            status=ResolutionStatus.MATCHED,
-            show=CanonicalShow(
-                source_key=source_key,
-                provider_identity=identity,
-                title=title,
-                year=year_hint,
-                numbering_mode=_numbering_mode(override),
-            ),
-            evidence=MatchEvidence(
-                method=method,
-                confidence=1.0,
-                reasons=(
-                    "single-explicit-provider-identity",
-                    f"provider-identity:{identity.key}",
-                ),
+        return _resolved_show_result(
+            source_key=source_key,
+            parse_group=parse_group,
+            override=override,
+            provider=provider,
+            provider_identity=identity,
+            title=title,
+            year=year_hint,
+            method=method,
+            confidence=1.0,
+            reasons=(
+                "single-explicit-provider-identity",
+                f"provider-identity:{identity.key}",
             ),
         )
 
@@ -575,23 +651,18 @@ def resolve_show_group_with_provider(
         )
         title = _preferred_title(override, source_title, provider_show.title)
         assert title is not None
-        return ShowResolution(
-            status=ResolutionStatus.MATCHED,
-            show=CanonicalShow(
-                source_key=source_key,
-                provider_identity=provider_show.identity,
-                title=title,
-                year=(
-                    provider_show.year if provider_show.year is not None else year_hint
-                ),
-                numbering_mode=_numbering_mode(override),
-            ),
-            evidence=MatchEvidence(
-                method=provider_method,
-                confidence=top.score,
-                reasons=(f"candidate-gap:{gap:.3f}",),
-                candidates=ranked,
-            ),
+        return _resolved_show_result(
+            source_key=source_key,
+            parse_group=parse_group,
+            override=override,
+            provider=provider,
+            provider_identity=provider_show.identity,
+            title=title,
+            year=(provider_show.year if provider_show.year is not None else year_hint),
+            method=provider_method,
+            confidence=top.score,
+            reasons=(f"candidate-gap:{gap:.3f}",),
+            candidates=ranked,
         )
 
     mode = _numbering_mode(override)
