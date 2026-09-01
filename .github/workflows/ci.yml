@@ -52,7 +52,7 @@ jobs:
         run: python -m ruff check jellyfin_show_organizer tests tools
 
       - name: Format check
-        run: python -m ruff format --diff jellyfin_show_organizer tests tools
+        run: python -m ruff format --check jellyfin_show_organizer tests tools
 
       - name: Type check
         run: python -m mypy jellyfin_show_organizer tests
