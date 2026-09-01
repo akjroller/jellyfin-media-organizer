@@ -134,7 +134,13 @@ class TvmazeAliasCache:
                 raise ValueError("alias cache response must be a JSON object array")
             if error is not None and response is not None:
                 raise ValueError("failed alias cache entries cannot carry responses")
-        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        except (
+            OSError,
+            UnicodeError,
+            json.JSONDecodeError,
+            TypeError,
+            ValueError,
+        ) as exc:
             return AliasCacheRecord(
                 request_key=request_key,
                 response=None,
