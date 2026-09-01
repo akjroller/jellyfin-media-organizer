@@ -97,7 +97,7 @@ def test_provider_subtitle_prefix_requires_multi_episode_catalog_confirmation() 
     )
 
 
-def test_single_episode_provider_subtitle_prefix_stays_unresolved() -> None:
+def test_single_episode_provider_subtitle_prefix_stays_blocked() -> None:
     result = resolve_show_group_with_provider(
         "Example Frontier",
         (
@@ -112,7 +112,7 @@ def test_single_episode_provider_subtitle_prefix_stays_unresolved() -> None:
         Provider(),
     )
 
-    assert result.status is ResolutionStatus.UNRESOLVED
+    assert result.status is ResolutionStatus.SUSPICIOUS
     assert result.show is None
     assert result.evidence.confidence == 0.88
-    assert "provider-evidence-below-threshold" in result.evidence.reasons
+    assert "ambiguous-top-candidates" in result.evidence.reasons
