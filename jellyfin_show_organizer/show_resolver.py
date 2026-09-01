@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from typing import Any
 
 from . import _show_resolver_core as _core
-from .models import CandidateEvidence, ParseResult
+from .models import CandidateEvidence, ParseResult, ProviderIdentity
 from .overrides import OverrideCatalog
 from .provider_aliases import TvmazeAliasProviderAdapter
 from .providers import MetadataProvider, ProviderShow
@@ -62,6 +62,23 @@ def _top_contenders(
     )
 
 
+def _structural_candidate_reasons(
+    candidate: CandidateEvidence,
+    provider_by_identity: Mapping[ProviderIdentity, ProviderShow],
+    span: tuple[int, int],
+    span_reason: str,
+) -> tuple[str, ...]:
+    show = provider_by_identity.get(candidate.provider_identity)
+    if show is None or show.year is None:
+        return ()
+    start, end = span
+    return (
+        span_reason,
+        f"provider-year:{show.year}",
+        f"structural-year-compatible:{str(start <= show.year <= end).casefold()}",
+    )
+
+
 def _structural_year_resolution(
     source_key: str,
     parse_group: tuple[ParseResult, ...],
@@ -114,15 +131,17 @@ def _structural_year_resolution(
     if not snapshot.resolved:
         return None
     provider_by_identity = {show.identity: show for show in snapshot.shows}
-    contender_shows: list[ProviderShow] = []
+    contender_shows: list[tuple[ProviderShow, int]] = []
     for contender in contenders:
         show = provider_by_identity.get(contender.provider_identity)
         if show is None or show.year is None:
             return None
-        contender_shows.append(show)
+        contender_shows.append((show, show.year))
 
     start, end = span
-    compatible = tuple(show for show in contender_shows if start <= show.year <= end)
+    compatible = tuple(
+        show for show, year in contender_shows if start <= year <= end
+    )
     if len(compatible) != 1:
         return None
     winner_show = compatible[0]
@@ -133,17 +152,11 @@ def _structural_year_resolution(
             candidate,
             reasons=(
                 *candidate.reasons,
-                *(
-                    (
-                        span_reason,
-                        f"provider-year:{provider_by_identity[candidate.provider_identity].year}",
-                        "structural-year-compatible:"
-                        f"{str(start <= provider_by_identity[candidate.provider_identity].year <= end).casefold()}",
-                    )
-                    if candidate.provider_identity in provider_by_identity
-                    and provider_by_identity[candidate.provider_identity].year
-                    is not None
-                    else ()
+                *_structural_candidate_reasons(
+                    candidate,
+                    provider_by_identity,
+                    span,
+                    span_reason,
                 ),
             ),
         )
