@@ -126,8 +126,21 @@ def _assignment(
     )
 
 
-def _evidence_family(parse: ParseResult) -> str:
+def _expected_family(mode: NumberingMode) -> str:
+    if mode is NumberingMode.AIRED:
+        return "aired"
+    if mode in {NumberingMode.ABSOLUTE, NumberingMode.PARENTHESIZED_ABSOLUTE}:
+        return "absolute"
+    if mode is NumberingMode.SPECIAL:
+        return "special"
+    if mode is NumberingMode.DATE:
+        return "date"
+    return "segment"
+
+
+def _evidence_family(parse: ParseResult, mode: NumberingMode) -> str:
     has_aired = parse.season is not None or bool(parse.episodes)
+    has_complete_aired = parse.season is not None and bool(parse.episodes)
     has_absolute = parse.absolute_episode is not None
     has_special = parse.special_kind is not None or parse.special_episode is not None
     has_date = parse.episode_date is not None
@@ -136,6 +149,14 @@ def _evidence_family(parse: ParseResult) -> str:
         if has_absolute or has_special or has_date:
             return "conflict"
         return "segment"
+
+    if has_aired and has_absolute:
+        if not has_complete_aired or has_special or has_date:
+            return "conflict"
+        selected = _expected_family(mode)
+        if selected in {"aired", "absolute"}:
+            return selected
+        return "conflict"
 
     families = [
         family
@@ -152,16 +173,19 @@ def _evidence_family(parse: ParseResult) -> str:
     return families[0] if families else "none"
 
 
-def _expected_family(mode: NumberingMode) -> str:
-    if mode is NumberingMode.AIRED:
-        return "aired"
-    if mode in {NumberingMode.ABSOLUTE, NumberingMode.PARENTHESIZED_ABSOLUTE}:
-        return "absolute"
-    if mode is NumberingMode.SPECIAL:
-        return "special"
-    if mode is NumberingMode.DATE:
-        return "date"
-    return "segment"
+def _dual_aired_reason(parse: ParseResult) -> str | None:
+    if parse.absolute_episode is None:
+        return None
+    return f"dual-numbering-evidence:secondary-absolute:{parse.absolute_episode}"
+
+
+def _dual_absolute_reason(parse: ParseResult) -> str | None:
+    if parse.season is None or not parse.episodes:
+        return None
+    coordinates = ",".join(
+        f"S{parse.season:02d}E{episode:02d}" for episode in parse.episodes
+    )
+    return f"dual-numbering-evidence:secondary-aired:{coordinates}"
 
 
 def _aired_assignment(
@@ -181,8 +205,7 @@ def _aired_assignment(
             f"catalog-request:{request_key}",
         )
     if (
-        parse.absolute_episode is not None
-        or parse.segment_hint is not None
+        parse.segment_hint is not None
         or parse.special_kind is not None
         or parse.episode_date is not None
     ):
@@ -213,6 +236,9 @@ def _aired_assignment(
         f"numbering-mode:{show.numbering_mode.value}",
         f"catalog-request:{request_key}",
     ]
+    dual_reason = _dual_aired_reason(parse)
+    if dual_reason is not None:
+        reasons.append(dual_reason)
     for number in parse.episodes:
         episode = by_coordinate.get((parse.season, number))
         if episode is None:
@@ -255,9 +281,9 @@ def _absolute_assignment(
             "missing-absolute-numbering-evidence",
             f"catalog-request:{request_key}",
         )
+    has_aired = parse.season is not None or bool(parse.episodes)
     if (
-        parse.season is not None
-        or parse.episodes
+        (has_aired and (parse.season is None or not parse.episodes))
         or parse.segment_hint is not None
         or parse.special_kind is not None
         or parse.episode_date is not None
@@ -288,14 +314,24 @@ def _absolute_assignment(
         )
 
     episode = regular[absolute - 1]
+    reasons = [
+        f"numbering-mode:{show.numbering_mode.value}",
+        f"catalog-request:{request_key}",
+    ]
+    dual_reason = _dual_absolute_reason(parse)
+    if dual_reason is not None:
+        reasons.append(dual_reason)
+    reasons.extend(
+        (
+            f"absolute-match:{absolute}->S{episode.season:02d}E{episode.number:02d}",
+            _episode_identity_reason(episode),
+        )
+    )
     return _assignment(
         source.source_key,
         AssignmentStatus.MATCHED,
         "episode-catalog",
-        f"numbering-mode:{show.numbering_mode.value}",
-        f"catalog-request:{request_key}",
-        f"absolute-match:{absolute}->S{episode.season:02d}E{episode.number:02d}",
-        _episode_identity_reason(episode),
+        *reasons,
         episodes=(episode,),
         confidence=1.0,
     )
@@ -702,9 +738,12 @@ def assign_episode_group_with_provider(
         )
 
     families = {
-        _evidence_family(source.parse)
+        family
         for source in source_group
-        if _evidence_family(source.parse) != "none"
+        if (
+            family := _evidence_family(source.parse, show.numbering_mode)
+        )
+        != "none"
     }
     if "conflict" in families or len(families) > 1:
         reason = "mixed-numbering-evidence:" + ",".join(sorted(families))
