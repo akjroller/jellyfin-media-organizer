@@ -156,23 +156,33 @@ def _dominates(left: ReleaseQualityEvidence, right: ReleaseQualityEvidence) -> b
 def select_unique_release_quality_winner(
     evidence: tuple[ReleaseQualityEvidence, ...],
 ) -> tuple[int | None, str]:
-    """Select a unique Pareto-dominant release only within compatible evidence."""
+    """Select a unique Pareto-dominant release only within compatible evidence.
+
+    A missing release-source token is not itself a quality signal. Resolution and
+    revision may still be compared when every candidate has an unknown source. In a
+    mixed known/unknown group, automatic selection is allowed only when the unique
+    Pareto winner has a known source and every unknown-source candidate is strictly
+    lower resolution. That prevents an unknown source from winning or tying a known
+    source while still resolving obvious lower-resolution alternates.
+    """
 
     if len(evidence) < 2:
         return None, "release-quality comparison requires at least two candidates"
 
     if any(item.errors for item in evidence):
         return None, "release-quality evidence contains conflicting parsed signals"
-    if any(item.resolution is None or item.source_family is None for item in evidence):
+    if any(item.resolution is None for item in evidence):
         return None, "release-quality evidence is incomplete"
-
-    source_families = {item.source_family for item in evidence}
-    if len(source_families) != 1:
-        return None, "release source families are incomparable"
 
     modes = {item.remux for item in evidence}
     if len(modes) != 1:
         return None, "remux and encode candidates are incomparable"
+
+    known_families = {
+        item.source_family for item in evidence if item.source_family is not None
+    }
+    if len(known_families) > 1:
+        return None, "release source families are incomparable"
 
     winners = tuple(
         index
@@ -188,6 +198,24 @@ def select_unique_release_quality_winner(
     winner_index = winners[0]
     winner = evidence[winner_index]
     assert winner.resolution is not None
+
+    unknown_indexes = tuple(
+        index for index, item in enumerate(evidence) if item.source_family is None
+    )
+    source_reason: str | None = None
+    if len(unknown_indexes) == len(evidence):
+        source_reason = "all release source families are unknown"
+    elif unknown_indexes:
+        if winner.source_family is None:
+            return None, "release-quality evidence is incomplete"
+        if any(
+            evidence[index].resolution is None
+            or evidence[index].resolution >= winner.resolution
+            for index in unknown_indexes
+        ):
+            return None, "release-quality evidence is incomplete"
+        source_reason = "known-source winner exceeds lower-resolution unknown-source candidates"
+
     dimensions: list[str] = []
     if any(
         other.resolution is not None and winner.resolution > other.resolution
@@ -201,4 +229,8 @@ def select_unique_release_quality_winner(
         if index != winner_index
     ):
         dimensions.append("revision")
-    return winner_index, "unique release-quality dominance via " + "+".join(dimensions)
+
+    reason = "unique release-quality dominance via " + "+".join(dimensions)
+    if source_reason is not None:
+        reason += f" ({source_reason})"
+    return winner_index, reason
