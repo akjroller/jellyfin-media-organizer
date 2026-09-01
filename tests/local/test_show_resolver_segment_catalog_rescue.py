@@ -23,7 +23,9 @@ ALPHA = ProviderIdentity("fixture", "alpha")
 BETA = ProviderIdentity("fixture", "beta")
 
 
-def _episode(show: str, value: str, season: int, number: int, title: str) -> ProviderEpisode:
+def _episode(
+    show: str, value: str, season: int, number: int, title: str
+) -> ProviderEpisode:
     return ProviderEpisode(
         identity=ProviderIdentity("fixture", f"{show}-{value}"),
         season=season,
@@ -64,7 +66,9 @@ class SegmentProvider:
             shows=self.searches.get(title, ()),
         )
 
-    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
         return self.catalogs[show_identity]
 
 
