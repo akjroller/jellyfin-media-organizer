@@ -214,7 +214,9 @@ def select_unique_release_quality_winner(
             for index in unknown_indexes
         ):
             return None, "release-quality evidence is incomplete"
-        source_reason = "known-source winner exceeds lower-resolution unknown-source candidates"
+        source_reason = (
+            "known-source winner exceeds lower-resolution unknown-source candidates"
+        )
 
     dimensions: list[str] = []
     if any(
