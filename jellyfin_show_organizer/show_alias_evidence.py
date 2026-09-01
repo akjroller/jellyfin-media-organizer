@@ -8,7 +8,7 @@ from difflib import SequenceMatcher
 from .models import CandidateEvidence, NumberingMode, ParseResult, ProviderIdentity
 from .numbering_inference import infer_group_numbering_mode
 from .provider_aliases import ProviderAliasSnapshot, TvmazeAliasProviderAdapter
-from .providers import MetadataProvider, ProviderShow
+from .providers import MetadataProvider, ProviderEpisodeCatalog, ProviderShow
 from .tvmaze_cache import TvmazeCatalogCache
 
 _ALIAS_SIMILARITY_FLOOR = 0.90
@@ -202,9 +202,10 @@ def _catalog_rescue_mode(parses: tuple[ParseResult, ...]) -> NumberingMode | Non
     """Return one already-unambiguous numbering family suitable for show rescue.
 
     Low-confidence show identity rescue must not use the provider catalog to decide
-    two things at once. Dual aired/absolute evidence belongs to the #109 numbering
-    inference path after the show is already resolved; here every source must carry
-    one complete, consistent aired or absolute family before any catalog is fetched.
+    two things at once. Dual aired/absolute evidence belongs to the numbering
+    inference path after the show is already resolved. Segment-title evidence is
+    also safe for identity rescue when every source has a title and any aired
+    coordinate is merely secondary evidence.
     """
 
     if not parses:
@@ -214,14 +215,21 @@ def _catalog_rescue_mode(parses: tuple[ParseResult, ...]) -> NumberingMode | Non
     for parse in parses:
         has_aired = parse.season is not None or bool(parse.episodes)
         has_absolute = parse.absolute_episode is not None
-        has_other = any(
-            (
-                parse.special_episode is not None,
-                parse.episode_date is not None,
-                parse.segment_hint is not None,
-            )
-        )
-        if sum((has_aired, has_absolute, has_other)) != 1:
+        has_special = parse.special_episode is not None
+        has_date = parse.episode_date is not None
+        has_segment = parse.segment_hint is not None
+
+        if has_segment:
+            if has_absolute or has_special or has_date:
+                return None
+            if parse.title_hint is None or not parse.title_hint.strip():
+                return None
+            if has_aired and (parse.season is None or not parse.episodes):
+                return None
+            modes.append(NumberingMode.SEGMENT_TITLE)
+            continue
+
+        if sum((has_aired, has_absolute, has_special, has_date)) != 1:
             return None
 
         if has_aired:
@@ -242,6 +250,59 @@ def _catalog_rescue_mode(parses: tuple[ParseResult, ...]) -> NumberingMode | Non
     return first
 
 
+def _segment_catalog_compatibility(
+    parses: tuple[ParseResult, ...],
+    catalog: ProviderEpisodeCatalog,
+) -> tuple[bool | None, tuple[str, ...]]:
+    request_reason = f"catalog-rescue-request:{catalog.request_key}"
+    if not catalog.resolved:
+        return None, (
+            request_reason,
+            "segment-catalog-rescue:indeterminate-catalog",
+            f"catalog-unresolved:{catalog.unresolved_reason or 'provider-catalog-unresolved'}",
+        )
+    if catalog.errors:
+        return None, (
+            request_reason,
+            "segment-catalog-rescue:indeterminate-catalog",
+            *(f"catalog-error:{error}" for error in catalog.errors),
+        )
+
+    by_title: dict[str, list[ProviderIdentity]] = {}
+    for episode in catalog.episodes:
+        title = _normalize(episode.title)
+        if title:
+            by_title.setdefault(title, []).append(episode.identity)
+
+    observed = tuple(
+        sorted(
+            {
+                _normalize(parse.title_hint or "")
+                for parse in parses
+                if parse.title_hint is not None and parse.title_hint.strip()
+            }
+        )
+    )
+    reasons: list[str] = [request_reason]
+    selected: list[ProviderIdentity] = []
+    for title in observed:
+        matches = tuple(by_title.get(title, ()))
+        if not matches:
+            reasons.append(f"segment-catalog-missing-title:{title}")
+            return False, tuple(reasons)
+        if len(matches) != 1:
+            reasons.append(f"segment-catalog-ambiguous-title:{title}")
+            return False, tuple(reasons)
+        selected.append(matches[0])
+
+    if len(set(selected)) != len(selected):
+        reasons.append("segment-catalog-distinct-titles-collapse")
+        return False, tuple(reasons)
+
+    reasons.append("segment-catalog-compatible:true")
+    return True, tuple(reasons)
+
+
 def catalog_group_rescue(
     provider: MetadataProvider,
     parses: tuple[ParseResult, ...],
@@ -252,8 +313,7 @@ def catalog_group_rescue(
     Every provider-search candidate is evaluated so a low textual score cannot hide
     a catalog-compatible competitor. Any incomplete candidate catalog blocks the
     rescue. A candidate itself is compatible only when the group's already-
-    unambiguous numbering family is uniquely compatible with that candidate's
-    catalog.
+    unambiguous evidence is uniquely compatible with that candidate's catalog.
     """
 
     expected_mode = _catalog_rescue_mode(parses)
@@ -266,6 +326,16 @@ def catalog_group_rescue(
 
     for candidate in sorted(ranked, key=lambda item: item.provider_identity.key):
         catalog = provider.episode_catalog(candidate.provider_identity)
+        if expected_mode is NumberingMode.SEGMENT_TITLE:
+            compatible, reasons = _segment_catalog_compatibility(parses, catalog)
+            candidate_reasons[candidate.provider_identity] = reasons
+            if compatible is None:
+                indeterminate = True
+            outcomes[candidate.provider_identity] = (
+                NumberingMode.SEGMENT_TITLE if compatible else None
+            )
+            continue
+
         inference = infer_group_numbering_mode(parses, catalog)
         candidate_reasons[candidate.provider_identity] = (
             f"catalog-rescue-request:{catalog.request_key}",
