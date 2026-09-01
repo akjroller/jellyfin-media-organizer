@@ -1,0 +1,129 @@
+name: Issue 36 rebuild
+
+on:
+  push:
+    branches: [issue-36-episode-decisions-rebuild]
+
+permissions:
+  contents: write
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_CONSTRAINT: ${{ github.workspace }}/requirements-ci.txt
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: issue-36-episode-decisions-rebuild
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Transplant issue 36 feature onto current main
+        shell: bash
+        run: |
+          git fetch origin issue-36-episode-decisions
+          git show origin/issue-36-episode-decisions:jellyfin_show_organizer/overrides.py > jellyfin_show_organizer/overrides.py
+          git show origin/issue-36-episode-decisions:docs/local-overrides.md > docs/local-overrides.md
+          git show origin/issue-36-episode-decisions:tests/local/test_episode_decision_overrides.py > tests/local/test_episode_decision_overrides.py
+          git show origin/issue-36-episode-decisions:tests/local/test_episode_decision_planning.py > tests/local/test_episode_decision_planning.py
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("jellyfin_show_organizer/planner.py")
+          text = path.read_text(encoding="utf-8")
+
+          old = "from .overrides import OverrideCatalog, load_overrides\n"
+          new = "from .overrides import EpisodeDecisionOverride, OverrideCatalog, load_overrides\n"
+          if old not in text:
+              raise SystemExit("override import insertion point missing")
+          text = text.replace(old, new, 1)
+
+          old = '''def _reason(evidence: MatchEvidence) -> str:\n    return "; ".join(evidence.reasons) or evidence.method\n'''
+          new = '''def _episode_decision_evidence(decision: EpisodeDecisionOverride) -> MatchEvidence:\n    return MatchEvidence(\n        method="episode-decision-override",\n        confidence=1.0,\n        reasons=(\n            f"episode-decision-provider:{decision.show_provider_identity.key}",\n            f"episode-decision-numbering-mode:{decision.numbering_mode.value}",\n            *decision.reasons,\n        ),\n    )\n\n\ndef _reason(evidence: MatchEvidence) -> str:\n    return "; ".join(evidence.reasons) or evidence.method\n'''
+          if old not in text:
+              raise SystemExit("evidence insertion point missing")
+          text = text.replace(old, new, 1)
+
+          old = '''def _plan_resolved_group(\n    sources: tuple[SourceFile, ...],\n    classifications: Mapping[str, ExtraClassification],\n    resolution: ShowResolution,\n    provider: MetadataProvider,\n    destination_policy: DestinationPolicy,\n) -> list[PlanRecord]:\n'''
+          new = '''def _plan_resolved_group(\n    sources: tuple[SourceFile, ...],\n    classifications: Mapping[str, ExtraClassification],\n    resolution: ShowResolution,\n    provider: MetadataProvider,\n    destination_policy: DestinationPolicy,\n    overrides: OverrideCatalog,\n) -> list[PlanRecord]:\n'''
+          if old not in text:
+              raise SystemExit("resolved group signature missing")
+          text = text.replace(old, new, 1)
+
+          old = '''    records: list[PlanRecord] = []\n    episode_sources: list[SourceEpisodeInput] = []\n\n    for source in sources:\n        classification = classifications[source.relative_path]\n        group_id = _operation_group_id(source.relative_path)\n'''
+          new = '''    records: list[PlanRecord] = []\n    episode_sources: list[SourceEpisodeInput] = []\n    decision_evidence: dict[str, MatchEvidence] = {}\n\n    for source in sources:\n        classification = classifications[source.relative_path]\n        group_id = _operation_group_id(source.relative_path)\n        decision = overrides.episode_decision_for(source.relative_path)\n        if decision is not None:\n            if classification.disposition is not ExtraDisposition.EPISODE_CANDIDATE:\n                raise PlanningConfigurationError(\n                    "episode decision source is not an episode candidate"\n                )\n            if decision.show_provider_identity != show.provider_identity:\n                raise PlanningConfigurationError(\n                    "episode decision provider identity conflicts with resolved show"\n                )\n            if decision.numbering_mode is not show.numbering_mode:\n                raise PlanningConfigurationError(\n                    "episode decision numbering mode conflicts with resolved show"\n                )\n'''
+          if old not in text:
+              raise SystemExit("resolved group loop insertion point missing")
+          text = text.replace(old, new, 1)
+
+          old = '''        episode_sources.append(\n            SourceEpisodeInput(\n                source_key=source.relative_path,\n                parse=classification.parse,\n            )\n        )\n'''
+          new = '''        effective_parse = classification.parse\n        if decision is not None:\n            effective_parse = decision.apply_to(effective_parse)\n            decision_evidence[source.relative_path] = _episode_decision_evidence(\n                decision\n            )\n        episode_sources.append(\n            SourceEpisodeInput(\n                source_key=source.relative_path,\n                parse=effective_parse,\n            )\n        )\n'''
+          if old not in text:
+              raise SystemExit("episode source insertion point missing")
+          text = text.replace(old, new, 1)
+
+          old = '''        assignment = assignments[source.relative_path]\n        evidence = _combine_evidence(resolution.evidence, assignment.evidence)\n        group_id = _operation_group_id(source.relative_path)\n'''
+          new = '''        assignment = assignments[source.relative_path]\n        evidence_parts = [resolution.evidence]\n        local_decision_evidence = decision_evidence.get(source.relative_path)\n        if local_decision_evidence is not None:\n            evidence_parts.append(local_decision_evidence)\n        evidence_parts.append(assignment.evidence)\n        evidence = _combine_evidence(*evidence_parts)\n        group_id = _operation_group_id(source.relative_path)\n'''
+          if old not in text:
+              raise SystemExit("assignment evidence insertion point missing")
+          text = text.replace(old, new, 1)
+
+          marker = '''def _build_plan(\n'''
+          helpers = '''def _configured_episode_decision_keys(overrides: OverrideCatalog) -> set[str]:\n    return {_path_key(decision.source)[0] for decision in overrides.episode_decisions}\n\n\ndef _validate_episode_decision_sources(\n    sources: tuple[SourceFile, ...],\n    overrides: OverrideCatalog,\n) -> None:\n    configured = _configured_episode_decision_keys(overrides)\n    available = {_path_key(source.relative_path)[0] for source in sources}\n    if configured - available:\n        raise PlanningConfigurationError(\n            "episode decision references an unknown source"\n        )\n\n\ndef _validate_episode_decision_consumption(\n    records: list[PlanRecord],\n    overrides: OverrideCatalog,\n) -> None:\n    configured = _configured_episode_decision_keys(overrides)\n    if not configured:\n        return\n    consumed = {\n        _path_key(record.source.relative_path)[0]\n        for record in records\n        if record.evidence is not None\n        and "episode-decision-override" in record.evidence.method.split("+")\n    }\n    if configured - consumed:\n        raise PlanningConfigurationError(\n            "episode decision could not be consumed safely"\n        )\n\n\n'''
+          if marker not in text:
+              raise SystemExit("build plan marker missing")
+          text = text.replace(marker, helpers + marker, 1)
+
+          old = '''    if not sources:\n        raise PlanningConfigurationError("no included video files were found")\n    sidecars = discover_sidecars(source_root, sources)\n'''
+          new = '''    if not sources:\n        raise PlanningConfigurationError("no included video files were found")\n    _validate_episode_decision_sources(sources, overrides)\n    sidecars = discover_sidecars(source_root, sources)\n'''
+          if old not in text:
+              raise SystemExit("source validation insertion point missing")
+          text = text.replace(old, new, 1)
+
+          old = '''                resolution,\n                provider,\n                destination_policy,\n            )\n        )\n\n    records = _apply_duplicate_decisions(records, sidecars, overrides)\n'''
+          new = '''                resolution,\n                provider,\n                destination_policy,\n                overrides,\n            )\n        )\n\n    _validate_episode_decision_consumption(records, overrides)\n    records = _apply_duplicate_decisions(records, sidecars, overrides)\n'''
+          if old not in text:
+              raise SystemExit("resolved group call insertion point missing")
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding="utf-8")
+
+          test_path = Path("tests/local/test_episode_decision_planning.py")
+          tests = test_path.read_text(encoding="utf-8")
+          old = '''from jellyfin_show_organizer.planner import (\n    PlanningConfigurationError,\n    TrackingTvmazeCatalogCache,\n    _plan_resolved_group,\n)\n'''
+          new = '''from jellyfin_show_organizer.planner import (\n    PlanningConfigurationError,\n    TrackingTvmazeCatalogCache,\n    _plan_resolved_group,\n    _validate_episode_decision_consumption,\n    _validate_episode_decision_sources,\n)\nfrom jellyfin_show_organizer.providers import TvmazeProviderAdapter\n'''
+          if old not in tests:
+              raise SystemExit("planning test import block missing")
+          tests = tests.replace(old, new, 1)
+
+          old = '''    records = _plan_resolved_group(\n        (_source(),),\n        {SOURCE: classified},\n        resolved,\n        TrackingTvmazeCatalogCache(\n            tmp_path / "cache",\n            offline=False,\n            refresh=False,\n        ),\n        provider,\n        DestinationPolicy(),\n        _overrides(decision),\n    )\n'''
+          new = '''    cache = TrackingTvmazeCatalogCache(\n        tmp_path / "cache",\n        offline=False,\n        refresh=False,\n    )\n    records = _plan_resolved_group(\n        (_source(),),\n        {SOURCE: classified},\n        resolved,\n        TvmazeProviderAdapter(cache, provider),\n        DestinationPolicy(),\n        _overrides(decision),\n    )\n'''
+          if old not in tests:
+              raise SystemExit("planning test provider call missing")
+          tests = tests.replace(old, new, 1)
+
+          tests += '''\n\ndef test_episode_decision_rejects_unknown_source() -> None:\n    decision = _decision()\n    with pytest.raises(\n        PlanningConfigurationError,\n        match="references an unknown source",\n    ):\n        _validate_episode_decision_sources((), _overrides(decision))\n\n\ndef test_episode_decision_rejects_unconsumed_existing_source() -> None:\n    decision = _decision()\n    source = _source()\n    _validate_episode_decision_sources((source,), _overrides(decision))\n\n    with pytest.raises(\n        PlanningConfigurationError,\n        match="could not be consumed safely",\n    ):\n        _validate_episode_decision_consumption([], _overrides(decision))\n'''
+          test_path.write_text(tests, encoding="utf-8")
+          PY
+      - name: Verify rebuilt change
+        shell: bash
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m ruff format jellyfin_show_organizer tests tools
+          python -m ruff check jellyfin_show_organizer tests tools
+          python -m ruff format --check jellyfin_show_organizer tests tools
+          python -m mypy jellyfin_show_organizer tests
+          JMO_TEST_NO_NETWORK=1 python -m pytest
+          python -m organizer --version
+      - name: Commit rebuilt feature
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/local-overrides.md jellyfin_show_organizer/overrides.py jellyfin_show_organizer/planner.py tests/local/test_episode_decision_overrides.py tests/local/test_episode_decision_planning.py
+          git commit -m "Add scoped episode decision override workflow"
+          git push origin HEAD:issue-36-episode-decisions-rebuild
