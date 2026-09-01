@@ -39,6 +39,24 @@ def test_structural_initialism_is_strong_but_compaction_is_not_direct_match() ->
     assert compact_reasons == ("compacted-source-prefix",)
 
 
+def test_provider_colon_subtitle_is_structural_evidence_not_a_direct_match() -> None:
+    score, reasons = structural_title_score(
+        ("example frontier",),
+        "Example Frontier: The Long Journey",
+    )
+
+    assert score == 0.78
+    assert reasons == ("provider-subtitle-prefix",)
+    assert structural_title_score(("example",), "Example: The Long Journey") == (
+        None,
+        (),
+    )
+    assert structural_title_score(
+        ("example frontier",),
+        "Example Frontier Revisited",
+    ) == (None, ())
+
+
 def test_air_catalog_rescue_needs_multiple_coordinates() -> None:
     identity = ProviderIdentity("fixture", "one")
     ranked = (
