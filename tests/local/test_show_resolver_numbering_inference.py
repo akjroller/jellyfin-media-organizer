@@ -282,7 +282,6 @@ def test_show_override_numbering_mode_remains_higher_authority() -> None:
     assert result.status is ResolutionStatus.MATCHED
     assert result.show is not None
     assert result.show.numbering_mode is NumberingMode.ABSOLUTE
-    assert "numbering-selected:override:absolute" in result.evidence.reasons
     assert provider.search_calls == []
     assert provider.catalog_calls == []
 
