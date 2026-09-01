@@ -243,8 +243,9 @@ def _fit_relative_path(
     middle_folder = sanitize_component(
         middle_folder_raw, max_length=policy.max_component_length
     )
-    filename_stem = sanitize_component(
-        filename_stem_raw, max_length=policy.max_component_length
+    filename_stem_limit = policy.max_component_length - len(extension)
+    filename_stem = _truncate_component(
+        _escape_component(filename_stem_raw), filename_stem_limit
     )
 
     reasons: list[str] = []
