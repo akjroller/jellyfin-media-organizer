@@ -64,9 +64,7 @@ class Provider:
         )
 
 
-def test_provider_subtitle_prefix_requires_multi_episode_catalog_confirmation() -> (
-    None
-):
+def test_provider_subtitle_prefix_requires_multi_episode_catalog_confirmation() -> None:
     result = resolve_show_group_with_provider(
         "Example Frontier",
         (
@@ -91,9 +89,7 @@ def test_provider_subtitle_prefix_requires_multi_episode_catalog_confirmation() 
     assert result.show is not None
     assert result.show.provider_identity == SHOW_ID
     assert result.evidence.confidence == 0.88
-    assert (
-        "aired-catalog-rescue:unique-compatible-candidate" in result.evidence.reasons
-    )
+    assert "aired-catalog-rescue:unique-compatible-candidate" in result.evidence.reasons
     assert any(
         "provider-subtitle-prefix" in reason
         for candidate in result.evidence.candidates
