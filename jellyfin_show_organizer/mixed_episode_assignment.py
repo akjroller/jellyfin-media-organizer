@@ -4,7 +4,6 @@ from collections.abc import Iterable
 from dataclasses import replace
 
 from .episode_assignment_strict import (
-    AssignmentStatus,
     EpisodeGroupAssignment,
     SourceEpisodeAssignment,
     SourceEpisodeInput,
