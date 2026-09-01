@@ -30,6 +30,9 @@ from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 _MATCH_THRESHOLD = 0.90
 _SUSPICIOUS_THRESHOLD = 0.75
 _MINIMUM_MATCH_GAP = 0.08
+_SEARCH_BACKOFF_STOPWORDS = frozenset(
+    {"a", "an", "and", "for", "in", "of", "on", "or", "the", "to"}
+)
 
 
 class ResolutionStatus(StrEnum):
@@ -62,6 +65,38 @@ def normalize_show_identity(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()
     normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
     return " ".join(normalized.split())
+
+
+def _search_backoff_titles(value: str) -> tuple[str, ...]:
+    """Return deterministic meaningful title prefixes for candidate discovery.
+
+    Backoff changes only the provider query used to discover candidates. It never
+    lowers the evidence threshold or directly selects a show.
+    """
+
+    normalized = unicodedata.normalize("NFKC", value)
+    tokens = re.findall(r"\w+", normalized, flags=re.UNICODE)
+    if len(tokens) < 2:
+        return ()
+
+    original_identity = normalize_show_identity(value)
+    seen: set[str] = {original_identity}
+    candidates: list[str] = []
+    for end in range(len(tokens) - 1, 0, -1):
+        prefix = " ".join(tokens[:end]).strip()
+        identity = normalize_show_identity(prefix)
+        if identity in seen or len(identity) < 4:
+            continue
+        meaningful = tuple(
+            token
+            for token in identity.split()
+            if token not in _SEARCH_BACKOFF_STOPWORDS
+        )
+        if not meaningful:
+            continue
+        seen.add(identity)
+        candidates.append(prefix)
+    return tuple(candidates)
 
 
 def _source_titles(parses: Iterable[ParseResult]) -> tuple[str, ...]:
@@ -618,9 +653,58 @@ def resolve_show_group_with_provider(
             snapshot.unresolved_reason or "provider-search-unresolved",
         )
 
+    search_reasons: list[str] = [f"provider-search-request:{snapshot.request_key}"]
     provider_candidates = snapshot.shows
     if not provider_candidates:
-        return _unresolved(provider_method, "no-valid-provider-candidates")
+        backoff_titles = _search_backoff_titles(search_title)
+        candidates_by_identity: dict[ProviderIdentity, ProviderShow] = {}
+        if backoff_titles:
+            provider_method = f"{provider_method}+search-backoff"
+            search_reasons.append("provider-search-backoff:attempted")
+        for backoff_title in backoff_titles:
+            backoff = provider.search_shows(backoff_title)
+            search_reasons.extend(
+                (
+                    f"provider-search-backoff-query:{normalize_show_identity(backoff_title)}",
+                    f"provider-search-backoff-request:{backoff.request_key}",
+                )
+            )
+            if not backoff.resolved:
+                return _unresolved(
+                    provider_method,
+                    *search_reasons,
+                    "provider-search-backoff:indeterminate",
+                    backoff.unresolved_reason or "provider-search-unresolved",
+                )
+            for candidate in backoff.shows:
+                previous = candidates_by_identity.get(candidate.identity)
+                if previous is not None and previous != candidate:
+                    return _unresolved(
+                        provider_method,
+                        *search_reasons,
+                        "provider-search-backoff:conflicting-candidate-metadata",
+                        f"provider-identity:{candidate.identity.key}",
+                    )
+                candidates_by_identity[candidate.identity] = candidate
+        if backoff_titles:
+            search_reasons.append("provider-search-backoff:complete")
+        provider_candidates = tuple(
+            sorted(
+                candidates_by_identity.values(),
+                key=lambda candidate: (
+                    normalize_show_identity(candidate.title),
+                    candidate.title,
+                    candidate.identity.key,
+                ),
+            )
+        )
+
+    if not provider_candidates:
+        return _unresolved(
+            provider_method,
+            *search_reasons,
+            "no-valid-provider-candidates",
+        )
 
     identities = {normalize_show_identity(title) for title in titles}
     identities.add(normalize_show_identity(source_key))
@@ -667,7 +751,7 @@ def resolve_show_group_with_provider(
             year=(provider_show.year if provider_show.year is not None else year_hint),
             method=provider_method,
             confidence=top.score,
-            reasons=(f"candidate-gap:{gap:.3f}",),
+            reasons=(*search_reasons, f"candidate-gap:{gap:.3f}"),
             candidates=ranked,
         )
 
@@ -712,7 +796,11 @@ def resolve_show_group_with_provider(
                 ),
                 method=method,
                 confidence=top.score,
-                reasons=(*alias_result.reasons, f"candidate-gap:{gap:.3f}"),
+                reasons=(
+                    *search_reasons,
+                    *alias_result.reasons,
+                    f"candidate-gap:{gap:.3f}",
+                ),
                 candidates=active_ranked,
             )
 
@@ -747,6 +835,7 @@ def resolve_show_group_with_provider(
                     method=f"{method}+catalog-tiebreak",
                     confidence=top.score,
                     reasons=(
+                        *search_reasons,
                         *(alias_result.reasons if alias_result is not None else ()),
                         *tie_break.reasons,
                         f"candidate-gap:{gap:.3f}",
@@ -786,6 +875,7 @@ def resolve_show_group_with_provider(
                         method=f"{method}+catalog-rescue",
                         confidence=top.score,
                         reasons=(
+                            *search_reasons,
                             *(alias_result.reasons if alias_result is not None else ()),
                             *rescue.reasons,
                             f"candidate-gap:{gap:.3f}",
@@ -817,6 +907,7 @@ def resolve_show_group_with_provider(
             confidence=top.score,
             reasons=(
                 reason,
+                *search_reasons,
                 *(alias_result.reasons if alias_result is not None else ()),
                 *(tie_break.reasons if tie_break is not None else ()),
                 *(rescue.reasons if rescue is not None else ()),
