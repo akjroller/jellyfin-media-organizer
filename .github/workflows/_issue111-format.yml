@@ -1,0 +1,38 @@
+name: Issue 111 format
+
+on:
+  push:
+    branches: [issue-111-release-quality-duplicates]
+
+permissions:
+  contents: write
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_CONSTRAINT: ${{ github.workspace }}/requirements-ci.txt
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: issue-111-release-quality-duplicates
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - run: |
+          python -m ruff format jellyfin_show_organizer/duplicate_classifier.py jellyfin_show_organizer/release_quality.py tests/local/test_duplicate_release_quality.py
+          python -m ruff check jellyfin_show_organizer/duplicate_classifier.py jellyfin_show_organizer/release_quality.py tests/local/test_duplicate_release_quality.py
+      - name: Persist formatted files
+        run: |
+          git config user.name "jmo-format"
+          git config user.email "jmo-format@users.noreply.github.com"
+          git add jellyfin_show_organizer/duplicate_classifier.py jellyfin_show_organizer/release_quality.py tests/local/test_duplicate_release_quality.py
+          if git diff --cached --quiet; then
+            echo "No formatting changes"
+          else
+            git commit -m "Format issue 111 changes [skip ci]"
+            git push
+          fi
