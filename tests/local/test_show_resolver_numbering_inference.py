@@ -5,8 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from jellyfin_show_organizer.models import NumberingMode, ParseResult, ProviderIdentity
-from jellyfin_show_organizer.overrides import OverrideCatalog, ShowOverride, load_overrides
+from jellyfin_show_organizer.models import (
+    NumberingMode,
+    ParseResult,
+    ProviderIdentity,
+)
+from jellyfin_show_organizer.overrides import (
+    OverrideCatalog,
+    ShowOverride,
+    load_overrides,
+)
 from jellyfin_show_organizer.planner import PlanningConfig, execute_plan
 from jellyfin_show_organizer.providers import (
     ProviderEpisode,
