@@ -653,7 +653,7 @@ def resolve_show_group_with_provider(
             snapshot.unresolved_reason or "provider-search-unresolved",
         )
 
-    search_reasons: list[str] = [f"provider-search-request:{snapshot.request_key}"]
+    search_reasons: list[str] = []
     provider_candidates = snapshot.shows
     if not provider_candidates:
         backoff_titles = _search_backoff_titles(search_title)
