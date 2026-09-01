@@ -114,7 +114,7 @@ def test_parenthesized_absolute_records_explicit_policy(tmp_path: Path) -> None:
     assert "numbering-mode:parenthesized-absolute" in assignment.evidence.reasons
 
 
-def test_mixed_numbering_evidence_fails_group_before_provider_access(
+def test_independent_aired_and_absolute_families_assign_against_same_catalog(
     tmp_path: Path,
 ) -> None:
     getter = CountingGetter()
@@ -128,13 +128,14 @@ def test_mixed_numbering_evidence_fails_group_before_provider_access(
         getter,
     )
 
-    assert result.status is AssignmentStatus.SUSPICIOUS
-    assert not getter.calls
-    assert all(not assignment.episodes for assignment in result.assignments)
+    assert result.status is AssignmentStatus.MATCHED
+    by_source = {assignment.source_key: assignment for assignment in result.assignments}
+    assert by_source["aired.mkv"].episodes[0].tvmaze_episode_id == 1001
+    assert by_source["absolute.mkv"].episodes[0].tvmaze_episode_id == 1002
     assert (
-        "mixed-numbering-evidence:absolute,aired"
-        in result.assignments[0].evidence.reasons
+        "mixed-numbering-family:absolute" in by_source["absolute.mkv"].evidence.reasons
     )
+    assert len(getter.calls) == 1
 
 
 def test_numbering_policy_conflict_fails_closed(tmp_path: Path) -> None:

@@ -228,7 +228,7 @@ def test_partial_catalog_cannot_eliminate_a_numbering_mode() -> None:
     assert "numbering-catalog-error:invalid-catalog-season:3" in result.evidence.reasons
 
 
-def test_mixed_single_mode_files_do_not_produce_a_group_guess() -> None:
+def test_mixed_single_mode_files_select_aired_primary_and_defer_absolute() -> None:
     result, _provider = _resolve(
         (
             ParseResult(
@@ -246,12 +246,12 @@ def test_mixed_single_mode_files_do_not_produce_a_group_guess() -> None:
         _three_episode_catalog(),
     )
 
-    assert result.status is ResolutionStatus.SUSPICIOUS
-    assert result.show is None
-    assert (
-        "numbering-inference:mixed-or-incomplete-group-evidence"
-        in result.evidence.reasons
-    )
+    assert result.status is ResolutionStatus.MATCHED
+    assert result.show is not None
+    assert result.show.numbering_mode is NumberingMode.AIRED
+    assert "numbering-inference:mixed-independent-families" in result.evidence.reasons
+    assert "numbering-primary:aired" in result.evidence.reasons
+    assert "numbering-selected:aired" in result.evidence.reasons
 
 
 def test_show_override_numbering_mode_remains_higher_authority() -> None:
