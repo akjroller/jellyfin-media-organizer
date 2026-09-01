@@ -249,7 +249,9 @@ def catalog_title_tiebreak(
 
     winners = tuple(
         identity
-        for identity, compatible in sorted(outcomes.items(), key=lambda item: item[0].key)
+        for identity, compatible in sorted(
+            outcomes.items(), key=lambda item: item[0].key
+        )
         if compatible
     )
     if len(winners) != 1:
@@ -344,7 +346,9 @@ def aired_catalog_rescue(
 
     winners = tuple(
         identity
-        for identity, compatible in sorted(outcomes.items(), key=lambda item: item[0].key)
+        for identity, compatible in sorted(
+            outcomes.items(), key=lambda item: item[0].key
+        )
         if compatible
     )
     if len(winners) != 1:
