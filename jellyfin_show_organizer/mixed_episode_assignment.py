@@ -25,6 +25,13 @@ _FAMILY_MODE = {
     "date": NumberingMode.DATE,
     "segment": NumberingMode.SEGMENT_TITLE,
 }
+_PARTITIONABLE_PRIMARY_MODES = frozenset(
+    {
+        NumberingMode.AIRED,
+        NumberingMode.ABSOLUTE,
+        NumberingMode.PARENTHESIZED_ABSOLUTE,
+    }
+)
 
 
 def _needs_partition(families: set[str], expected_family: str) -> bool:
@@ -66,11 +73,12 @@ def assign_episode_group_with_provider(
     """Assign a resolved show while isolating independent numbering families.
 
     The strict assignment engine remains authoritative for every individual family.
-    Partitioning is used only when a source group contains the configured/selected
-    primary family plus independent alternate evidence that the strict group-level
-    guard would otherwise reject wholesale. Each family is validated against the
-    same provider show catalog, and cross-family provider-episode collisions remain
-    fail-closed.
+    Partitioning is used only when an aired/absolute primary show contains the
+    selected primary family plus independent alternate evidence that the strict
+    group-level guard would otherwise reject wholesale. Explicit date, special, and
+    segment-title policies remain strict group-wide contracts. Each partitioned
+    family is validated against the same provider show catalog, and cross-family
+    provider-episode collisions remain fail-closed.
     """
 
     source_group = tuple(
@@ -81,6 +89,9 @@ def assign_episode_group_with_provider(
     )
     if not source_group:
         raise ValueError("episode assignment requires at least one source")
+
+    if show.numbering_mode not in _PARTITIONABLE_PRIMARY_MODES:
+        return _assign_strict_group(show, source_group, provider)
 
     expected_family = _expected_family(show.numbering_mode)
     family_by_source = {
