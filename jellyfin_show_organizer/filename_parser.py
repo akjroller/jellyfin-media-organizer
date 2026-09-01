@@ -64,6 +64,7 @@ _SEASON_NOISE = re.compile(
 )
 _GENERIC_SEASON_DIR = re.compile(r"(?i)^(?:season[ ._-]*\d{1,2}|s\d{1,2})$")
 _CHECKSUM = re.compile(r"(?i)(?:^|\s)[A-F0-9]{8}(?=$|\s)")
+_UNBRACKETED_RELEASE_PREFIX = re.compile(r"^(?P<tag>[A-Za-z0-9]+)-(?P<series>.+)$")
 
 
 def _normalize_text(value: str) -> str:
@@ -165,6 +166,51 @@ def _fallback_series(path: PurePosixPath) -> tuple[str | None, int | None]:
     return None, None
 
 
+def _parent_confirmed_prefixed_series(
+    stem: str,
+    path: PurePosixPath,
+    match: re.Match[str],
+) -> tuple[str, int | None] | None:
+    """Strip one leading release token only when the parent proves the remainder."""
+
+    if len(path.parts) < 2:
+        return None
+    parent = path.parts[-2]
+    parent_match = _SXE.search(parent)
+    if parent_match is None:
+        return None
+
+    file_episodes = _episode_list(int(match.group("episode")), match.group("tail"))
+    parent_episodes = _episode_list(
+        int(parent_match.group("episode")), parent_match.group("tail")
+    )
+    if (
+        int(match.group("season")) != int(parent_match.group("season"))
+        or file_episodes != parent_episodes
+        or (match.group("segment") or None) != (parent_match.group("segment") or None)
+    ):
+        return None
+
+    prefix = stem[: match.start()].strip(" ._-")
+    prefixed = _UNBRACKETED_RELEASE_PREFIX.fullmatch(prefix)
+    if prefixed is None:
+        return None
+
+    remainder_series, remainder_year = _series_and_year(prefixed.group("series"))
+    parent_series, parent_year = _series_and_year(parent[: parent_match.start()])
+    if remainder_series is None or parent_series is None:
+        return None
+    if remainder_series.casefold() != parent_series.casefold():
+        return None
+    if (
+        remainder_year is not None
+        and parent_year is not None
+        and remainder_year != parent_year
+    ):
+        return None
+    return parent_series, remainder_year if remainder_year is not None else parent_year
+
+
 def _series_for_match(
     stem: str,
     path: PurePosixPath,
@@ -254,6 +300,9 @@ def parse_video_path(relative_path: str) -> ParseResult:
     match = _SXE.search(stem)
     if match is not None:
         series, year = _series_for_match(stem, path, match)
+        parent_confirmed = _parent_confirmed_prefixed_series(stem, path, match)
+        if parent_confirmed is not None:
+            series, year = parent_confirmed
         absolute_episode, title_start = _dual_absolute_after_sxe(stem, match)
         return ParseResult(
             series_hint=series,
