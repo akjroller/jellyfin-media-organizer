@@ -464,11 +464,7 @@ def _numbering_for_resolved_show(
     identity: ProviderIdentity,
 ) -> tuple[NumberingMode | None, tuple[str, ...], bool]:
     if override is not None:
-        return (
-            override.numbering_mode,
-            (f"numbering-selected:override:{override.numbering_mode.value}",),
-            False,
-        )
+        return override.numbering_mode, (), False
     if not _has_auto_numbering_evidence(parses):
         return NumberingMode.AIRED, (), False
 
