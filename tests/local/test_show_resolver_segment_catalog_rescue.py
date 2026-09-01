@@ -124,7 +124,8 @@ def test_segment_titles_can_uniquely_rescue_show_identity() -> None:
     assert result.show is not None
     assert result.show.provider_identity == ALPHA
     assert result.show.numbering_mode is NumberingMode.SEGMENT_TITLE
-    assert result.evidence.method.endswith("+search-backoff+catalog-rescue")
+    assert "+search-backoff" in result.evidence.method
+    assert result.evidence.method.endswith("+catalog-rescue")
     assert "catalog-rescue-numbering-mode:segment-title" in result.evidence.reasons
 
 

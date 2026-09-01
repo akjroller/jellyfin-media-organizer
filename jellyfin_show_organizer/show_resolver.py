@@ -25,6 +25,12 @@ from .show_alias_evidence import (
     catalog_group_rescue,
     enrich_provider_alias_evidence,
 )
+from .show_structural_evidence import (
+    aired_catalog_rescue,
+    catalog_title_tiebreak,
+    structural_title_score,
+    token_merge_queries,
+)
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
 _MATCH_THRESHOLD = 0.90
@@ -216,8 +222,18 @@ def _score_candidate(
         score = 0.90
         reasons.append("exact-normalized-title")
     else:
-        score = 0.72 * best_ratio
-        reasons.append(f"title-similarity:{best_ratio:.3f}")
+        structural_score, structural_reasons = structural_title_score(
+            identities,
+            candidate.title,
+        )
+        fuzzy_score = 0.72 * best_ratio
+        if structural_score is not None and structural_score > fuzzy_score:
+            score = structural_score
+            reasons.extend(structural_reasons)
+            reasons.append(f"title-similarity:{best_ratio:.3f}")
+        else:
+            score = fuzzy_score
+            reasons.append(f"title-similarity:{best_ratio:.3f}")
 
     if year_hint is not None:
         if candidate.year == year_hint:
@@ -574,6 +590,17 @@ def _candidate_gap(
     return top, top.score - second_score
 
 
+def _add_discovered_candidate(
+    candidates: dict[ProviderIdentity, ProviderShow],
+    candidate: ProviderShow,
+) -> bool:
+    previous = candidates.get(candidate.identity)
+    if previous is not None and previous != candidate:
+        return False
+    candidates[candidate.identity] = candidate
+    return True
+
+
 def resolve_show_group_with_provider(
     source_key: str,
     parses: Iterable[ParseResult],
@@ -656,8 +683,8 @@ def resolve_show_group_with_provider(
     search_reasons: list[str] = []
     provider_candidates = snapshot.shows
     if not provider_candidates:
-        backoff_titles = _search_backoff_titles(search_title)
         candidates_by_identity: dict[ProviderIdentity, ProviderShow] = {}
+        backoff_titles = _search_backoff_titles(search_title)
         if backoff_titles:
             provider_method = f"{provider_method}+search-backoff"
             search_reasons.append("provider-search-backoff:attempted")
@@ -677,17 +704,46 @@ def resolve_show_group_with_provider(
                     backoff.unresolved_reason or "provider-search-unresolved",
                 )
             for candidate in backoff.shows:
-                previous = candidates_by_identity.get(candidate.identity)
-                if previous is not None and previous != candidate:
+                if not _add_discovered_candidate(candidates_by_identity, candidate):
                     return _unresolved(
                         provider_method,
                         *search_reasons,
                         "provider-search-backoff:conflicting-candidate-metadata",
                         f"provider-identity:{candidate.identity.key}",
                     )
-                candidates_by_identity[candidate.identity] = candidate
         if backoff_titles:
             search_reasons.append("provider-search-backoff:complete")
+
+        merge_titles = token_merge_queries(search_title)
+        if merge_titles:
+            provider_method = f"{provider_method}+token-merge"
+            search_reasons.append("provider-search-token-merge:attempted")
+        for merge_title in merge_titles:
+            merged = provider.search_shows(merge_title)
+            search_reasons.extend(
+                (
+                    f"provider-search-token-merge-query:{normalize_show_identity(merge_title)}",
+                    f"provider-search-token-merge-request:{merged.request_key}",
+                )
+            )
+            if not merged.resolved:
+                return _unresolved(
+                    provider_method,
+                    *search_reasons,
+                    "provider-search-token-merge:indeterminate",
+                    merged.unresolved_reason or "provider-search-unresolved",
+                )
+            for candidate in merged.shows:
+                if not _add_discovered_candidate(candidates_by_identity, candidate):
+                    return _unresolved(
+                        provider_method,
+                        *search_reasons,
+                        "provider-search-token-merge:conflicting-candidate-metadata",
+                        f"provider-identity:{candidate.identity.key}",
+                    )
+        if merge_titles:
+            search_reasons.append("provider-search-token-merge:complete")
+
         provider_candidates = tuple(
             sorted(
                 candidates_by_identity.values(),
@@ -806,6 +862,8 @@ def resolve_show_group_with_provider(
 
     alias_indeterminate = alias_result is not None and alias_result.indeterminate
     tie_break = None
+    title_tie_break = None
+    aired_rescue = None
     rescue = None
     if not alias_indeterminate:
         mode = _numbering_mode(override)
@@ -844,7 +902,90 @@ def resolve_show_group_with_provider(
                 ),
             )
 
-        if tie_break is None:
+        if (
+            tie_break is not None
+            and tie_break.winner is None
+            and mode is NumberingMode.AIRED
+        ):
+            title_tie_break = catalog_title_tiebreak(
+                provider,
+                parse_group,
+                tie_break.candidates,
+                minimum_gap=_MINIMUM_MATCH_GAP,
+                suspicious_threshold=_SUSPICIOUS_THRESHOLD,
+            )
+            if title_tie_break is not None and title_tie_break.winner is not None:
+                provider_show = next(
+                    candidate
+                    for candidate in provider_candidates
+                    if candidate.identity == title_tie_break.winner
+                )
+                title = _preferred_title(override, source_title, provider_show.title)
+                assert title is not None
+                return _resolved_show_result(
+                    source_key=source_key,
+                    parse_group=parse_group,
+                    override=override,
+                    provider=provider,
+                    provider_identity=provider_show.identity,
+                    title=title,
+                    year=(
+                        provider_show.year
+                        if provider_show.year is not None
+                        else year_hint
+                    ),
+                    method=f"{method}+catalog-title-tiebreak",
+                    confidence=top.score,
+                    reasons=(
+                        *search_reasons,
+                        *(alias_result.reasons if alias_result is not None else ()),
+                        *tie_break.reasons,
+                        *title_tie_break.reasons,
+                        f"candidate-gap:{gap:.3f}",
+                    ),
+                    candidates=title_tie_break.candidates,
+                )
+
+        if mode is NumberingMode.AIRED:
+            aired_rescue = aired_catalog_rescue(provider, parse_group, active_ranked)
+            if aired_rescue is not None and aired_rescue.winner is not None:
+                provider_show = next(
+                    candidate
+                    for candidate in provider_candidates
+                    if candidate.identity == aired_rescue.winner
+                )
+                title = _preferred_title(override, source_title, provider_show.title)
+                assert title is not None
+                return _resolved_show_result(
+                    source_key=source_key,
+                    parse_group=parse_group,
+                    override=override,
+                    provider=provider,
+                    provider_identity=provider_show.identity,
+                    title=title,
+                    year=(
+                        provider_show.year
+                        if provider_show.year is not None
+                        else year_hint
+                    ),
+                    method=f"{method}+aired-catalog-rescue",
+                    confidence=top.score,
+                    reasons=(
+                        *search_reasons,
+                        *(alias_result.reasons if alias_result is not None else ()),
+                        *(tie_break.reasons if tie_break is not None else ()),
+                        *(
+                            title_tie_break.reasons
+                            if title_tie_break is not None
+                            else ()
+                        ),
+                        *aired_rescue.reasons,
+                        f"candidate-gap:{gap:.3f}",
+                    ),
+                    candidates=aired_rescue.candidates,
+                )
+
+        if tie_break is None and aired_rescue is None:
             rescue = catalog_group_rescue(provider, parse_group, active_ranked)
             if (
                 rescue is not None
@@ -895,7 +1036,11 @@ def resolve_show_group_with_provider(
         else "provider-evidence-below-threshold"
     )
     candidates = active_ranked
-    if tie_break is not None:
+    if title_tie_break is not None:
+        candidates = title_tie_break.candidates
+    elif aired_rescue is not None:
+        candidates = aired_rescue.candidates
+    elif tie_break is not None:
         candidates = tie_break.candidates
     elif rescue is not None:
         candidates = rescue.candidates
@@ -910,6 +1055,8 @@ def resolve_show_group_with_provider(
                 *search_reasons,
                 *(alias_result.reasons if alias_result is not None else ()),
                 *(tie_break.reasons if tie_break is not None else ()),
+                *(title_tie_break.reasons if title_tie_break is not None else ()),
+                *(aired_rescue.reasons if aired_rescue is not None else ()),
                 *(rescue.reasons if rescue is not None else ()),
                 f"candidate-gap:{gap:.3f}",
             ),

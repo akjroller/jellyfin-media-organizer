@@ -319,6 +319,15 @@ def catalog_group_rescue(
     expected_mode = _catalog_rescue_mode(parses)
     if not ranked or expected_mode is None:
         return None
+    if expected_mode is NumberingMode.AIRED and len(ranked) == 1:
+        coordinates = {
+            (parse.season, episode)
+            for parse in parses
+            if parse.season is not None
+            for episode in parse.episodes
+        }
+        if len(coordinates) < 2:
+            return None
 
     outcomes: dict[ProviderIdentity, NumberingMode | None] = {}
     candidate_reasons: dict[ProviderIdentity, tuple[str, ...]] = {}
