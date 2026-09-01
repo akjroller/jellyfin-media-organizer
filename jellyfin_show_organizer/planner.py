@@ -49,7 +49,7 @@ from .models import (
     SourceFile,
     TerminalStatus,
 )
-from .overrides import OverrideCatalog, load_overrides
+from .overrides import EpisodeDecisionOverride, OverrideCatalog, load_overrides
 from .preflight import (
     PreflightRecord,
     PreflightResult,
@@ -222,6 +222,18 @@ def _classification_evidence(classification: ExtraClassification) -> MatchEviden
     )
 
 
+def _episode_decision_evidence(decision: EpisodeDecisionOverride) -> MatchEvidence:
+    return MatchEvidence(
+        method="episode-decision-override",
+        confidence=1.0,
+        reasons=(
+            f"episode-decision-provider:{decision.show_provider_identity.key}",
+            f"episode-decision-numbering-mode:{decision.numbering_mode.value}",
+            *decision.reasons,
+        ),
+    )
+
+
 def _reason(evidence: MatchEvidence) -> str:
     return "; ".join(evidence.reasons) or evidence.method
 
@@ -265,15 +277,31 @@ def _plan_resolved_group(
     resolution: ShowResolution,
     provider: MetadataProvider,
     destination_policy: DestinationPolicy,
+    overrides: OverrideCatalog,
 ) -> list[PlanRecord]:
     assert resolution.show is not None
     show = resolution.show
     records: list[PlanRecord] = []
     episode_sources: list[SourceEpisodeInput] = []
+    decision_evidence: dict[str, MatchEvidence] = {}
 
     for source in sources:
         classification = classifications[source.relative_path]
         group_id = _operation_group_id(source.relative_path)
+        decision = overrides.episode_decision_for(source.relative_path)
+        if decision is not None:
+            if classification.disposition is not ExtraDisposition.EPISODE_CANDIDATE:
+                raise PlanningConfigurationError(
+                    "episode decision source is not an episode candidate"
+                )
+            if decision.show_provider_identity != show.provider_identity:
+                raise PlanningConfigurationError(
+                    "episode decision provider identity conflicts with resolved show"
+                )
+            if decision.numbering_mode is not show.numbering_mode:
+                raise PlanningConfigurationError(
+                    "episode decision numbering mode conflicts with resolved show"
+                )
         if classification.disposition in {
             ExtraDisposition.SUSPICIOUS,
             ExtraDisposition.UNRESOLVED,
@@ -342,10 +370,16 @@ def _plan_resolved_group(
                 )
             continue
 
+        effective_parse = classification.parse
+        if decision is not None:
+            effective_parse = decision.apply_to(effective_parse)
+            decision_evidence[source.relative_path] = _episode_decision_evidence(
+                decision
+            )
         episode_sources.append(
             SourceEpisodeInput(
                 source_key=source.relative_path,
-                parse=classification.parse,
+                parse=effective_parse,
             )
         )
 
@@ -362,7 +396,12 @@ def _plan_resolved_group(
     for source_input in episode_sources:
         source = sources_by_path[source_input.source_key]
         assignment = assignments[source.relative_path]
-        evidence = _combine_evidence(resolution.evidence, assignment.evidence)
+        evidence_parts = [resolution.evidence]
+        local_decision_evidence = decision_evidence.get(source.relative_path)
+        if local_decision_evidence is not None:
+            evidence_parts.append(local_decision_evidence)
+        evidence_parts.append(assignment.evidence)
+        evidence = _combine_evidence(*evidence_parts)
         group_id = _operation_group_id(source.relative_path)
         if assignment.status is not AssignmentStatus.MATCHED:
             status = (
@@ -628,6 +667,41 @@ def _cache_snapshots(
     )
 
 
+def _configured_episode_decision_keys(overrides: OverrideCatalog) -> set[str]:
+    return {_path_key(decision.source)[0] for decision in overrides.episode_decisions}
+
+
+def _validate_episode_decision_sources(
+    sources: tuple[SourceFile, ...],
+    overrides: OverrideCatalog,
+) -> None:
+    configured = _configured_episode_decision_keys(overrides)
+    available = {_path_key(source.relative_path)[0] for source in sources}
+    if configured - available:
+        raise PlanningConfigurationError(
+            "episode decision references an unknown source"
+        )
+
+
+def _validate_episode_decision_consumption(
+    records: list[PlanRecord],
+    overrides: OverrideCatalog,
+) -> None:
+    configured = _configured_episode_decision_keys(overrides)
+    if not configured:
+        return
+    consumed = {
+        _path_key(record.source.relative_path)[0]
+        for record in records
+        if record.evidence is not None
+        and "episode-decision-override" in record.evidence.method.split("+")
+    }
+    if configured - consumed:
+        raise PlanningConfigurationError(
+            "episode decision could not be consumed safely"
+        )
+
+
 def _build_plan(
     source_root: AuthorizedShowsRoot,
     config: PlanningConfig,
@@ -652,6 +726,7 @@ def _build_plan(
     )
     if not sources:
         raise PlanningConfigurationError("no included video files were found")
+    _validate_episode_decision_sources(sources, overrides)
     sidecars = discover_sidecars(source_root, sources)
     classifications = {
         source.relative_path: classify_extra(source.relative_path) for source in sources
@@ -687,9 +762,11 @@ def _build_plan(
                 resolution,
                 provider,
                 destination_policy,
+                overrides,
             )
         )
 
+    _validate_episode_decision_consumption(records, overrides)
     records = _apply_duplicate_decisions(records, sidecars, overrides)
     ordered_records = tuple(
         sorted(records, key=lambda item: _path_key(item.source.relative_path))
