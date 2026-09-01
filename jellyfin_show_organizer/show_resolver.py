@@ -19,11 +19,11 @@ from .models import (
 )
 from .numbering_inference import infer_group_numbering_mode
 from .overrides import OverrideCatalog, ShowOverride
-from .providers import (
-    MetadataProvider,
-    ProviderEpisodeCatalog,
-    ProviderShow,
-    TvmazeProviderAdapter,
+from .provider_aliases import TvmazeAliasProviderAdapter
+from .providers import MetadataProvider, ProviderEpisodeCatalog, ProviderShow
+from .show_alias_evidence import (
+    catalog_group_rescue,
+    enrich_provider_alias_evidence,
 )
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
@@ -502,7 +502,7 @@ def _resolved_show_result(
             status=ResolutionStatus.SUSPICIOUS,
             show=None,
             evidence=MatchEvidence(
-                method=(f"{method}+numbering-inference" if attempted else method),
+                method=f"{method}+numbering-inference" if attempted else method,
                 confidence=confidence,
                 reasons=(
                     "resolved-show-numbering-mode-not-unique",
@@ -529,6 +529,14 @@ def _resolved_show_result(
             candidates=candidates,
         ),
     )
+
+
+def _candidate_gap(
+    ranked: tuple[CandidateEvidence, ...],
+) -> tuple[CandidateEvidence, float]:
+    top = ranked[0]
+    second_score = ranked[1].score if len(ranked) > 1 else 0.0
+    return top, top.score - second_score
 
 
 def resolve_show_group_with_provider(
@@ -637,9 +645,7 @@ def resolve_show_group_with_provider(
             ),
         )
     )
-    top = ranked[0]
-    second_score = ranked[1].score if len(ranked) > 1 else 0.0
-    gap = top.score - second_score
+    top, gap = _candidate_gap(ranked)
 
     if top.score >= _MATCH_THRESHOLD and (
         len(ranked) == 1 or gap >= _MINIMUM_MATCH_GAP
@@ -665,37 +671,128 @@ def resolve_show_group_with_provider(
             candidates=ranked,
         )
 
-    mode = _numbering_mode(override)
-    tie_break = _catalog_tie_break(parse_group, mode, provider, ranked)
-    if tie_break is not None and tie_break.winner is not None:
-        provider_show = next(
-            candidate
-            for candidate in provider_candidates
-            if candidate.identity == tie_break.winner
+    alias_result = None
+    active_ranked = ranked
+    method = provider_method
+    if top.score < _MATCH_THRESHOLD:
+        alias_result = enrich_provider_alias_evidence(
+            provider,
+            provider_candidates,
+            ranked,
+            identity_tuple,
+            year_hint,
         )
-        title = _preferred_title(override, source_title, provider_show.title)
-        assert title is not None
-        return ShowResolution(
-            status=ResolutionStatus.MATCHED,
-            show=CanonicalShow(
+        active_ranked = alias_result.ranked
+        if alias_result.attempted:
+            method = f"{provider_method}+provider-aliases"
+        top, gap = _candidate_gap(active_ranked)
+
+        if (
+            alias_result.attempted
+            and not alias_result.indeterminate
+            and top.score >= _MATCH_THRESHOLD
+            and (len(active_ranked) == 1 or gap >= _MINIMUM_MATCH_GAP)
+        ):
+            provider_show = next(
+                candidate
+                for candidate in provider_candidates
+                if candidate.identity == top.provider_identity
+            )
+            title = _preferred_title(override, source_title, provider_show.title)
+            assert title is not None
+            return _resolved_show_result(
                 source_key=source_key,
+                parse_group=parse_group,
+                override=override,
+                provider=provider,
                 provider_identity=provider_show.identity,
                 title=title,
                 year=(
                     provider_show.year if provider_show.year is not None else year_hint
                 ),
-                numbering_mode=mode,
-            ),
-            evidence=MatchEvidence(
-                method=f"{provider_method}+catalog-tiebreak",
+                method=method,
                 confidence=top.score,
-                reasons=(
-                    *tie_break.reasons,
-                    f"candidate-gap:{gap:.3f}",
+                reasons=(*alias_result.reasons, f"candidate-gap:{gap:.3f}"),
+                candidates=active_ranked,
+            )
+
+    alias_indeterminate = alias_result is not None and alias_result.indeterminate
+    tie_break = None
+    rescue = None
+    if not alias_indeterminate:
+        mode = _numbering_mode(override)
+        tie_break = _catalog_tie_break(parse_group, mode, provider, active_ranked)
+        if tie_break is not None and tie_break.winner is not None:
+            provider_show = next(
+                candidate
+                for candidate in provider_candidates
+                if candidate.identity == tie_break.winner
+            )
+            title = _preferred_title(override, source_title, provider_show.title)
+            assert title is not None
+            return ShowResolution(
+                status=ResolutionStatus.MATCHED,
+                show=CanonicalShow(
+                    source_key=source_key,
+                    provider_identity=provider_show.identity,
+                    title=title,
+                    year=(
+                        provider_show.year
+                        if provider_show.year is not None
+                        else year_hint
+                    ),
+                    numbering_mode=mode,
                 ),
-                candidates=tie_break.candidates,
-            ),
-        )
+                evidence=MatchEvidence(
+                    method=f"{method}+catalog-tiebreak",
+                    confidence=top.score,
+                    reasons=(
+                        *(alias_result.reasons if alias_result is not None else ()),
+                        *tie_break.reasons,
+                        f"candidate-gap:{gap:.3f}",
+                    ),
+                    candidates=tie_break.candidates,
+                ),
+            )
+
+        if tie_break is None:
+            rescue = catalog_group_rescue(provider, parse_group, active_ranked)
+            if (
+                rescue is not None
+                and rescue.winner is not None
+                and rescue.numbering_mode is not None
+            ):
+                provider_show = next(
+                    candidate
+                    for candidate in provider_candidates
+                    if candidate.identity == rescue.winner
+                )
+                title = _preferred_title(override, source_title, provider_show.title)
+                assert title is not None
+                return ShowResolution(
+                    status=ResolutionStatus.MATCHED,
+                    show=CanonicalShow(
+                        source_key=source_key,
+                        provider_identity=provider_show.identity,
+                        title=title,
+                        year=(
+                            provider_show.year
+                            if provider_show.year is not None
+                            else year_hint
+                        ),
+                        numbering_mode=rescue.numbering_mode,
+                    ),
+                    evidence=MatchEvidence(
+                        method=f"{method}+catalog-rescue",
+                        confidence=top.score,
+                        reasons=(
+                            *(alias_result.reasons if alias_result is not None else ()),
+                            *rescue.reasons,
+                            f"candidate-gap:{gap:.3f}",
+                        ),
+                        candidates=rescue.candidates,
+                    ),
+                )
 
     status = (
         ResolutionStatus.SUSPICIOUS
@@ -707,18 +804,25 @@ def resolve_show_group_with_provider(
         if status is ResolutionStatus.SUSPICIOUS
         else "provider-evidence-below-threshold"
     )
+    candidates = active_ranked
+    if tie_break is not None:
+        candidates = tie_break.candidates
+    elif rescue is not None:
+        candidates = rescue.candidates
     return ShowResolution(
         status=status,
         show=None,
         evidence=MatchEvidence(
-            method=provider_method,
+            method=method,
             confidence=top.score,
             reasons=(
                 reason,
+                *(alias_result.reasons if alias_result is not None else ()),
                 *(tie_break.reasons if tie_break is not None else ()),
+                *(rescue.reasons if rescue is not None else ()),
                 f"candidate-gap:{gap:.3f}",
             ),
-            candidates=tie_break.candidates if tie_break is not None else ranked,
+            candidates=candidates,
         ),
     )
 
@@ -730,11 +834,11 @@ def resolve_show_group(
     cache: TvmazeCatalogCache,
     getter: JsonGetter,
 ) -> ShowResolution:
-    """Compatibility wrapper using the initial TVMaze provider adapter."""
+    """Compatibility wrapper using the TVMaze provider plus cached alias evidence."""
 
     return resolve_show_group_with_provider(
         source_key,
         parses,
         overrides,
-        TvmazeProviderAdapter(cache, getter),
+        TvmazeAliasProviderAdapter(cache, getter),
     )
