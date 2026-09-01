@@ -173,8 +173,7 @@ def _absolute_compatibility(
     )
     if ambiguous:
         return None, tuple(
-            "numbering-catalog-ambiguous:absolute:"
-            f"S{season:02d}E{number:02d}"
+            f"numbering-catalog-ambiguous:absolute:S{season:02d}E{number:02d}"
             for season, number in ambiguous
         )
 
