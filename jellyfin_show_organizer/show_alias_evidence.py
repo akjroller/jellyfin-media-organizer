@@ -7,8 +7,9 @@ from difflib import SequenceMatcher
 
 from .models import CandidateEvidence, NumberingMode, ParseResult, ProviderIdentity
 from .numbering_inference import infer_group_numbering_mode
-from .provider_aliases import ProviderAliasSnapshot
+from .provider_aliases import ProviderAliasSnapshot, TvmazeAliasProviderAdapter
 from .providers import MetadataProvider, ProviderShow
+from .tvmaze_cache import TvmazeCatalogCache
 
 _ALIAS_SIMILARITY_FLOOR = 0.90
 _ALIAS_SIMILARITY_WEIGHT = 0.86
@@ -85,6 +86,22 @@ def _alias_score(
     return round(score, 6), tuple(reasons)
 
 
+def _alias_loader(provider: MetadataProvider):
+    loader = getattr(provider, "show_aliases", None)
+    if callable(loader):
+        return loader
+
+    cache = getattr(provider, "_cache", None)
+    getter = getattr(provider, "_getter", None)
+    if (
+        provider.provider_name == "tvmaze"
+        and isinstance(cache, TvmazeCatalogCache)
+        and callable(getter)
+    ):
+        return TvmazeAliasProviderAdapter(cache, getter).show_aliases
+    return None
+
+
 def enrich_provider_alias_evidence(
     provider: MetadataProvider,
     shows: tuple[ProviderShow, ...],
@@ -94,8 +111,8 @@ def enrich_provider_alias_evidence(
 ) -> AliasEnrichment:
     """Add lazy provider alias evidence without weakening the match threshold."""
 
-    loader = getattr(provider, "show_aliases", None)
-    if not callable(loader):
+    loader = _alias_loader(provider)
+    if loader is None:
         return AliasEnrichment(
             ranked=ranked,
             attempted=False,
