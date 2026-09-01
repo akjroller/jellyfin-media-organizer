@@ -122,12 +122,20 @@ def test_numbered_creditless_markers_classify_as_extras_not_absolute_episodes() 
     assert result.decision.kind == "creditless-opening"
 
 
-def test_quality_and_codec_release_tails_do_not_change_semantic_extra_identity() -> None:
+def test_quality_and_codec_release_tails_do_not_change_semantic_extra_identity() -> (
+    None
+):
     high = "Fixture Series/Fixture.Series.S01EXTRA.Cast.Reunion.1080p.WEB-DL.x265-GROUP.mkv"
-    low = "Fixture Series/Fixture.Series.S01EXTRA.Cast.Reunion.720p.WEB-DL.x264-OTHER.mkv"
+    low = (
+        "Fixture Series/Fixture.Series.S01EXTRA.Cast.Reunion.720p.WEB-DL.x264-OTHER.mkv"
+    )
 
-    high_naming = derive_extra_display_identity(high, "extra", show_title="Fixture Series")
-    low_naming = derive_extra_display_identity(low, "extra", show_title="Fixture Series")
+    high_naming = derive_extra_display_identity(
+        high, "extra", show_title="Fixture Series"
+    )
+    low_naming = derive_extra_display_identity(
+        low, "extra", show_title="Fixture Series"
+    )
     high_destination = _destination(high)
     low_destination = _destination(low)
 

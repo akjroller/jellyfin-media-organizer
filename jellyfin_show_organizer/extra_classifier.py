@@ -72,6 +72,16 @@ _SPECIAL_NUMBERING = re.compile(r"\b(?:ova|oad)\b")
 _STRUCTURAL_SEASON_EXTRA = re.compile(
     r"(?i)(?<![A-Za-z0-9])s\d{1,2}[ ._-]*extras?(?:[ ._-]*\d{1,3})?(?![A-Za-z])"
 )
+_CREDITLESS_VARIANTS: dict[ExtraKind, re.Pattern[str]] = {
+    ExtraKind.CREDITLESS_OPENING: re.compile(
+        r"(?i)(?<![A-Za-z0-9])(?:ncop|creditless[ ._-]+opening|clean[ ._-]+opening)"
+        r"[ ._-]*(?P<variant>\d{1,3})(?![A-Za-z0-9])"
+    ),
+    ExtraKind.CREDITLESS_ENDING: re.compile(
+        r"(?i)(?<![A-Za-z0-9])(?:nced|creditless[ ._-]+ending|clean[ ._-]+ending)"
+        r"[ ._-]*(?P<variant>\d{1,3})(?![A-Za-z0-9])"
+    ),
+}
 
 _FOLDER_KINDS: dict[str, ExtraKind] = {
     "creditless openings": ExtraKind.CREDITLESS_OPENING,
@@ -144,7 +154,33 @@ def _extra_markers(
     if any(kind is ExtraKind.DELETED_SCENE for kind, _ in hits):
         hits = [(kind, reason) for kind, reason in hits if kind is not ExtraKind.CLIP]
 
+    if any(kind is not ExtraKind.EXTRA for kind, _ in hits):
+        hits = [
+            (kind, reason)
+            for kind, reason in hits
+            if not (
+                kind is ExtraKind.EXTRA and reason == "structural season-extra marker"
+            )
+        ]
+
     return tuple(hits)
+
+
+def _creditless_variant_matches_parse(
+    path: PurePosixPath,
+    kind: ExtraKind,
+    parsed: ParseResult,
+) -> bool:
+    pattern = _CREDITLESS_VARIANTS.get(kind)
+    if pattern is None or parsed.absolute_episode is None:
+        return False
+    match = pattern.search(path.stem)
+    return (
+        match is not None
+        and parsed.season is None
+        and not parsed.episodes
+        and parsed.absolute_episode == int(match.group("variant"))
+    )
 
 
 def classify_extra(relative_path: str) -> ExtraClassification:
@@ -188,7 +224,10 @@ def classify_extra(relative_path: str) -> ExtraClassification:
                 reasons=(rule,),
             )
 
-        if strong_episode or special_numbering_match is not None:
+        creditless_variant = _creditless_variant_matches_parse(path, kind, parsed)
+        if (
+            strong_episode and not creditless_variant
+        ) or special_numbering_match is not None:
             conflict = "strong episode evidence"
             if special_numbering_match is not None and not strong_episode:
                 conflict = "special-numbering evidence"

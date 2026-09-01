@@ -31,6 +31,7 @@ from .episode_assignment import (
     assign_episode_group_with_provider,
 )
 from .extra_classifier import ExtraClassification, ExtraDisposition, classify_extra
+from .extra_naming import derive_extra_display_identity
 from .inventory import (
     AuthorizedShowsRoot,
     InventoryStatus,
@@ -330,6 +331,12 @@ def _plan_resolved_group(
 
         if classification.disposition is ExtraDisposition.EXTRA:
             assert classification.decision is not None
+            naming = derive_extra_display_identity(
+                source.relative_path,
+                classification.decision.kind,
+                show_title=show.title,
+                title_hint=classification.parse.title_hint,
+            )
             destination = build_extra_destination(
                 show,
                 source_key=source.relative_path,
@@ -341,6 +348,11 @@ def _plan_resolved_group(
             evidence = _combine_evidence(
                 resolution.evidence,
                 _classification_evidence(classification),
+                MatchEvidence(
+                    method="extra-naming",
+                    confidence=1.0,
+                    reasons=naming.reasons,
+                ),
             )
             if destination.status is DestinationStatus.READY:
                 records.append(
@@ -471,7 +483,13 @@ def _logical_identity(record: PlanRecord) -> str:
         )
         return f"{show_identity}:episodes:{episodes}"
     if record.extra is not None:
-        return f"{show_identity}:extra:{record.extra.kind}"
+        naming = derive_extra_display_identity(
+            record.source.relative_path,
+            record.extra.kind,
+            show_title=record.show.title,
+            title_hint=record.parse.title_hint if record.parse is not None else None,
+        )
+        return f"{show_identity}:extra:{record.extra.kind}:{naming.identity_key}"
     return f"{show_identity}:source:{record.source.relative_path}"
 
 
