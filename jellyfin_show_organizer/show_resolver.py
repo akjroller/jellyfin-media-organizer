@@ -19,9 +19,7 @@ normalize_show_identity = _core.normalize_show_identity
 _STRUCTURAL_YEAR_RANGE = re.compile(
     r"(?<!\d)((?:18|19|20)\d{2})\s*[-\u2013\u2014]\s*((?:18|19|20)\d{2})(?!\d)"
 )
-_STRUCTURAL_SINGLE_YEAR = re.compile(
-    r"[\[(]\s*((?:18|19|20)\d{2})\s*[\])]"
-)
+_STRUCTURAL_SINGLE_YEAR = re.compile(r"[\[(]\s*((?:18|19|20)\d{2})\s*[\])]")
 
 
 def _structural_year_span(source_key: str) -> tuple[int, int] | None:
@@ -35,7 +33,9 @@ def _structural_year_span(source_key: str) -> tuple[int, int] | None:
     if ranges:
         return next(iter(ranges))
 
-    years = {int(match.group(1)) for match in _STRUCTURAL_SINGLE_YEAR.finditer(source_key)}
+    years = {
+        int(match.group(1)) for match in _STRUCTURAL_SINGLE_YEAR.finditer(source_key)
+    }
     if len(years) != 1:
         return None
     year = next(iter(years))
@@ -141,7 +141,8 @@ def _structural_year_resolution(
                         f"{str(start <= provider_by_identity[candidate.provider_identity].year <= end).casefold()}",
                     )
                     if candidate.provider_identity in provider_by_identity
-                    and provider_by_identity[candidate.provider_identity].year is not None
+                    and provider_by_identity[candidate.provider_identity].year
+                    is not None
                     else ()
                 ),
             ),
