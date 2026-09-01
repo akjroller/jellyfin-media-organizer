@@ -744,6 +744,21 @@ def assign_episode_group_with_provider(
 
     catalog = provider.episode_catalog(show.provider_identity)
     request_key = catalog.request_key
+    if catalog.show_identity != show.provider_identity:
+        assignments = tuple(
+            _assignment(
+                source.source_key,
+                AssignmentStatus.SUSPICIOUS,
+                "episode-catalog",
+                "provider-catalog-show-identity-mismatch",
+                f"requested-show:{show.provider_identity.key}",
+                f"catalog-show:{catalog.show_identity.key}",
+            )
+            for source in source_group
+        )
+        return EpisodeGroupAssignment(
+            show, AssignmentStatus.SUSPICIOUS, assignments, request_key
+        )
     if not catalog.resolved:
         assignments = tuple(
             _assignment(

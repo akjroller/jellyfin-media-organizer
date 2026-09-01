@@ -195,6 +195,58 @@ def test_duplicate_provider_coordinates_are_normalized_as_catalog_errors(
     assert "duplicate-aired-coordinate:S01E01" in catalog.errors
 
 
+class WrongShowCatalogProvider(FixtureProvider):
+    def episode_catalog(
+        self,
+        show_identity: ProviderIdentity,
+    ) -> ProviderEpisodeCatalog:
+        self.catalog_calls.append(show_identity)
+        return ProviderEpisodeCatalog(
+            provider=self.provider_name,
+            request_key="episodes:wrong-show",
+            cache_snapshot_id="c" * 64,
+            show_identity=ProviderIdentity("fixture", "show-beta"),
+            episodes=(
+                ProviderEpisode(
+                    identity=ProviderIdentity("fixture", "episode-wrong"),
+                    season=1,
+                    number=1,
+                    title="Wrong Pilot",
+                ),
+            ),
+        )
+
+
+def test_assignment_rejects_catalog_for_wrong_show_identity() -> None:
+    provider = WrongShowCatalogProvider()
+    resolution = resolve_show_group_with_provider(
+        "fixture-harbor",
+        (ParseResult(series_hint="Fixture Harbor", season=1, episodes=(1,)),),
+        load_overrides(),
+        provider,
+    )
+    assert resolution.status is ResolutionStatus.MATCHED
+    assert resolution.show is not None
+
+    assignment = assign_episode_group_with_provider(
+        resolution.show,
+        (
+            SourceEpisodeInput(
+                "Fixture Harbor S01E01.mkv",
+                ParseResult(series_hint="Fixture Harbor", season=1, episodes=(1,)),
+            ),
+        ),
+        provider,
+    )
+
+    assert assignment.status is AssignmentStatus.SUSPICIOUS
+    assert assignment.assignments[0].status is AssignmentStatus.SUSPICIOUS
+    assert (
+        "provider-catalog-show-identity-mismatch"
+        in assignment.assignments[0].evidence.reasons
+    )
+
+
 def test_non_tvmaze_provider_flows_through_planning_consumers() -> None:
     provider = FixtureProvider()
     parse = ParseResult(series_hint="Fixture Harbor", season=1, episodes=(1,))
