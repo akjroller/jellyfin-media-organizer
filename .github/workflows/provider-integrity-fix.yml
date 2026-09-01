@@ -1,0 +1,65 @@
+name: Provider integrity fix
+
+on:
+  push:
+    branches: [issue-40-complete-provider-boundary]
+
+permissions:
+  contents: write
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_CONSTRAINT: ${{ github.workspace }}/requirements-ci.txt
+
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: issue-40-complete-provider-boundary
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply catalog identity guard and regression test
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          assignment = Path("jellyfin_show_organizer/episode_assignment.py")
+          text = assignment.read_text(encoding="utf-8")
+          old = '''    catalog = provider.episode_catalog(show.provider_identity)\n    request_key = catalog.request_key\n    if not catalog.resolved:\n'''
+          new = '''    catalog = provider.episode_catalog(show.provider_identity)\n    request_key = catalog.request_key\n    if catalog.show_identity != show.provider_identity:\n        assignments = tuple(\n            _assignment(\n                source.source_key,\n                AssignmentStatus.SUSPICIOUS,\n                "episode-catalog",\n                "provider-catalog-show-identity-mismatch",\n                f"requested-show:{show.provider_identity.key}",\n                f"catalog-show:{catalog.show_identity.key}",\n            )\n            for source in source_group\n        )\n        return EpisodeGroupAssignment(\n            show, AssignmentStatus.SUSPICIOUS, assignments, request_key\n        )\n    if not catalog.resolved:\n'''
+          if old in text:
+              assignment.write_text(text.replace(old, new, 1), encoding="utf-8")
+          elif "provider-catalog-show-identity-mismatch" not in text:
+              raise SystemExit("assignment insertion point not found")
+
+          tests = Path("tests/local/test_provider_boundary.py")
+          text = tests.read_text(encoding="utf-8")
+          marker = "def test_non_tvmaze_provider_flows_through_planning_consumers() -> None:\n"
+          addition = '''class WrongShowCatalogProvider(FixtureProvider):\n    def episode_catalog(\n        self,\n        show_identity: ProviderIdentity,\n    ) -> ProviderEpisodeCatalog:\n        self.catalog_calls.append(show_identity)\n        return ProviderEpisodeCatalog(\n            provider=self.provider_name,\n            request_key="episodes:wrong-show",\n            cache_snapshot_id="c" * 64,\n            show_identity=ProviderIdentity("fixture", "show-beta"),\n            episodes=(\n                ProviderEpisode(\n                    identity=ProviderIdentity("fixture", "episode-wrong"),\n                    season=1,\n                    number=1,\n                    title="Wrong Pilot",\n                ),\n            ),\n        )\n\n\ndef test_assignment_rejects_catalog_for_wrong_show_identity() -> None:\n    provider = WrongShowCatalogProvider()\n    show = ProviderShow(\n        identity=ProviderIdentity("fixture", "show-alpha"),\n        title="Fixture Harbor",\n        year=2026,\n    )\n    resolution = resolve_show_group_with_provider(\n        "fixture-harbor",\n        (ParseResult(series_hint="Fixture Harbor", season=1, episodes=(1,)),),\n        load_overrides(),\n        provider,\n    )\n    assert resolution.status is ResolutionStatus.MATCHED\n    assert resolution.show is not None\n\n    assignment = assign_episode_group_with_provider(\n        resolution.show,\n        (\n            SourceEpisodeInput(\n                "Fixture Harbor S01E01.mkv",\n                ParseResult(series_hint="Fixture Harbor", season=1, episodes=(1,)),\n            ),\n        ),\n        provider,\n    )\n\n    assert assignment.status is AssignmentStatus.SUSPICIOUS\n    assert assignment.assignments[0].status is AssignmentStatus.SUSPICIOUS\n    assert (\n        "provider-catalog-show-identity-mismatch"\n        in assignment.assignments[0].evidence.reasons\n    )\n\n\n'''
+          if "test_assignment_rejects_catalog_for_wrong_show_identity" not in text:
+              if marker not in text:
+                  raise SystemExit("test insertion point not found")
+              tests.write_text(text.replace(marker, addition + marker, 1), encoding="utf-8")
+          PY
+      - name: Format and verify
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m ruff format jellyfin_show_organizer/episode_assignment.py tests/local/test_provider_boundary.py
+          python -m ruff check jellyfin_show_organizer/episode_assignment.py tests/local/test_provider_boundary.py
+          python -m mypy jellyfin_show_organizer tests/local/test_provider_boundary.py
+          JMO_TEST_NO_NETWORK=1 python -m pytest tests/local/test_provider_boundary.py
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jellyfin_show_organizer/episode_assignment.py tests/local/test_provider_boundary.py
+          git commit -m "Reject mismatched provider episode catalogs"
+          git push origin HEAD:issue-40-complete-provider-boundary
