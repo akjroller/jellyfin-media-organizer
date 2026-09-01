@@ -158,6 +158,15 @@ def derive_extra_display_identity(
     default_title = _DEFAULT_TITLES.get(kind, "Extra")
     stem = _stem(relative_path)
 
+    if title_hint is not None and title_hint.strip():
+        hinted, trimmed = _trim_release_noise(title_hint)
+        if hinted:
+            return _finalize(
+                hinted,
+                source_reason="extra-naming-source:parser-title-hint",
+                release_noise_trimmed=trimmed,
+            )
+
     creditless_pattern = _CREDITLESS_MARKERS.get(kind)
     if creditless_pattern is not None:
         match = creditless_pattern.search(stem)
@@ -175,15 +184,6 @@ def derive_extra_display_identity(
                 source_reason=f"extra-naming-source:{kind}-marker",
                 release_noise_trimmed=trimmed,
                 additional_reasons=reasons,
-            )
-
-    if title_hint is not None and title_hint.strip():
-        hinted, trimmed = _trim_release_noise(title_hint)
-        if hinted:
-            return _finalize(
-                hinted,
-                source_reason="extra-naming-source:parser-title-hint",
-                release_noise_trimmed=trimmed,
             )
 
     structural_match = _STRUCTURAL_EXTRA.search(stem)
@@ -211,6 +211,11 @@ def derive_extra_display_identity(
                 release_noise_trimmed=trimmed,
                 additional_reasons=(f"extra-naming-structural-variant:{label}",),
             )
+        return _finalize(
+            default_title,
+            source_reason="extra-naming-source:kind-fallback",
+            release_noise_trimmed=trimmed,
+        )
 
     specific_pattern = _SPECIFIC_MARKERS.get(kind)
     if specific_pattern is not None:
