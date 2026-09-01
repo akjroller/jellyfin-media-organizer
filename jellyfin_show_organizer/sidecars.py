@@ -25,6 +25,10 @@ IGNORED_ADJACENT_EXTENSIONS = frozenset(
 )
 _RELEASE_PACKAGE_EXTENSIONS = frozenset({".rar", ".sfv", ".srr"})
 _RAR_VOLUME_EXTENSION = re.compile(r"^\.r\d{2}$", re.IGNORECASE)
+_EPISODE_GUIDE_DOCUMENT = re.compile(
+    r"(?:^|[ ._-])(?:episode|season)[ ._-]+guides?(?=$|[ ._-])",
+    re.IGNORECASE,
+)
 _LANGUAGE_TAG = re.compile(r"^[a-z]{2,3}(?:-[a-z]{2,4})?$", re.IGNORECASE)
 _SUBTITLE_FLAGS = frozenset({"default", "forced", "sdh", "cc"})
 
@@ -173,7 +177,7 @@ def _subtitle_candidates(
     return tuple(candidates)
 
 
-def _ignored_adjacent_reason(extension: str) -> str | None:
+def _ignored_adjacent_reason(path: Path, extension: str) -> str | None:
     if extension in IGNORED_ADJACENT_EXTENSIONS:
         return "explicitly-ignored-adjacent-file"
     if (
@@ -181,6 +185,8 @@ def _ignored_adjacent_reason(extension: str) -> str | None:
         or _RAR_VOLUME_EXTENSION.fullmatch(extension) is not None
     ):
         return "known-release-package-artifact"
+    if extension == ".txt" and _EPISODE_GUIDE_DOCUMENT.search(path.stem) is not None:
+        return "known-episode-guide-document"
     return None
 
 
@@ -295,7 +301,7 @@ def discover_sidecars(
                 )
                 continue
 
-            ignored_reason = _ignored_adjacent_reason(extension)
+            ignored_reason = _ignored_adjacent_reason(path, extension)
             if ignored_reason is not None:
                 ignored.append(
                     AdjacentFile(
