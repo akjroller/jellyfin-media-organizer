@@ -148,8 +148,7 @@ def test_exact_romanized_provider_alias_is_first_class_evidence() -> None:
     candidate = result.evidence.candidates[0]
     assert candidate.score == 0.9
     assert (
-        "exact-normalized-provider-alias:example romanized title"
-        in candidate.reasons
+        "exact-normalized-provider-alias:example romanized title" in candidate.reasons
     )
     assert provider.alias_calls == [ALPHA]
 
