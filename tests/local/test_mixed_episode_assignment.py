@@ -7,7 +7,12 @@ from jellyfin_show_organizer.episode_assignment import (
     SourceEpisodeInput,
     assign_episode_group_with_provider,
 )
-from jellyfin_show_organizer.models import CanonicalShow, NumberingMode, ParseResult, ProviderIdentity
+from jellyfin_show_organizer.models import (
+    CanonicalShow,
+    NumberingMode,
+    ParseResult,
+    ProviderIdentity,
+)
 from jellyfin_show_organizer.providers import ProviderEpisode, ProviderEpisodeCatalog
 
 pytestmark = pytest.mark.local
@@ -77,11 +82,22 @@ def test_mixed_aired_absolute_and_segment_families_assign_independently() -> Non
 
     by_source = {assignment.source_key: assignment for assignment in result.assignments}
     assert result.status is AssignmentStatus.MATCHED
-    assert by_source["aired.mkv"].episodes[0].identity == ProviderIdentity("fixture", "one")
-    assert by_source["absolute.mkv"].episodes[0].identity == ProviderIdentity("fixture", "two")
-    assert by_source["segment.mkv"].episodes[0].identity == ProviderIdentity("fixture", "three")
-    assert "mixed-numbering-family:absolute" in by_source["absolute.mkv"].evidence.reasons
-    assert "mixed-numbering-family:segment" in by_source["segment.mkv"].evidence.reasons
+    assert by_source["aired.mkv"].episodes[0].identity == ProviderIdentity(
+        "fixture", "one"
+    )
+    assert by_source["absolute.mkv"].episodes[0].identity == ProviderIdentity(
+        "fixture", "two"
+    )
+    assert by_source["segment.mkv"].episodes[0].identity == ProviderIdentity(
+        "fixture", "three"
+    )
+    assert (
+        "mixed-numbering-family:absolute"
+        in by_source["absolute.mkv"].evidence.reasons
+    )
+    assert (
+        "mixed-numbering-family:segment" in by_source["segment.mkv"].evidence.reasons
+    )
     assert provider.catalog_calls == 3
 
 
@@ -98,9 +114,13 @@ def test_bad_alternate_family_does_not_poison_primary_aired_source() -> None:
     by_source = {assignment.source_key: assignment for assignment in result.assignments}
     assert result.status is AssignmentStatus.UNRESOLVED
     assert by_source["aired.mkv"].status is AssignmentStatus.MATCHED
-    assert by_source["aired.mkv"].episodes[0].identity == ProviderIdentity("fixture", "one")
+    assert by_source["aired.mkv"].episodes[0].identity == ProviderIdentity(
+        "fixture", "one"
+    )
     assert by_source["segment.mkv"].status is AssignmentStatus.UNRESOLVED
-    assert "missing-segment-title-evidence" in by_source["segment.mkv"].evidence.reasons
+    assert (
+        "missing-segment-title-evidence" in by_source["segment.mkv"].evidence.reasons
+    )
 
 
 def test_cross_family_provider_episode_collision_stays_suspicious() -> None:
@@ -114,10 +134,16 @@ def test_cross_family_provider_episode_collision_stays_suspicious() -> None:
     )
 
     assert result.status is AssignmentStatus.SUSPICIOUS
-    assert all(assignment.status is AssignmentStatus.SUSPICIOUS for assignment in result.assignments)
+    assert all(
+        assignment.status is AssignmentStatus.SUSPICIOUS
+        for assignment in result.assignments
+    )
     assert all(not assignment.episodes for assignment in result.assignments)
     assert all(
-        any(reason.startswith("duplicate-provider-episode-assignment:") for reason in assignment.evidence.reasons)
+        any(
+            reason.startswith("duplicate-provider-episode-assignment:")
+            for reason in assignment.evidence.reasons
+        )
         for assignment in result.assignments
     )
 
@@ -132,4 +158,7 @@ def test_selected_policy_is_not_bypassed_when_expected_family_is_absent() -> Non
 
     assert result.status is AssignmentStatus.SUSPICIOUS
     assert provider.catalog_calls == 0
-    assert "numbering-policy-conflict:expected-absolute:observed-aired" in result.assignments[0].evidence.reasons
+    assert (
+        "numbering-policy-conflict:expected-absolute:observed-aired"
+        in result.assignments[0].evidence.reasons
+    )
