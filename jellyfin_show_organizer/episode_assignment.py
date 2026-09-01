@@ -240,20 +240,49 @@ def _aired_assignment(
     if dual_reason is not None:
         reasons.append(dual_reason)
     for number in parse.episodes:
+        coordinate = f"S{parse.season:02d}E{number:02d}"
         episode = by_coordinate.get((parse.season, number))
         if episode is None:
-            return _assignment(
-                source.source_key,
-                AssignmentStatus.UNRESOLVED,
-                "episode-catalog",
-                *reasons,
-                f"missing-aired-catalog-entry:S{parse.season:02d}E{number:02d}",
-            )
+            if len(parse.episodes) == 1 and parse.title_hint is not None:
+                normalized_title = _normalize_title(parse.title_hint)
+                title_matches = tuple(
+                    candidate
+                    for candidate in catalog.episodes
+                    if candidate.number is not None
+                    and _normalize_title(candidate.title) == normalized_title
+                )
+                if len(title_matches) == 1:
+                    episode = title_matches[0]
+                    reasons.extend(
+                        (
+                            f"catalog-coordinate-missing:{coordinate}",
+                            f"catalog-title-fallback:unique:{normalized_title}",
+                            f"catalog-title-match:{normalized_title}"
+                            f"->{_episode_identity_reason(episode)}",
+                        )
+                    )
+                elif len(title_matches) > 1:
+                    return _assignment(
+                        source.source_key,
+                        AssignmentStatus.SUSPICIOUS,
+                        "episode-catalog",
+                        *reasons,
+                        f"catalog-coordinate-missing:{coordinate}",
+                        f"catalog-title-fallback:ambiguous:{normalized_title}",
+                    )
+            if episode is None:
+                return _assignment(
+                    source.source_key,
+                    AssignmentStatus.UNRESOLVED,
+                    "episode-catalog",
+                    *reasons,
+                    f"missing-aired-catalog-entry:{coordinate}",
+                )
         matches.append(episode)
-        reasons.append(
-            f"catalog-match:S{parse.season:02d}E{number:02d}"
-            f"->{_episode_identity_reason(episode)}"
-        )
+        if by_coordinate.get((parse.season, number)) is episode:
+            reasons.append(
+                f"catalog-match:{coordinate}->{_episode_identity_reason(episode)}"
+            )
 
     return _assignment(
         source.source_key,
@@ -685,6 +714,16 @@ def _protect_segment_identity(
     return tuple(protected)
 
 
+def _accessory_special_families_allowed(
+    families: set[str],
+    expected_family: str,
+) -> bool:
+    return expected_family in {"aired", "absolute"} and families == {
+        expected_family,
+        "special",
+    }
+
+
 def assign_episode_group_with_provider(
     show: CanonicalShow,
     sources: Iterable[SourceEpisodeInput],
@@ -742,7 +781,9 @@ def assign_episode_group_with_provider(
         for source in source_group
         if (family := _evidence_family(source.parse, show.numbering_mode)) != "none"
     }
-    if "conflict" in families or len(families) > 1:
+    expected_family = _expected_family(show.numbering_mode)
+    accessory_specials = _accessory_special_families_allowed(families, expected_family)
+    if "conflict" in families or (len(families) > 1 and not accessory_specials):
         reason = "mixed-numbering-evidence:" + ",".join(sorted(families))
         assignments = tuple(
             _assignment(
@@ -758,8 +799,7 @@ def assign_episode_group_with_provider(
             show, AssignmentStatus.SUSPICIOUS, assignments, None
         )
 
-    expected_family = _expected_family(show.numbering_mode)
-    if families and families != {expected_family}:
+    if families and expected_family not in families:
         reason = (
             f"numbering-policy-conflict:expected-{expected_family}:"
             f"observed-{next(iter(families))}"
@@ -858,9 +898,23 @@ def assign_episode_group_with_provider(
     elif show.numbering_mode is NumberingMode.SEGMENT_TITLE:
         matcher = _segment_assignment
 
-    assignments = tuple(
-        matcher(source, show, catalog, request_key) for source in source_group
-    )
+    def assign_source(source: SourceEpisodeInput) -> SourceEpisodeAssignment:
+        family = _evidence_family(source.parse, show.numbering_mode)
+        if accessory_specials and family == "special":
+            assignment = _special_assignment(source, show, catalog, request_key)
+            return replace(
+                assignment,
+                evidence=replace(
+                    assignment.evidence,
+                    reasons=(
+                        f"accessory-special-under:{show.numbering_mode.value}",
+                        *assignment.evidence.reasons,
+                    ),
+                ),
+            )
+        return matcher(source, show, catalog, request_key)
+
+    assignments = tuple(assign_source(source) for source in source_group)
     if show.numbering_mode is NumberingMode.SEGMENT_TITLE:
         assignments = _protect_segment_identity(source_group, assignments)
     else:
