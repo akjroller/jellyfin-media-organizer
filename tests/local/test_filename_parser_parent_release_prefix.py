@@ -10,8 +10,7 @@ pytestmark = pytest.mark.local
 
 def test_parent_matching_episode_confirms_one_prepended_release_token() -> None:
     parsed = parse_video_path(
-        "synthetic/Example.Series.S01E03.Release/"
-        "TEAM-Example.Series.S01E03.720p.mkv"
+        "synthetic/Example.Series.S01E03.Release/TEAM-Example.Series.S01E03.720p.mkv"
     )
 
     assert parsed == ParseResult(
@@ -35,8 +34,7 @@ def test_legitimate_hyphenated_series_is_not_stripped() -> None:
 
 def test_parent_must_exactly_match_the_remainder_after_release_token() -> None:
     parsed = parse_video_path(
-        "synthetic/Example.Series.S01E03.Release/"
-        "TEAM-Wrong.Series.S01E03.720p.mkv"
+        "synthetic/Example.Series.S01E03.Release/TEAM-Wrong.Series.S01E03.720p.mkv"
     )
 
     assert parsed == ParseResult(
@@ -60,8 +58,7 @@ def test_generic_season_parent_cannot_confirm_release_token_stripping() -> None:
 
 def test_parent_coordinate_conflict_blocks_release_token_stripping() -> None:
     parsed = parse_video_path(
-        "synthetic/Example.Series.S01E04.Release/"
-        "TEAM-Example.Series.S01E03.720p.mkv"
+        "synthetic/Example.Series.S01E04.Release/TEAM-Example.Series.S01E03.720p.mkv"
     )
 
     assert parsed == ParseResult(
