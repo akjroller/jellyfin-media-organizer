@@ -902,7 +902,11 @@ def resolve_show_group_with_provider(
                 ),
             )
 
-        if tie_break is not None and tie_break.winner is None and mode is NumberingMode.AIRED:
+        if (
+            tie_break is not None
+            and tie_break.winner is None
+            and mode is NumberingMode.AIRED
+        ):
             title_tie_break = catalog_title_tiebreak(
                 provider,
                 parse_group,
@@ -969,11 +973,7 @@ def resolve_show_group_with_provider(
                     reasons=(
                         *search_reasons,
                         *(alias_result.reasons if alias_result is not None else ()),
-                        *(
-                            tie_break.reasons
-                            if tie_break is not None
-                            else ()
-                        ),
+                        *(tie_break.reasons if tie_break is not None else ()),
                         *(
                             title_tie_break.reasons
                             if title_tie_break is not None
@@ -1055,11 +1055,7 @@ def resolve_show_group_with_provider(
                 *search_reasons,
                 *(alias_result.reasons if alias_result is not None else ()),
                 *(tie_break.reasons if tie_break is not None else ()),
-                *(
-                    title_tie_break.reasons
-                    if title_tie_break is not None
-                    else ()
-                ),
+                *(title_tie_break.reasons if title_tie_break is not None else ()),
                 *(aired_rescue.reasons if aired_rescue is not None else ()),
                 *(rescue.reasons if rescue is not None else ()),
                 f"candidate-gap:{gap:.3f}",
