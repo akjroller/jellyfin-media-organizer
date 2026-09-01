@@ -33,6 +33,10 @@ _LEGACY_BRACKETED = re.compile(
     r"\s*\[\s*episod(?:e)?[ ._-]*(?P<episode>\d{1,3})"
     r"(?P<segment>[A-Za-z])?\s*\]"
 )
+_DUAL_ABSOLUTE_AFTER_SXE = re.compile(
+    r"^[ ._-]*(?:\((?P<paren>\d{1,3})\)|\[(?P<bracket>\d{1,3})\])"
+    r"(?=$|[ ._\-\[])"
+)
 _PARENTHESIZED_ABSOLUTE = re.compile(
     r"^(?P<series>.+?)\s*\((?P<episode>\d{1,3})\)(?=$|[ ._\-\[])"
 )
@@ -99,6 +103,24 @@ def _episode_list(first: int, tail: str) -> tuple[int, ...]:
         if episode not in episodes:
             episodes.append(episode)
     return tuple(episodes)
+
+
+def _dual_absolute_after_sxe(
+    stem: str,
+    match: re.Match[str],
+) -> tuple[int | None, int]:
+    remainder = stem[match.end() :]
+    candidate = _DUAL_ABSOLUTE_AFTER_SXE.match(remainder)
+    if candidate is None:
+        return None, match.end()
+
+    trailing = remainder[candidate.end() :]
+    if _DUAL_ABSOLUTE_AFTER_SXE.match(trailing) is not None:
+        return None, match.end()
+
+    value = candidate.group("paren") or candidate.group("bracket")
+    assert value is not None
+    return int(value), match.end() + candidate.end()
 
 
 def _title_hint(stem: str, start: int) -> str | None:
@@ -232,14 +254,16 @@ def parse_video_path(relative_path: str) -> ParseResult:
     match = _SXE.search(stem)
     if match is not None:
         series, year = _series_for_match(stem, path, match)
+        absolute_episode, title_start = _dual_absolute_after_sxe(stem, match)
         return ParseResult(
             series_hint=series,
             season=int(match.group("season")),
             episodes=_episode_list(int(match.group("episode")), match.group("tail")),
+            absolute_episode=absolute_episode,
             segment_hint=(match.group("segment") or None),
             year=year,
             embedded_tvmaze_id=embedded_id,
-            title_hint=_title_hint(stem, match.end()),
+            title_hint=_title_hint(stem, title_start),
         )
 
     match = _X_NOTATION.search(stem)
