@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import Any
 
 from . import _show_resolver_core as _core
-from .models import CandidateEvidence, ParseResult, ProviderIdentity
+from .models import CandidateEvidence, ParseResult
 from .overrides import OverrideCatalog
 from .provider_aliases import TvmazeAliasProviderAdapter
 from .providers import MetadataProvider, ProviderShow
