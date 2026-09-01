@@ -131,7 +131,7 @@ def test_incomplete_secondary_aired_evidence_still_fails_closed(tmp_path: Path) 
     assert "mixed-numbering-evidence:conflict" in result.assignments[0].evidence.reasons
 
 
-def test_separate_aired_and_absolute_sources_are_still_mixed(tmp_path: Path) -> None:
+def test_separate_aired_and_absolute_sources_are_independent(tmp_path: Path) -> None:
     getter = CountingGetter()
     result = assign_episode_group(
         _show(NumberingMode.AIRED),
@@ -143,9 +143,12 @@ def test_separate_aired_and_absolute_sources_are_still_mixed(tmp_path: Path) -> 
         getter,
     )
 
-    assert result.status is AssignmentStatus.SUSPICIOUS
-    assert getter.calls == []
+    assert result.status is AssignmentStatus.MATCHED
+    by_source = {assignment.source_key: assignment for assignment in result.assignments}
+    assert by_source["aired.mkv"].episodes[0].tvmaze_episode_id == 1001
+    assert by_source["absolute.mkv"].episodes[0].tvmaze_episode_id == 1002
     assert (
-        "mixed-numbering-evidence:absolute,aired"
-        in result.assignments[0].evidence.reasons
+        "mixed-numbering-family:absolute"
+        in by_source["absolute.mkv"].evidence.reasons
     )
+    assert len(getter.calls) == 1
