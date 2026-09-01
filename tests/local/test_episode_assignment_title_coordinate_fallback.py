@@ -29,7 +29,9 @@ class FixtureProvider:
     def search_shows(self, title: str) -> ProviderSearchSnapshot:
         raise AssertionError(f"unexpected show search: {title}")
 
-    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
         assert show_identity == _SHOW_ID
         return ProviderEpisodeCatalog(
             provider="fixture",
