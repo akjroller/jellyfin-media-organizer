@@ -42,9 +42,7 @@ def _decision(*candidates: DuplicateCandidate):
 
 
 def test_release_quality_parser_records_only_structured_supported_signals() -> None:
-    evidence = parse_release_quality(
-        "Example.Series.S01E01.1080p.WEB-DL.REPACK.v3.mkv"
-    )
+    evidence = parse_release_quality("Example.Series.S01E01.1080p.WEB-DL.REPACK.v3.mkv")
 
     assert evidence.resolution == 1080
     assert evidence.source_family is ReleaseSourceFamily.WEB_DL
@@ -127,9 +125,7 @@ def test_equal_quality_ties_remain_unresolved() -> None:
 
     assert decision.winner is None
     assert decision.losers == ()
-    assert any(
-        "no unique candidate dominates" in item for item in decision.evidence
-    )
+    assert any("no unique candidate dominates" in item for item in decision.evidence)
 
 
 def test_incomplete_release_metadata_remains_unresolved() -> None:
@@ -163,9 +159,7 @@ def test_cross_dimension_tradeoff_remains_unresolved() -> None:
     decision = _decision(resolution, revision)
 
     assert decision.winner is None
-    assert any(
-        "no unique candidate dominates" in item for item in decision.evidence
-    )
+    assert any("no unique candidate dominates" in item for item in decision.evidence)
 
 
 def test_file_size_never_breaks_an_equal_quality_tie() -> None:

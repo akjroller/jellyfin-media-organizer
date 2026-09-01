@@ -95,9 +95,7 @@ def _quality_audit_evidence(
     for candidate in candidates:
         quality = candidate.release_quality
         assert quality is not None
-        evidence.append(
-            f"release-quality:{candidate.operation_key}:{quality.summary}"
-        )
+        evidence.append(f"release-quality:{candidate.operation_key}:{quality.summary}")
     return tuple(evidence)
 
 

@@ -29,7 +29,9 @@ class ReleaseQualityEvidence:
     @property
     def summary(self) -> str:
         resolution = f"{self.resolution}p" if self.resolution is not None else "unknown"
-        source = self.source_family.value if self.source_family is not None else "unknown"
+        source = (
+            self.source_family.value if self.source_family is not None else "unknown"
+        )
         markers = ",".join(self.revision_markers) if self.revision_markers else "none"
         errors = ",".join(self.errors) if self.errors else "none"
         mode = "remux" if self.remux else "encode"
@@ -92,11 +94,14 @@ def parse_release_quality(relative_path: str) -> ReleaseQualityEvidence:
     resolution = next(iter(resolutions)) if len(resolutions) == 1 else None
     if len(resolutions) > 1:
         errors.append(
-            "multiple-resolutions:" + ",".join(str(value) for value in sorted(resolutions))
+            "multiple-resolutions:"
+            + ",".join(str(value) for value in sorted(resolutions))
         )
 
     source_families = {
-        family for family, pattern in _SOURCE_PATTERNS if pattern.search(stem) is not None
+        family
+        for family, pattern in _SOURCE_PATTERNS
+        if pattern.search(stem) is not None
     }
     source_family = next(iter(source_families)) if len(source_families) == 1 else None
     if len(source_families) > 1:
