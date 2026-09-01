@@ -44,7 +44,9 @@ def _has_complete_absolute(parse: ParseResult) -> bool:
     return parse.absolute_episode is not None and parse.absolute_episode > 0
 
 
-def _usable_numbering_parses(parses: tuple[ParseResult, ...]) -> tuple[ParseResult, ...]:
+def _usable_numbering_parses(
+    parses: tuple[ParseResult, ...],
+) -> tuple[ParseResult, ...]:
     """Return aired/absolute evidence that can participate in primary-mode choice.
 
     Specials, dates, and segment-title records are independent accessory families.
@@ -289,8 +291,10 @@ def infer_group_numbering_mode(
     elif absolute_only:
         observations, observation_reasons = _candidate_observations(absolute_only)
         context_reasons = (
-            "numbering-inference:invalid-records-deferred-to-assignment",
-        ) if invalid else ()
+            ("numbering-inference:invalid-records-deferred-to-assignment",)
+            if invalid
+            else ()
+        )
     else:
         return NumberingModeInference(
             attempted=True,
