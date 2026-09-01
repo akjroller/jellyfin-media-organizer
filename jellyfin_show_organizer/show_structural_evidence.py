@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, replace
-from difflib import SequenceMatcher
 
 from .models import CandidateEvidence, ParseResult, ProviderIdentity
 from .providers import MetadataProvider, ProviderEpisodeCatalog
