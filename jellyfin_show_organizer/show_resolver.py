@@ -511,9 +511,7 @@ def _resolved_show_result(
             status=ResolutionStatus.SUSPICIOUS,
             show=None,
             evidence=MatchEvidence(
-                method=(
-                    f"{method}+numbering-inference" if attempted else method
-                ),
+                method=(f"{method}+numbering-inference" if attempted else method),
                 confidence=confidence,
                 reasons=(
                     "resolved-show-numbering-mode-not-unique",
@@ -534,7 +532,7 @@ def _resolved_show_result(
             numbering_mode=mode,
         ),
         evidence=MatchEvidence(
-            method=(f"{method}+numbering-inference" if attempted else method),
+            method=f"{method}+numbering-inference" if attempted else method,
             confidence=confidence,
             reasons=(*reasons, *numbering_reasons),
             candidates=candidates,
