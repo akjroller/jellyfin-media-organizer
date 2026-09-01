@@ -93,6 +93,19 @@ def _provider_subtitle_prefix(source: str, candidate_title: str) -> bool:
     return _normalize(head) == source_normalized
 
 
+def _provider_ampersand_equivalent(source: str, candidate_title: str) -> bool:
+    """Return true for a complete-title ``and`` versus ``&`` equivalence."""
+
+    source_normalized = _normalize(source)
+    if "and" not in source_normalized.split():
+        return False
+    candidate = unicodedata.normalize("NFKC", candidate_title)
+    if "&" not in candidate:
+        return False
+    candidate_with_conjunction = candidate.replace("&", " and ")
+    return _normalize(candidate_with_conjunction) == source_normalized
+
+
 def structural_title_score(
     identities: tuple[str, ...],
     candidate_title: str,
@@ -107,6 +120,8 @@ def structural_title_score(
             continue
         if _initialism_equivalent(normalized, candidate_normalized):
             return 0.90, ("token-initialism-equivalent",)
+        if _provider_ampersand_equivalent(normalized, candidate_title):
+            return 0.90, ("provider-ampersand-equivalent",)
 
         source_tokens = normalized.split()
         if _provider_subtitle_prefix(normalized, candidate_title):
