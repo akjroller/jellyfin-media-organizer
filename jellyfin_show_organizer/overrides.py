@@ -5,15 +5,15 @@ import json
 import re
 import tomllib
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.resources import files
 from pathlib import Path, PurePosixPath
 from typing import Any, TypeGuard
 
-from .models import NumberingMode, ProviderIdentity, TitlePreference
+from .models import NumberingMode, ParseResult, ProviderIdentity, TitlePreference
 
 OVERRIDES_RESOURCE = "data/overrides-v1.toml"
-SUPPORTED_OVERRIDE_SCHEMA_VERSIONS = frozenset({1, 2})
+SUPPORTED_OVERRIDE_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 
 
 def _normalize_identity(value: str) -> str:
@@ -22,22 +22,29 @@ def _normalize_identity(value: str) -> str:
     return " ".join(normalized.split())
 
 
-def _normalize_source_reference(value: str) -> str:
+def _normalize_source_reference(
+    value: str,
+    *,
+    label: str = "local override source",
+) -> str:
     if not value or value != value.strip():
-        raise ValueError("duplicate preference source must be a non-empty trimmed path")
+        raise ValueError(f"{label} must be a non-empty trimmed path")
     normalized = unicodedata.normalize("NFC", value.replace("\\", "/"))
     if re.match(r"^[A-Za-z]:", normalized):
-        raise ValueError("duplicate preference source must be relative")
+        raise ValueError(f"{label} must be relative")
     path = PurePosixPath(normalized)
     if path.is_absolute() or not path.parts:
-        raise ValueError("duplicate preference source must be relative")
+        raise ValueError(f"{label} must be relative")
     if any(part in {"", ".", ".."} for part in path.parts):
-        raise ValueError("duplicate preference source cannot contain dot segments")
+        raise ValueError(f"{label} cannot contain dot segments")
     return path.as_posix()
 
 
 def _source_reference_key(value: str) -> str:
-    return unicodedata.normalize("NFKC", _normalize_source_reference(value)).casefold()
+    return unicodedata.normalize(
+        "NFKC",
+        _normalize_source_reference(value),
+    ).casefold()
 
 
 def _is_plain_int(value: object) -> TypeGuard[int]:
@@ -145,7 +152,14 @@ class DuplicatePreferenceOverride:
     reasons: tuple[str, ...] = ("explicit local duplicate preference",)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "source", _normalize_source_reference(self.source))
+        object.__setattr__(
+            self,
+            "source",
+            _normalize_source_reference(
+                self.source,
+                label="duplicate preference source",
+            ),
+        )
         if self.rank < 0:
             raise ValueError("duplicate preference rank cannot be negative")
         if not self.reasons or any(
@@ -162,11 +176,149 @@ class DuplicatePreferenceOverride:
             raise ValueError("duplicate preference reasons must be unique")
 
 
+def _decision_family(parse: ParseResult) -> str:
+    families = [
+        family
+        for family, present in (
+            ("aired", parse.season is not None or bool(parse.episodes)),
+            ("absolute", parse.absolute_episode is not None),
+            (
+                "special",
+                parse.special_kind is not None or parse.special_episode is not None,
+            ),
+            ("date", parse.episode_date is not None),
+            ("segment", parse.segment_hint is not None),
+        )
+        if present
+    ]
+    if len(families) != 1:
+        return "conflict" if families else "none"
+    return families[0]
+
+
+def _expected_decision_family(mode: NumberingMode) -> str:
+    if mode is NumberingMode.AIRED:
+        return "aired"
+    if mode in {NumberingMode.ABSOLUTE, NumberingMode.PARENTHESIZED_ABSOLUTE}:
+        return "absolute"
+    if mode is NumberingMode.SPECIAL:
+        return "special"
+    if mode is NumberingMode.DATE:
+        return "date"
+    return "segment"
+
+
+@dataclass(frozen=True, slots=True)
+class EpisodeDecisionOverride:
+    """One exact-source local decision for episode numbering evidence."""
+
+    source: str
+    show_provider_identity: ProviderIdentity
+    numbering_mode: NumberingMode
+    parse: ParseResult
+    reasons: tuple[str, ...] = ("explicit local episode decision",)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "source",
+            _normalize_source_reference(
+                self.source,
+                label="episode decision source",
+            ),
+        )
+        expected = _expected_decision_family(self.numbering_mode)
+        family = _decision_family(self.parse)
+        if family != expected:
+            raise ValueError(
+                "episode decision numbering evidence does not match "
+                f"numbering_mode={self.numbering_mode.value!r}"
+            )
+
+        if self.numbering_mode is NumberingMode.AIRED:
+            if self.parse.season is None or not self.parse.episodes:
+                raise ValueError(
+                    "aired episode decisions require season and at least one episode"
+                )
+            if len(set(self.parse.episodes)) != len(self.parse.episodes):
+                raise ValueError("episode decision episodes must be unique")
+        elif self.numbering_mode in {
+            NumberingMode.ABSOLUTE,
+            NumberingMode.PARENTHESIZED_ABSOLUTE,
+        }:
+            if self.parse.absolute_episode is None or self.parse.absolute_episode <= 0:
+                raise ValueError(
+                    "absolute episode decisions require a positive absolute_episode"
+                )
+        elif self.numbering_mode is NumberingMode.SEGMENT_TITLE:
+            if (
+                self.parse.segment_hint is None
+                or not self.parse.segment_hint.strip()
+                or self.parse.segment_hint != self.parse.segment_hint.strip()
+                or self.parse.title_hint is None
+                or not self.parse.title_hint.strip()
+                or self.parse.title_hint != self.parse.title_hint.strip()
+            ):
+                raise ValueError(
+                    "segment-title episode decisions require trimmed "
+                    "segment_hint and title_hint"
+                )
+
+        if (
+            self.numbering_mode is not NumberingMode.SEGMENT_TITLE
+            and self.parse.title_hint is not None
+        ):
+            raise ValueError(
+                "episode decision title_hint is only valid for segment-title mode"
+            )
+
+        if not self.reasons or any(
+            not reason or reason != reason.strip() for reason in self.reasons
+        ):
+            raise ValueError(
+                "episode decision reasons must contain non-empty trimmed strings"
+            )
+        normalized_reasons = [
+            unicodedata.normalize("NFKC", reason).casefold() for reason in self.reasons
+        ]
+        if len(normalized_reasons) != len(set(normalized_reasons)):
+            raise ValueError("episode decision reasons must be unique")
+
+    @property
+    def show_provider(self) -> str:
+        return self.show_provider_identity.provider
+
+    @property
+    def show_provider_id(self) -> str:
+        return self.show_provider_identity.value
+
+    def apply_to(self, parse: ParseResult) -> ParseResult:
+        """Replace only episode-numbering evidence while preserving show evidence."""
+
+        title_hint = (
+            self.parse.title_hint
+            if self.numbering_mode is NumberingMode.SEGMENT_TITLE
+            else parse.title_hint
+        )
+        return replace(
+            parse,
+            season=self.parse.season,
+            episodes=self.parse.episodes,
+            absolute_episode=self.parse.absolute_episode,
+            special_kind=self.parse.special_kind,
+            special_episode=self.parse.special_episode,
+            episode_date=self.parse.episode_date,
+            segment_hint=self.parse.segment_hint,
+            title_hint=title_hint,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class OverrideCatalog:
     schema_version: int
     shows: tuple[ShowOverride, ...]
     duplicate_preferences: tuple[DuplicatePreferenceOverride, ...] = ()
+    episode_decisions: tuple[EpisodeDecisionOverride, ...] = ()
 
     def __post_init__(self) -> None:
         if self.schema_version not in SUPPORTED_OVERRIDE_SCHEMA_VERSIONS:
@@ -179,6 +331,8 @@ class OverrideCatalog:
             )
         if self.schema_version < 2 and self.duplicate_preferences:
             raise ValueError("duplicate preferences require override schema_version 2")
+        if self.schema_version < 3 and self.episode_decisions:
+            raise ValueError("episode decisions require override schema_version 3")
 
         identities: dict[str, str] = {}
         provider_ids: dict[ProviderIdentity, str] = {}
@@ -216,6 +370,17 @@ class OverrideCatalog:
                 )
             duplicate_sources[normalized] = preference.source
 
+        decision_sources: dict[str, str] = {}
+        for decision in self.episode_decisions:
+            normalized = _source_reference_key(decision.source)
+            owner = decision_sources.get(normalized)
+            if owner is not None:
+                raise ValueError(
+                    "episode decision source is configured more than once: "
+                    f"{decision.source!r} conflicts with {owner!r}"
+                )
+            decision_sources[normalized] = decision.source
+
     def get(self, key: str) -> ShowOverride | None:
         normalized = _normalize_identity(key)
         return next(
@@ -236,6 +401,19 @@ class OverrideCatalog:
                 preference
                 for preference in self.duplicate_preferences
                 if _source_reference_key(preference.source) == normalized
+            ),
+            None,
+        )
+
+    def episode_decision_for(
+        self, source_relative_path: str
+    ) -> EpisodeDecisionOverride | None:
+        normalized = _source_reference_key(source_relative_path)
+        return next(
+            (
+                decision
+                for decision in self.episode_decisions
+                if _source_reference_key(decision.source) == normalized
             ),
             None,
         )
@@ -283,6 +461,34 @@ class OverrideCatalog:
                 }
                 for preference in sorted(
                     self.duplicate_preferences,
+                    key=lambda item: (_source_reference_key(item.source), item.source),
+                )
+            ]
+        if self.schema_version >= 3:
+            payload["episode_decisions"] = [
+                {
+                    "absolute_episode": decision.parse.absolute_episode,
+                    "episode_date": decision.parse.episode_date,
+                    "episodes": list(decision.parse.episodes),
+                    "numbering_mode": decision.numbering_mode.value,
+                    "reasons": sorted(
+                        decision.reasons,
+                        key=lambda reason: (
+                            unicodedata.normalize("NFKC", reason).casefold(),
+                            reason,
+                        ),
+                    ),
+                    "season": decision.parse.season,
+                    "segment_hint": decision.parse.segment_hint,
+                    "show_provider": decision.show_provider,
+                    "show_provider_id": decision.show_provider_id,
+                    "source": decision.source,
+                    "special_episode": decision.parse.special_episode,
+                    "special_kind": decision.parse.special_kind,
+                    "title_hint": decision.parse.title_hint,
+                }
+                for decision in sorted(
+                    self.episode_decisions,
                     key=lambda item: (_source_reference_key(item.source), item.source),
                 )
             ]
@@ -409,6 +615,98 @@ def _parse_duplicate_preference(raw: dict[str, Any]) -> DuplicatePreferenceOverr
     )
 
 
+def _episode_decision_identity(raw: dict[str, Any]) -> ProviderIdentity:
+    provider = raw.get("show_provider")
+    provider_id = raw.get("show_provider_id")
+    if not isinstance(provider, str):
+        raise ValueError("episode decision show_provider must be a string")
+    if not (isinstance(provider_id, str) or _is_plain_int(provider_id)):
+        raise ValueError(
+            "episode decision show_provider_id must be a string or integer"
+        )
+    identity = ProviderIdentity(provider, str(provider_id))
+    if identity.provider == "tvmaze":
+        identity.require_positive_int("tvmaze")
+    return identity
+
+
+def _optional_int(raw: dict[str, Any], field: str) -> int | None:
+    value = raw.get(field)
+    if value is not None and not _is_plain_int(value):
+        raise ValueError(f"episode decision {field} must be an integer")
+    return value
+
+
+def _optional_string(raw: dict[str, Any], field: str) -> str | None:
+    value = raw.get(field)
+    if value is not None and not isinstance(value, str):
+        raise ValueError(f"episode decision {field} must be a string")
+    return value
+
+
+def _parse_episode_decision(raw: dict[str, Any]) -> EpisodeDecisionOverride:
+    allowed = {
+        "source",
+        "show_provider",
+        "show_provider_id",
+        "numbering_mode",
+        "season",
+        "episodes",
+        "absolute_episode",
+        "special_kind",
+        "special_episode",
+        "episode_date",
+        "segment_hint",
+        "title_hint",
+        "reasons",
+    }
+    unknown = set(raw) - allowed
+    if unknown:
+        raise ValueError(f"unknown episode decision fields: {sorted(unknown)}")
+
+    source = raw.get("source")
+    if not isinstance(source, str):
+        raise ValueError("episode decision source must be a string")
+
+    raw_episodes = raw.get("episodes", [])
+    if not isinstance(raw_episodes, list) or not all(
+        _is_plain_int(episode) for episode in raw_episodes
+    ):
+        raise ValueError("episode decision episodes must be a list of integers")
+
+    reasons = raw.get("reasons", ["explicit local episode decision"])
+    if not isinstance(reasons, list) or not all(
+        isinstance(reason, str) for reason in reasons
+    ):
+        raise ValueError("episode decision reasons must be a list of strings")
+
+    raw_numbering_mode = raw.get("numbering_mode")
+    if not isinstance(raw_numbering_mode, str):
+        raise ValueError("episode decision numbering_mode must be a string")
+    try:
+        numbering_mode = NumberingMode(raw_numbering_mode)
+    except ValueError as exc:
+        raise ValueError("invalid episode decision numbering_mode") from exc
+
+    parse = ParseResult(
+        season=_optional_int(raw, "season"),
+        episodes=tuple(raw_episodes),
+        absolute_episode=_optional_int(raw, "absolute_episode"),
+        special_kind=_optional_string(raw, "special_kind"),
+        special_episode=_optional_int(raw, "special_episode"),
+        episode_date=_optional_string(raw, "episode_date"),
+        segment_hint=_optional_string(raw, "segment_hint"),
+        title_hint=_optional_string(raw, "title_hint"),
+    )
+    return EpisodeDecisionOverride(
+        source=source,
+        show_provider_identity=_episode_decision_identity(raw),
+        numbering_mode=numbering_mode,
+        parse=parse,
+        reasons=tuple(reasons),
+    )
+
+
 def load_overrides(path: Path | None = None) -> OverrideCatalog:
     payload = path.read_bytes() if path is not None else _read_default_overrides()
     try:
@@ -418,7 +716,12 @@ def load_overrides(path: Path | None = None) -> OverrideCatalog:
     except tomllib.TOMLDecodeError as exc:
         raise ValueError(f"invalid override TOML: {exc}") from exc
 
-    allowed_top_level = {"schema_version", "shows", "duplicate_preferences"}
+    allowed_top_level = {
+        "schema_version",
+        "shows",
+        "duplicate_preferences",
+        "episode_decisions",
+    }
     unknown_top_level = set(raw) - allowed_top_level
     if unknown_top_level:
         raise ValueError(
@@ -428,6 +731,7 @@ def load_overrides(path: Path | None = None) -> OverrideCatalog:
     schema_version = raw.get("schema_version")
     shows = raw.get("shows", [])
     duplicate_preferences = raw.get("duplicate_preferences", [])
+    episode_decisions = raw.get("episode_decisions", [])
     if not _is_plain_int(schema_version):
         raise ValueError("override schema_version must be an integer")
     if not isinstance(shows, list) or not all(isinstance(show, dict) for show in shows):
@@ -436,6 +740,12 @@ def load_overrides(path: Path | None = None) -> OverrideCatalog:
         isinstance(preference, dict) for preference in duplicate_preferences
     ):
         raise ValueError("duplicate_preferences must be an array of tables")
+    if not isinstance(episode_decisions, list) or not all(
+        isinstance(decision, dict) for decision in episode_decisions
+    ):
+        raise ValueError("episode_decisions must be an array of tables")
+    if schema_version < 3 and "episode_decisions" in raw:
+        raise ValueError("episode decisions require override schema_version 3")
 
     return OverrideCatalog(
         schema_version=schema_version,
@@ -443,5 +753,8 @@ def load_overrides(path: Path | None = None) -> OverrideCatalog:
         duplicate_preferences=tuple(
             _parse_duplicate_preference(preference)
             for preference in duplicate_preferences
+        ),
+        episode_decisions=tuple(
+            _parse_episode_decision(decision) for decision in episode_decisions
         ),
     )
