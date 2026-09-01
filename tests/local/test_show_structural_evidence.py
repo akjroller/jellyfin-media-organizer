@@ -57,6 +57,24 @@ def test_provider_colon_subtitle_is_structural_evidence_not_a_direct_match() -> 
     ) == (None, ())
 
 
+def test_provider_ampersand_is_complete_title_conjunction_equivalence() -> None:
+    score, reasons = structural_title_score(
+        ("example heroes and villains",),
+        "Example Heroes & Villains",
+    )
+
+    assert score == 0.90
+    assert reasons == ("provider-ampersand-equivalent",)
+    assert structural_title_score(
+        ("example heroes and villains",),
+        "Example Heroes & Strangers",
+    ) == (None, ())
+    assert structural_title_score(
+        ("example heroes villains",),
+        "Example Heroes & Villains",
+    ) == (None, ())
+
+
 def test_air_catalog_rescue_needs_multiple_coordinates() -> None:
     identity = ProviderIdentity("fixture", "one")
     ranked = (
