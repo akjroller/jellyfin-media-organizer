@@ -64,8 +64,7 @@ def test_absolute_selected_mode_accepts_complete_dual_evidence(tmp_path: Path) -
     assert assignment.episodes[0].tvmaze_episode_id == 1002
     assert "numbering-mode:absolute" in assignment.evidence.reasons
     assert (
-        "dual-numbering-evidence:secondary-aired:S09E24"
-        in assignment.evidence.reasons
+        "dual-numbering-evidence:secondary-aired:S09E24" in assignment.evidence.reasons
     )
     assert len(getter.calls) == 1
 
@@ -88,8 +87,7 @@ def test_aired_selected_mode_accepts_complete_dual_evidence(tmp_path: Path) -> N
     assert assignment.episodes[0].tvmaze_episode_id == 1001
     assert "numbering-mode:aired" in assignment.evidence.reasons
     assert (
-        "dual-numbering-evidence:secondary-absolute:99"
-        in assignment.evidence.reasons
+        "dual-numbering-evidence:secondary-absolute:99" in assignment.evidence.reasons
     )
 
 
