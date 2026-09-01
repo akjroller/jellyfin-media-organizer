@@ -718,10 +718,10 @@ def _accessory_special_families_allowed(
     families: set[str],
     expected_family: str,
 ) -> bool:
-    return (
-        expected_family in {"aired", "absolute"}
-        and families == {expected_family, "special"}
-    )
+    return expected_family in {"aired", "absolute"} and families == {
+        expected_family,
+        "special",
+    }
 
 
 def assign_episode_group_with_provider(
@@ -782,9 +782,7 @@ def assign_episode_group_with_provider(
         if (family := _evidence_family(source.parse, show.numbering_mode)) != "none"
     }
     expected_family = _expected_family(show.numbering_mode)
-    accessory_specials = _accessory_special_families_allowed(
-        families, expected_family
-    )
+    accessory_specials = _accessory_special_families_allowed(families, expected_family)
     if "conflict" in families or (len(families) > 1 and not accessory_specials):
         reason = "mixed-numbering-evidence:" + ",".join(sorted(families))
         assignments = tuple(
