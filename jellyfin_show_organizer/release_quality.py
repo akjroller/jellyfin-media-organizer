@@ -208,12 +208,10 @@ def select_unique_release_quality_winner(
     elif unknown_indexes:
         if winner.source_family is None:
             return None, "release-quality evidence is incomplete"
-        if any(
-            evidence[index].resolution is None
-            or evidence[index].resolution >= winner.resolution
-            for index in unknown_indexes
-        ):
-            return None, "release-quality evidence is incomplete"
+        for index in unknown_indexes:
+            resolution = evidence[index].resolution
+            if resolution is None or resolution >= winner.resolution:
+                return None, "release-quality evidence is incomplete"
         source_reason = (
             "known-source winner exceeds lower-resolution unknown-source candidates"
         )
