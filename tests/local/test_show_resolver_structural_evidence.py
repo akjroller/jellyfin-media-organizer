@@ -142,7 +142,9 @@ def test_compacted_token_query_can_discover_candidate_then_catalog_rescue() -> N
     assert provider.search_calls == ["Example Hero", "Example", "ExampleHero"]
 
 
-def test_low_confidence_season_subtitle_is_rescued_only_by_multi_episode_catalog() -> None:
+def test_low_confidence_season_subtitle_is_rescued_only_by_multi_episode_catalog() -> (
+    None
+):
     show = ProviderShow(_identity("base"), "Example Academy", None)
     provider = StructuralProvider(
         searches={"Example Academy New": (show,)},
@@ -179,9 +181,7 @@ def test_single_episode_low_confidence_candidate_is_not_catalog_rescued() -> Non
     provider = StructuralProvider(
         searches={"Example Academy New": (show,)},
         catalogs={
-            _identity("base"): _catalog(
-                "base", (_episode("base", 2, 1, "Return"),)
-            )
+            _identity("base"): _catalog("base", (_episode("base", 2, 1, "Return"),))
         },
     )
 
@@ -243,11 +243,15 @@ def test_exact_title_collision_uses_multiple_coordinate_titles_to_break_tie() ->
     assert result.status is ResolutionStatus.MATCHED
     assert result.show is not None
     assert result.show.provider_identity == _identity("alpha")
-    assert "catalog-title-tiebreak:unique-compatible-candidate" in result.evidence.reasons
+    assert (
+        "catalog-title-tiebreak:unique-compatible-candidate" in result.evidence.reasons
+    )
     assert "catalog-tiebreak-winner:fixture:alpha" in result.evidence.reasons
 
 
-def test_exact_title_collision_with_only_one_title_observation_stays_suspicious() -> None:
+def test_exact_title_collision_with_only_one_title_observation_stays_suspicious() -> (
+    None
+):
     alpha = ProviderShow(_identity("alpha"), "Example Series", None)
     beta = ProviderShow(_identity("beta"), "Example Series", None)
     shared = (
@@ -301,4 +305,7 @@ def test_unresolved_catalog_blocks_low_confidence_rescue() -> None:
 
     assert result.status is ResolutionStatus.UNRESOLVED
     assert result.show is None
-    assert "aired-catalog-rescue:indeterminate-candidate-catalog" in result.evidence.reasons
+    assert (
+        "aired-catalog-rescue:indeterminate-candidate-catalog"
+        in result.evidence.reasons
+    )
