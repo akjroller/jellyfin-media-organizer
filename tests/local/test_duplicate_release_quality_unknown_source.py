@@ -39,8 +39,7 @@ def test_uniform_unknown_source_can_use_unique_resolution_dominance() -> None:
     assert decision.winner == higher
     assert decision.losers == (lower,)
     assert any(
-        "all release source families are unknown" in item
-        for item in decision.evidence
+        "all release source families are unknown" in item for item in decision.evidence
     )
 
 
@@ -53,8 +52,7 @@ def test_known_source_can_beat_strictly_lower_resolution_unknown_source() -> Non
     assert decision.winner == higher
     assert decision.losers == (lower,)
     assert any(
-        "known-source winner exceeds lower-resolution unknown-source candidates"
-        in item
+        "known-source winner exceeds lower-resolution unknown-source candidates" in item
         for item in decision.evidence
     )
 
