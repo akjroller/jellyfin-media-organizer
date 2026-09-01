@@ -139,9 +139,7 @@ def _structural_year_resolution(
         contender_shows.append((show, show.year))
 
     start, end = span
-    compatible = tuple(
-        show for show, year in contender_shows if start <= year <= end
-    )
+    compatible = tuple(show for show, year in contender_shows if start <= year <= end)
     if len(compatible) != 1:
         return None
     winner_show = compatible[0]
