@@ -132,7 +132,10 @@ def test_independent_aired_and_absolute_families_assign_against_same_catalog(
     by_source = {assignment.source_key: assignment for assignment in result.assignments}
     assert by_source["aired.mkv"].episodes[0].tvmaze_episode_id == 1001
     assert by_source["absolute.mkv"].episodes[0].tvmaze_episode_id == 1002
-    assert "mixed-numbering-family:absolute" in by_source["absolute.mkv"].evidence.reasons
+    assert (
+        "mixed-numbering-family:absolute"
+        in by_source["absolute.mkv"].evidence.reasons
+    )
     assert len(getter.calls) == 1
 
 
