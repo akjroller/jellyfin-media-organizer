@@ -454,12 +454,7 @@ def _catalog_tie_break(
 
 
 def _has_auto_numbering_evidence(parses: tuple[ParseResult, ...]) -> bool:
-    return any(
-        parse.season is not None
-        or bool(parse.episodes)
-        or parse.absolute_episode is not None
-        for parse in parses
-    )
+    return any(parse.absolute_episode is not None for parse in parses)
 
 
 def _numbering_for_resolved_show(
