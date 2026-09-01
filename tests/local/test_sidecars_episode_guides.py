@@ -87,7 +87,9 @@ def test_arbitrary_or_near_miss_text_documents_remain_unresolved(
     assert result.unresolved[0].reason == "unsupported-adjacent-file"
 
 
-def test_episode_guide_rule_does_not_change_subtitle_association(tmp_path: Path) -> None:
+def test_episode_guide_rule_does_not_change_subtitle_association(
+    tmp_path: Path,
+) -> None:
     shows = tmp_path / "Shows"
     _touch(shows / "Synthetic Series" / "Pilot.mkv")
     _touch(shows / "Synthetic Series" / "Pilot.en.srt", b"subtitle")
