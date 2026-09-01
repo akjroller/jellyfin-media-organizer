@@ -685,6 +685,16 @@ def _protect_segment_identity(
     return tuple(protected)
 
 
+def _accessory_special_families_allowed(
+    families: set[str],
+    expected_family: str,
+) -> bool:
+    return (
+        expected_family in {"aired", "absolute"}
+        and families == {expected_family, "special"}
+    )
+
+
 def assign_episode_group_with_provider(
     show: CanonicalShow,
     sources: Iterable[SourceEpisodeInput],
@@ -742,7 +752,11 @@ def assign_episode_group_with_provider(
         for source in source_group
         if (family := _evidence_family(source.parse, show.numbering_mode)) != "none"
     }
-    if "conflict" in families or len(families) > 1:
+    expected_family = _expected_family(show.numbering_mode)
+    accessory_specials = _accessory_special_families_allowed(
+        families, expected_family
+    )
+    if "conflict" in families or (len(families) > 1 and not accessory_specials):
         reason = "mixed-numbering-evidence:" + ",".join(sorted(families))
         assignments = tuple(
             _assignment(
@@ -758,8 +772,7 @@ def assign_episode_group_with_provider(
             show, AssignmentStatus.SUSPICIOUS, assignments, None
         )
 
-    expected_family = _expected_family(show.numbering_mode)
-    if families and families != {expected_family}:
+    if families and expected_family not in families:
         reason = (
             f"numbering-policy-conflict:expected-{expected_family}:"
             f"observed-{next(iter(families))}"
@@ -858,9 +871,23 @@ def assign_episode_group_with_provider(
     elif show.numbering_mode is NumberingMode.SEGMENT_TITLE:
         matcher = _segment_assignment
 
-    assignments = tuple(
-        matcher(source, show, catalog, request_key) for source in source_group
-    )
+    def assign_source(source: SourceEpisodeInput) -> SourceEpisodeAssignment:
+        family = _evidence_family(source.parse, show.numbering_mode)
+        if accessory_specials and family == "special":
+            assignment = _special_assignment(source, show, catalog, request_key)
+            return replace(
+                assignment,
+                evidence=replace(
+                    assignment.evidence,
+                    reasons=(
+                        f"accessory-special-under:{show.numbering_mode.value}",
+                        *assignment.evidence.reasons,
+                    ),
+                ),
+            )
+        return matcher(source, show, catalog, request_key)
+
+    assignments = tuple(assign_source(source) for source in source_group)
     if show.numbering_mode is NumberingMode.SEGMENT_TITLE:
         assignments = _protect_segment_identity(source_group, assignments)
     else:
