@@ -9,6 +9,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from .decision_hash import stable_decision_hash
 from .models import (
     CompanionPlanRecord,
     CompanionStatus,
@@ -67,6 +68,7 @@ class AuditBundle:
     mapping_csv: bytes
     summary_txt: bytes
     plan_sha256: bytes
+    decision_sha256: bytes
     unresolved_csv: bytes
     extras_csv: bytes
     duplicates_csv: bytes
@@ -83,6 +85,7 @@ class AuditBundle:
             ("sidecars.csv", self.sidecars_csv),
             ("summary.txt", self.summary_txt),
             ("plan.sha256", self.plan_sha256),
+            ("decision.sha256", self.decision_sha256),
         ]
         if self.preflight_json is not None:
             files.append(("preflight.json", self.preflight_json))
@@ -184,11 +187,12 @@ def render_summary(
     plan: OrganizerPlan,
     preflight: PreflightResult | None = None,
 ) -> bytes:
-    """Render a concise, path-free status summary tied to the exact plan hash."""
+    """Render a concise, path-free status summary tied to both plan fingerprints."""
 
     counts = Counter(record.status for record in plan.records)
     lines = [
         f"plan_sha256={stable_plan_hash(plan)}",
+        f"decision_sha256={stable_decision_hash(plan)}",
         f"records={len(plan.records)}",
     ]
     lines.extend(f"{status.value}={counts[status]}" for status in TerminalStatus)
@@ -211,6 +215,7 @@ def render_audit_bundle(
     """Render every public audit artifact from the same immutable plan object."""
 
     plan_hash = stable_plan_hash(plan)
+    decision_hash = stable_decision_hash(plan)
     records = canonical_records(plan)
     unresolved = tuple(
         record
@@ -242,6 +247,7 @@ def render_audit_bundle(
         sidecars_csv=render_sidecars_csv(plan),
         summary_txt=render_summary(plan, preflight),
         plan_sha256=f"{plan_hash}\n".encode("ascii"),
+        decision_sha256=f"{decision_hash}\n".encode("ascii"),
         preflight_json=preflight_json,
         preflight_txt=preflight_txt,
     )

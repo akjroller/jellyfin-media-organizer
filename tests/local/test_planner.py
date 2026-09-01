@@ -113,6 +113,7 @@ def test_end_to_end_plan_is_cached_deterministic_and_non_mutating(
 
     output_files = {path.name for path in (tmp_path / "audit-first").iterdir()}
     assert output_files == {
+        "decision.sha256",
         "duplicates.csv",
         "extras.csv",
         "mapping.csv",
@@ -145,6 +146,7 @@ def test_end_to_end_plan_is_cached_deterministic_and_non_mutating(
     assert second.preflight.ready
     assert first.preflight.plan_hash == second.preflight.plan_hash
     assert first.bundle.plan_json == second.bundle.plan_json
+    assert first.bundle.decision_sha256 == second.bundle.decision_sha256
 
 
 def test_planner_rejects_generated_state_inside_media_root(tmp_path: Path) -> None:
