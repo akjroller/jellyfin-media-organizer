@@ -415,9 +415,7 @@ def _mixed_segment_title_rescue(
         if compatible and len(set(selected)) != len(selected):
             compatible = False
             reasons.append("mixed-segment-title-distinct-titles-collapse")
-        reasons.append(
-            f"mixed-segment-title-compatible:{str(compatible).casefold()}"
-        )
+        reasons.append(f"mixed-segment-title-compatible:{str(compatible).casefold()}")
         outcomes[candidate.provider_identity] = compatible
         extra_reasons[candidate.provider_identity] = tuple(reasons)
 
