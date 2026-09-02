@@ -170,9 +170,8 @@ def _pre_premiere_assignment(
     boundary_reasons = tuple(
         reason
         for source_date in source_dates
-        if (
-            reason := _pre_premiere_boundary_reason(source_date, show, catalog)
-        ) is not None
+        if (reason := _pre_premiere_boundary_reason(source_date, show, catalog))
+        is not None
     )
     if not boundary_reasons:
         return None
@@ -420,9 +419,7 @@ def assign_episode_group_with_provider(
     guarded = {
         source.source_key: assignment
         for source in source_group
-        if (
-            assignment := _pre_premiere_assignment(source, show, catalog)
-        ) is not None
+        if (assignment := _pre_premiere_assignment(source, show, catalog)) is not None
     }
     if not guarded:
         return original
