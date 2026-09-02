@@ -617,7 +617,10 @@ def assign_episode_group_with_provider(
         if remaining:
             rerun = _assign_episode_group_core(show, remaining, provider)
             base_assignments.update(
-                assignment.source_key: assignment for assignment in rerun.assignments
+                {
+                    assignment.source_key: assignment
+                    for assignment in rerun.assignments
+                }
             )
             if rerun.catalog_request_key is not None:
                 request_keys.add(rerun.catalog_request_key)
