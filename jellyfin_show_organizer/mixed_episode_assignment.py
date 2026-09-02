@@ -21,7 +21,12 @@ from .episode_assignment_strict import (
     assign_episode_group_with_provider as _assign_strict_group,
 )
 from .models import CanonicalShow, MatchEvidence, NumberingMode
-from .providers import MetadataProvider, ProviderEpisode, ProviderEpisodeCatalog, TvmazeProviderAdapter
+from .providers import (
+    MetadataProvider,
+    ProviderEpisode,
+    ProviderEpisodeCatalog,
+    TvmazeProviderAdapter,
+)
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
 _FAMILY_MODE = {
