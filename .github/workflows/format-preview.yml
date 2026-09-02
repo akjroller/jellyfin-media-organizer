@@ -1,0 +1,22 @@
+name: Temporary formatting preview
+
+on:
+  push:
+    branches:
+      - fix/parenthetical-show-aliases
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install "ruff==0.15.20"
+      - run: python -m ruff format --diff jellyfin_show_organizer/show_resolver.py tests/local/test_parenthetical_show_aliases.py
