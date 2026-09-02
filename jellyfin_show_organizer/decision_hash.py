@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict
 from typing import Any
 
-from .models import CompanionPlanRecord, OrganizerPlan, PlanRecord
+from .models import CompanionPlanRecord, OrganizerPlan, ParseResult, PlanRecord
 from .schema import canonical_companions, canonical_records
 
 DECISION_HASH_VERSION = 1
@@ -23,6 +23,14 @@ def _duplicate_decision(record: PlanRecord) -> dict[str, Any] | None:
     }
 
 
+def _parse_decision(parse: ParseResult | None) -> dict[str, Any] | None:
+    if parse is None:
+        return None
+    payload = asdict(parse)
+    payload.pop("series_aliases", None)
+    return payload
+
+
 def _record_decision(record: PlanRecord) -> dict[str, Any]:
     """Return only outcome-bearing fields for one video record.
 
@@ -35,7 +43,7 @@ def _record_decision(record: PlanRecord) -> dict[str, Any]:
     return {
         "source": asdict(record.source),
         "status": record.status.value,
-        "parse": asdict(record.parse) if record.parse is not None else None,
+        "parse": _parse_decision(record.parse),
         "show": asdict(record.show) if record.show is not None else None,
         "destination": record.destination,
         "extra": asdict(record.extra) if record.extra is not None else None,
