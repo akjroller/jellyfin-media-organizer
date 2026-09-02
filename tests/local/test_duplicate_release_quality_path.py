@@ -120,8 +120,9 @@ def test_parent_remux_and_filename_encode_remain_incomparable() -> None:
     )
 
 
-def test_duplicate_selection_is_input_order_deterministic_with_parent_evidence(
-) -> None:
+def test_duplicate_selection_is_input_order_deterministic_with_parent_evidence() -> (
+    None
+):
     lower = "Example.Series.S01.720p.WEB-DL/Example.Series.S01E01.mkv"
     higher = "Example.Series.S01.1080p.WEB-DL/Example.Series.S01E01.mkv"
 
