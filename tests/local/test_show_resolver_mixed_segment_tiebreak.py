@@ -23,7 +23,9 @@ ALPHA = ProviderIdentity("fixture", "alpha")
 BETA = ProviderIdentity("fixture", "beta")
 
 
-def _episode(show: str, value: str, season: int, number: int, title: str) -> ProviderEpisode:
+def _episode(
+    show: str, value: str, season: int, number: int, title: str
+) -> ProviderEpisode:
     return ProviderEpisode(
         identity=ProviderIdentity("fixture", f"{show}-{value}"),
         season=season,
@@ -113,7 +115,10 @@ def _mixed_parses() -> tuple[ParseResult, ...]:
     )
 
 
-def _resolve(provider: MixedSegmentProvider, parses: tuple[ParseResult, ...] | None = None):
+def _resolve(
+    provider: MixedSegmentProvider,
+    parses: tuple[ParseResult, ...] | None = None,
+):
     return resolve_show_group_with_provider(
         "Example Collection",
         parses or _mixed_parses(),
@@ -148,16 +153,25 @@ def test_mixed_aired_segment_titles_break_show_identity_tie() -> None:
     assert result.status is ResolutionStatus.MATCHED
     assert result.show is not None
     assert result.show.provider_identity == ALPHA
-    assert "mixed-segment-title-rescue:unique-compatible-candidate" in result.evidence.reasons
-    assert "mixed-segment-title-rescue-winner:fixture:alpha" in result.evidence.reasons
+    assert (
+        "mixed-segment-title-rescue:unique-compatible-candidate"
+        in result.evidence.reasons
+    )
+    assert (
+        "mixed-segment-title-rescue-winner:fixture:alpha" in result.evidence.reasons
+    )
     assert provider.catalog_calls == [ALPHA, BETA]
 
 
 def test_mixed_segment_rescue_requires_two_distinct_titles() -> None:
     provider = MixedSegmentProvider(
         {
-            ALPHA: _catalog(ALPHA, (_episode("alpha", "one", 1, 1, "First Story"),)),
-            BETA: _catalog(BETA, (_episode("beta", "one", 1, 1, "First Story"),)),
+            ALPHA: _catalog(
+                ALPHA, (_episode("alpha", "one", 1, 1, "First Story"),)
+            ),
+            BETA: _catalog(
+                BETA, (_episode("beta", "one", 1, 1, "First Story"),)
+            ),
         }
     )
     parses = (
@@ -186,8 +200,12 @@ def test_mixed_segment_rescue_requires_two_distinct_titles() -> None:
 def test_mixed_segment_rescue_rejects_duplicate_normalized_titles() -> None:
     provider = MixedSegmentProvider(
         {
-            ALPHA: _catalog(ALPHA, (_episode("alpha", "one", 1, 1, "First Story"),)),
-            BETA: _catalog(BETA, (_episode("beta", "one", 1, 1, "First Story"),)),
+            ALPHA: _catalog(
+                ALPHA, (_episode("alpha", "one", 1, 1, "First Story"),)
+            ),
+            BETA: _catalog(
+                BETA, (_episode("beta", "one", 1, 1, "First Story"),)
+            ),
         }
     )
     parses = (
@@ -231,7 +249,10 @@ def test_mixed_segment_rescue_keeps_equal_catalog_matches_blocked() -> None:
 
     assert result.status is ResolutionStatus.SUSPICIOUS
     assert result.show is None
-    assert "mixed-segment-title-rescue:no-unique-compatible-candidate" in result.evidence.reasons
+    assert (
+        "mixed-segment-title-rescue:no-unique-compatible-candidate"
+        in result.evidence.reasons
+    )
 
 
 def test_mixed_segment_rescue_keeps_provider_failure_indeterminate() -> None:
@@ -252,7 +273,10 @@ def test_mixed_segment_rescue_keeps_provider_failure_indeterminate() -> None:
 
     assert result.status is ResolutionStatus.SUSPICIOUS
     assert result.show is None
-    assert "mixed-segment-title-rescue:indeterminate-candidate-catalog" in result.evidence.reasons
+    assert (
+        "mixed-segment-title-rescue:indeterminate-candidate-catalog"
+        in result.evidence.reasons
+    )
 
 
 def test_mixed_segment_rescue_requires_unique_provider_title_matches() -> None:
@@ -298,7 +322,9 @@ def test_mixed_segment_rescue_is_input_order_deterministic() -> None:
                 _episode("alpha", "two", 1, 2, "Second Story"),
             ),
         ),
-        BETA: _catalog(BETA, (_episode("beta", "other", 1, 1, "Unrelated"),)),
+        BETA: _catalog(
+            BETA, (_episode("beta", "other", 1, 1, "Unrelated"),)
+        ),
     }
     first = _resolve(MixedSegmentProvider(catalogs), _mixed_parses())
     second = _resolve(MixedSegmentProvider(catalogs), tuple(reversed(_mixed_parses())))
