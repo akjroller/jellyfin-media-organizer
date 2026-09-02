@@ -5,7 +5,10 @@ from pathlib import PurePosixPath
 import pytest
 
 from jellyfin_show_organizer.destination import DestinationPolicy
-from jellyfin_show_organizer.extra_classifier import ExtraClassification, ExtraDisposition
+from jellyfin_show_organizer.extra_classifier import (
+    ExtraClassification,
+    ExtraDisposition,
+)
 from jellyfin_show_organizer.models import (
     CanonicalShow,
     CompanionStatus,
