@@ -27,6 +27,7 @@ from .duplicate_classifier import (
 )
 from .episode_assignment import (
     AssignmentStatus,
+    SourceEpisodeAssignment,
     SourceEpisodeInput,
     assign_episode_group_with_provider,
 )
@@ -40,6 +41,7 @@ from .inventory import (
 )
 from .models import (
     CacheSnapshot,
+    CanonicalShow,
     CompanionPlanRecord,
     CompanionStatus,
     MatchEvidence,
@@ -249,6 +251,137 @@ def _plan_episode(episode: ProviderEpisode) -> PlanEpisode:
     )
 
 
+_DUPLICATE_PROVIDER_EPISODE_PREFIX = "duplicate-provider-episode-assignment:"
+_PROVIDER_EPISODE_DUPLICATE_CANDIDATE = "provider-episode-duplicate-candidate"
+
+
+def _duplicate_provider_claims(
+    assignment: SourceEpisodeAssignment,
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            reason.removeprefix(_DUPLICATE_PROVIDER_EPISODE_PREFIX)
+            for reason in assignment.evidence.reasons
+            if reason.startswith(_DUPLICATE_PROVIDER_EPISODE_PREFIX)
+        )
+    )
+
+
+def _duplicate_claim_components(
+    claims_by_source: Mapping[str, tuple[str, ...]],
+) -> tuple[tuple[str, ...], ...]:
+    remaining = set(claims_by_source)
+    components: list[tuple[str, ...]] = []
+    while remaining:
+        seed = min(remaining, key=_path_key)
+        component = {seed}
+        frontier = [seed]
+        remaining.remove(seed)
+        while frontier:
+            current = frontier.pop()
+            current_claims = set(claims_by_source[current])
+            connected = sorted(
+                (
+                    source
+                    for source in remaining
+                    if current_claims.intersection(claims_by_source[source])
+                ),
+                key=_path_key,
+            )
+            for source in connected:
+                remaining.remove(source)
+                component.add(source)
+                frontier.append(source)
+        components.append(tuple(sorted(component, key=_path_key)))
+    return tuple(components)
+
+
+def _recover_equivalent_provider_episode_duplicates(
+    show: CanonicalShow,
+    sources: tuple[SourceEpisodeInput, ...],
+    assignments: Mapping[str, SourceEpisodeAssignment],
+    provider: MetadataProvider,
+) -> dict[str, SourceEpisodeAssignment]:
+    """Recover only exact-set duplicate claims after the strict overlap guard fires.
+
+    The normal group assignment remains fail-closed. Sources are re-evaluated one at
+    a time solely to recover the provider episodes that the strict duplicate guard
+    deliberately removed. A connected overlap component is promoted only when every
+    member independently matches and every member has the exact same complete
+    provider-episode identity set. Partial overlaps therefore remain suspicious.
+    """
+
+    claims_by_source = {
+        source.source_key: claims
+        for source in sources
+        if (
+            assignment := assignments.get(source.source_key)
+        ) is not None
+        and assignment.status is AssignmentStatus.SUSPICIOUS
+        and (claims := _duplicate_provider_claims(assignment))
+    }
+    if len(claims_by_source) < 2:
+        return {}
+
+    source_by_key = {source.source_key: source for source in sources}
+    recovered: dict[str, SourceEpisodeAssignment] = {}
+    for component in _duplicate_claim_components(claims_by_source):
+        if len(component) < 2:
+            continue
+
+        individual: dict[str, SourceEpisodeAssignment] = {}
+        complete_sets: set[tuple[str, ...]] = set()
+        valid = True
+        for source_key in component:
+            result = assign_episode_group_with_provider(
+                show,
+                (source_by_key[source_key],),
+                provider,
+            )
+            if len(result.assignments) != 1:
+                valid = False
+                break
+            assignment = result.assignments[0]
+            if assignment.status is not AssignmentStatus.MATCHED or not assignment.episodes:
+                valid = False
+                break
+            complete_set = tuple(
+                sorted(episode.identity.key for episode in assignment.episodes)
+            )
+            if len(complete_set) != len(set(complete_set)):
+                valid = False
+                break
+            individual[source_key] = assignment
+            complete_sets.add(complete_set)
+
+        if not valid or len(individual) != len(component) or len(complete_sets) != 1:
+            continue
+
+        episode_set = next(iter(complete_sets))
+        set_reason = "provider-episode-duplicate-set:" + ",".join(episode_set)
+        for source_key in component:
+            assignment = individual[source_key]
+            original = assignments[source_key]
+            duplicate_reasons = tuple(
+                reason
+                for reason in original.evidence.reasons
+                if reason.startswith(_DUPLICATE_PROVIDER_EPISODE_PREFIX)
+            )
+            recovered[source_key] = replace(
+                assignment,
+                evidence=replace(
+                    assignment.evidence,
+                    reasons=(
+                        *assignment.evidence.reasons,
+                        *duplicate_reasons,
+                        _PROVIDER_EPISODE_DUPLICATE_CANDIDATE,
+                        set_reason,
+                    ),
+                ),
+            )
+    return recovered
+
+
 def _unresolved_show_records(
     sources: tuple[SourceFile, ...],
     classifications: Mapping[str, ExtraClassification],
@@ -404,6 +537,14 @@ def _plan_resolved_group(
     assignments = {
         assignment.source_key: assignment for assignment in assignment_group.assignments
     }
+    assignments.update(
+        _recover_equivalent_provider_episode_duplicates(
+            show,
+            tuple(episode_sources),
+            assignments,
+            provider,
+        )
+    )
     sources_by_path = {source.relative_path: source for source in sources}
     for source_input in episode_sources:
         source = sources_by_path[source_input.source_key]
@@ -493,6 +634,24 @@ def _logical_identity(record: PlanRecord) -> str:
     return f"{show_identity}:source:{record.source.relative_path}"
 
 
+def _provider_episode_duplicate_collision_key(record: PlanRecord) -> str | None:
+    evidence = record.evidence
+    if evidence is None or _PROVIDER_EPISODE_DUPLICATE_CANDIDATE not in evidence.reasons:
+        return None
+    if record.show is None or not record.provider_episodes:
+        raise PlanningConfigurationError(
+            "provider-episode duplicate candidate is missing resolved identity"
+        )
+    episode_ids = tuple(
+        sorted(episode.provider_identity.key for episode in record.provider_episodes)
+    )
+    return (
+        "provider-episode-collision:"
+        f"{record.show.provider_identity.key}:"
+        + ",".join(episode_ids)
+    )
+
+
 def _apply_duplicate_decisions(
     records: list[PlanRecord],
     sidecars: SidecarDiscovery,
@@ -523,6 +682,7 @@ def _apply_duplicate_decisions(
             "duplicate preference references an unknown or non-movable source"
         )
 
+    provider_duplicate_keys: set[str] = set()
     candidates: list[DuplicateCandidate] = []
     for record in candidate_records:
         configured = overrides.duplicate_preference_for(record.source.relative_path)
@@ -537,6 +697,9 @@ def _apply_duplicate_decisions(
             if configured is not None
             else None
         )
+        collision_key = _provider_episode_duplicate_collision_key(record)
+        if collision_key is not None:
+            provider_duplicate_keys.add(_path_key(record.source.relative_path)[0])
         candidates.append(
             DuplicateCandidate(
                 operation_key=record.source.relative_path,
@@ -547,7 +710,7 @@ def _apply_duplicate_decisions(
                         key=_path_key,
                     ),
                 ),
-                destination=cast(str, record.destination),
+                destination=collision_key or cast(str, record.destination),
                 logical_identity=_logical_identity(record),
                 fingerprint=record.source.fingerprint,
                 preference=preference,
@@ -560,6 +723,10 @@ def _apply_duplicate_decisions(
         for result in results
         for candidate in result.candidates
     }
+    if provider_duplicate_keys - collision_keys:
+        raise PlanningConfigurationError(
+            "provider-episode duplicate candidate did not form a complete collision"
+        )
     if configured_keys - collision_keys:
         raise PlanningConfigurationError(
             "duplicate preference source is not part of a destination collision"
