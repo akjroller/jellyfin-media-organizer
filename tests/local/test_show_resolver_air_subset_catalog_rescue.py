@@ -151,10 +151,15 @@ def test_one_aired_coordinate_plus_absolute_sibling_is_not_enough_for_rescue() -
 
     assert result.status is ResolutionStatus.SUSPICIOUS
     assert result.show is None
-    assert "aired-catalog-rescue:unique-compatible-candidate" not in result.evidence.reasons
+    assert (
+        "aired-catalog-rescue:unique-compatible-candidate"
+        not in result.evidence.reasons
+    )
 
 
-def test_mixed_aired_and_absolute_evidence_on_same_record_blocks_subset_rescue() -> None:
+def test_mixed_aired_and_absolute_evidence_on_same_record_blocks_subset_rescue() -> (
+    None
+):
     show = ProviderShow(
         _identity("frontier"),
         "Example Frontier: The Long Journey",
@@ -181,7 +186,10 @@ def test_mixed_aired_and_absolute_evidence_on_same_record_blocks_subset_rescue()
 
     assert result.status is ResolutionStatus.SUSPICIOUS
     assert result.show is None
-    assert "aired-catalog-rescue:unique-compatible-candidate" not in result.evidence.reasons
+    assert (
+        "aired-catalog-rescue:unique-compatible-candidate"
+        not in result.evidence.reasons
+    )
 
 
 def test_two_catalogs_that_both_fit_aired_subset_remain_suspicious() -> None:
@@ -210,4 +218,6 @@ def test_two_catalogs_that_both_fit_aired_subset_remain_suspicious() -> None:
 
     assert result.status is ResolutionStatus.SUSPICIOUS
     assert result.show is None
-    assert "aired-catalog-rescue:no-unique-compatible-candidate" in result.evidence.reasons
+    assert (
+        "aired-catalog-rescue:no-unique-compatible-candidate" in result.evidence.reasons
+    )
