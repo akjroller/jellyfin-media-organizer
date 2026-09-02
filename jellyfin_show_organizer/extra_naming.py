@@ -36,10 +36,11 @@ _DEFAULT_TITLES: dict[str, str] = {
 }
 
 _STRUCTURAL_EXTRA = re.compile(
-    r"(?i)(?<![A-Za-z0-9])s\d{1,2}[ ._-]*extras?"
+    r"(?i)(?<![A-Za-z0-9])s(?P<season>\d{1,2})[ ._-]*extras?"
     r"(?:[ ._-]*(?P<variant>\d{1,3}))?(?![A-Za-z0-9])"
 )
 _GENERIC_EXTRA = re.compile(r"(?i)(?<![A-Za-z0-9])extras?(?![A-Za-z0-9])")
+_SEASON_MARKER = re.compile(r"(?i)(?<![A-Za-z0-9])s(?P<season>\d{1,2})(?![A-Za-z0-9])")
 _CREDITLESS_MARKERS: dict[str, re.Pattern[str]] = {
     "creditless-opening": re.compile(
         r"(?i)(?<![A-Za-z0-9])(?:ncop|creditless[ ._-]+opening|clean[ ._-]+opening)"
@@ -126,6 +127,15 @@ def _variant_label(value: str) -> str:
     return f"{number:02d}" if number < 100 else str(number)
 
 
+def _season_context_before(value: str, end: int) -> str | None:
+    seasons = {
+        int(match.group("season")) for match in _SEASON_MARKER.finditer(value[:end])
+    }
+    if len(seasons) != 1:
+        return None
+    return f"{next(iter(seasons)):02d}"
+
+
 def _finalize(
     title: str,
     *,
@@ -178,6 +188,10 @@ def derive_extra_display_identity(
                 label = _variant_label(variant)
                 title = f"{default_title} {label}"
                 reasons = (f"extra-naming-{kind}-variant:{label}",)
+            season = _season_context_before(stem, match.start())
+            if season is not None:
+                title = f"Season {season} - {title}"
+                reasons = (*reasons, f"extra-naming-season-context:{season}")
             _, trimmed = _trim_release_noise(stem[match.end() :])
             return _finalize(
                 title,
@@ -188,6 +202,8 @@ def derive_extra_display_identity(
 
     structural_match = _STRUCTURAL_EXTRA.search(stem)
     if structural_match is not None:
+        season = _variant_label(structural_match.group("season"))
+        season_reason = f"extra-naming-season-context:{season}"
         variant = structural_match.group("variant")
         tail, trimmed = _trim_release_noise(stem[structural_match.end() :])
         if tail:
@@ -198,23 +214,27 @@ def derive_extra_display_identity(
             else:
                 reasons = ()
             return _finalize(
-                tail,
+                f"Season {season} - {tail}",
                 source_reason="extra-naming-source:structural-extra-tail",
                 release_noise_trimmed=trimmed,
-                additional_reasons=reasons,
+                additional_reasons=(*reasons, season_reason),
             )
         if variant is not None:
             label = _variant_label(variant)
             return _finalize(
-                f"Extra {label}",
+                f"Season {season} - Extra {label}",
                 source_reason="extra-naming-source:structural-extra-variant",
                 release_noise_trimmed=trimmed,
-                additional_reasons=(f"extra-naming-structural-variant:{label}",),
+                additional_reasons=(
+                    f"extra-naming-structural-variant:{label}",
+                    season_reason,
+                ),
             )
         return _finalize(
-            default_title,
+            f"Season {season} - {default_title}",
             source_reason="extra-naming-source:kind-fallback",
             release_noise_trimmed=trimmed,
+            additional_reasons=(season_reason,),
         )
 
     specific_pattern = _SPECIFIC_MARKERS.get(kind)

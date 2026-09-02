@@ -67,12 +67,15 @@ def test_distinct_generic_extra_titles_receive_distinct_destinations() -> None:
     assert drawing.status is DestinationStatus.READY
     assert music.status is DestinationStatus.READY
     assert drawing.relative_path == (
-        "Fixture Series (2026)/extras/How To Draw Character.mkv"
+        "Fixture Series (2026)/extras/Season 01 - How To Draw Character.mkv"
     )
-    assert music.relative_path == "Fixture Series (2026)/extras/Music Video.mkv"
+    assert (
+        music.relative_path
+        == "Fixture Series (2026)/extras/Season 01 - Music Video.mkv"
+    )
     assert drawing.relative_path != music.relative_path
     assert find_destination_collisions((drawing, music)) == ()
-    assert "extra-display-title:How To Draw Character" in drawing.reasons
+    assert "extra-display-title:Season 01 - How To Draw Character" in drawing.reasons
 
 
 @pytest.mark.parametrize(
@@ -139,8 +142,8 @@ def test_quality_and_codec_release_tails_do_not_change_semantic_extra_identity()
     high_destination = _destination(high)
     low_destination = _destination(low)
 
-    assert high_naming.display_title == "Cast Reunion"
-    assert low_naming.display_title == "Cast Reunion"
+    assert high_naming.display_title == "Season 01 - Cast Reunion"
+    assert low_naming.display_title == "Season 01 - Cast Reunion"
     assert high_naming.identity_key == low_naming.identity_key
     assert high_destination.relative_path == low_destination.relative_path
     assert "extra-naming-release-noise-trimmed" in high_naming.reasons
@@ -184,7 +187,7 @@ def test_unsafe_semantic_title_is_preserved_then_sanitized_losslessly() -> None:
 
     assert decision.status is DestinationStatus.READY
     assert decision.relative_path is not None
-    assert decision.relative_path.endswith("Part~003AOne~003F.mkv")
+    assert decision.relative_path.endswith("Season 01 - Part~003AOne~003F.mkv")
     assert "extra-display-title:Part:One?" in decision.reasons
 
 
@@ -192,5 +195,86 @@ def test_generic_extra_without_useful_identity_keeps_safe_fallback() -> None:
     decision = _destination("Fixture Series/Fixture.Series.S01EXTRA.1080p.WEB-DL.mkv")
 
     assert decision.status is DestinationStatus.READY
-    assert decision.relative_path == "Fixture Series (2026)/extras/Extra.mkv"
+    assert decision.relative_path == (
+        "Fixture Series (2026)/extras/Season 01 - Extra.mkv"
+    )
     assert "extra-naming-source:kind-fallback" in decision.reasons
+
+
+def test_structural_extra_seasons_do_not_collapse_to_one_destination() -> None:
+    season_one = _destination(
+        "Fixture Series/Fixture.Series.S01EXTRA01.Mission.Overview.1080p.DVD.x264.mkv"
+    )
+    season_two = _destination(
+        "Fixture Series/Fixture.Series.S02EXTRA01.Mission.Overview.1080p.DVD.x264.mkv"
+    )
+
+    assert season_one.status is DestinationStatus.READY
+    assert season_two.status is DestinationStatus.READY
+    assert season_one.relative_path == (
+        "Fixture Series (2026)/extras/Season 01 - Extra 01 - Mission Overview.mkv"
+    )
+    assert season_two.relative_path == (
+        "Fixture Series (2026)/extras/Season 02 - Extra 01 - Mission Overview.mkv"
+    )
+    assert find_destination_collisions((season_one, season_two)) == ()
+    assert "extra-naming-season-context:01" in season_one.reasons
+    assert "extra-naming-season-context:02" in season_two.reasons
+
+
+def test_creditless_extra_seasons_do_not_collapse_to_one_destination() -> None:
+    season_one = _destination(
+        "Fixture Series/Fixture.Series.S1.NCOP.01.1080p.BluRay.x265.mkv",
+        "creditless-opening",
+    )
+    season_two = _destination(
+        "Fixture Series/Fixture.Series.S2.NCOP.01.1080p.BluRay.x265.mkv",
+        "creditless-opening",
+    )
+
+    assert season_one.relative_path == (
+        "Fixture Series (2026)/extras/Season 01 - Creditless Opening 01.mkv"
+    )
+    assert season_two.relative_path == (
+        "Fixture Series (2026)/extras/Season 02 - Creditless Opening 01.mkv"
+    )
+    assert find_destination_collisions((season_one, season_two)) == ()
+
+
+def test_ambiguous_season_context_is_not_guessed_for_creditless_extra() -> None:
+    decision = _destination(
+        "Fixture Series/Fixture.Series.S1.S2.NCED.01.1080p.BluRay.x265.mkv",
+        "creditless-ending",
+    )
+
+    assert decision.relative_path == (
+        "Fixture Series (2026)/extras/Creditless Ending 01.mkv"
+    )
+    assert not any(
+        reason.startswith("extra-naming-season-context:") for reason in decision.reasons
+    )
+
+
+def test_episode_coordinate_is_not_mistaken_for_extra_season_context() -> None:
+    decision = _destination(
+        "Fixture Series/Fixture.Series.S01E03.NCOP.01.1080p.BluRay.x265.mkv",
+        "creditless-opening",
+    )
+
+    assert decision.relative_path == (
+        "Fixture Series (2026)/extras/Creditless Opening 01.mkv"
+    )
+    assert not any(
+        reason.startswith("extra-naming-season-context:") for reason in decision.reasons
+    )
+
+
+def test_planner_extra_identity_keeps_seasons_distinct() -> None:
+    season_one = _extra_record(
+        "Fixture Series/Fixture.Series.S01EXTRA01.Mission.Overview.mkv"
+    )
+    season_two = _extra_record(
+        "Fixture Series/Fixture.Series.S02EXTRA01.Mission.Overview.mkv"
+    )
+
+    assert _logical_identity(season_one) != _logical_identity(season_two)
