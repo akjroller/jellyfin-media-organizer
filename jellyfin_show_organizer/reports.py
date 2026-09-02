@@ -246,10 +246,14 @@ def _duplicate_row(
         "duplicate_ref": stable_duplicate_ref(decision),
         "destination_key": decision.destination_key,
         "destination": "|".join(destinations),
-        "decision_state": "winner-selected" if decision.winner is not None else "review-required",
+        "decision_state": "winner-selected"
+        if decision.winner is not None
+        else "review-required",
         "candidate_count": str(len(candidates)),
         "candidates": "|".join(candidates),
-        "candidate_review_refs": "|".join(stable_review_ref(value) for value in candidates),
+        "candidate_review_refs": "|".join(
+            stable_review_ref(value) for value in candidates
+        ),
         "winner": decision.winner or "",
         "winner_review_ref": (
             stable_review_ref(decision.winner) if decision.winner is not None else ""
