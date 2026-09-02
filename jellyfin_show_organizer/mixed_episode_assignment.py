@@ -105,6 +105,17 @@ def _pre_premiere_contexts(source_key: str) -> tuple[str, ...]:
     )
 
 
+def _has_pre_premiere_guard_signal(
+    source: SourceEpisodeInput,
+    show: CanonicalShow,
+) -> bool:
+    return (
+        _evidence_family(source.parse, show.numbering_mode) in {"aired", "absolute"}
+        and bool(_pre_premiere_contexts(source.source_key))
+        and bool(_source_dates(source.source_key))
+    )
+
+
 def _first_regular_airdate(catalog: ProviderEpisodeCatalog) -> str | None:
     dates = tuple(
         sorted(
@@ -406,6 +417,14 @@ def assign_episode_group_with_provider(
     ):
         return original
 
+    potential_guard_sources = tuple(
+        source
+        for source in source_group
+        if _has_pre_premiere_guard_signal(source, show)
+    )
+    if not potential_guard_sources:
+        return original
+
     catalog = provider.episode_catalog(show.provider_identity)
     if (
         catalog.request_key != original.catalog_request_key
@@ -418,7 +437,7 @@ def assign_episode_group_with_provider(
 
     guarded = {
         source.source_key: assignment
-        for source in source_group
+        for source in potential_guard_sources
         if (assignment := _pre_premiere_assignment(source, show, catalog)) is not None
     }
     if not guarded:
