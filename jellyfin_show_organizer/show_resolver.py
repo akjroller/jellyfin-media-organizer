@@ -120,7 +120,9 @@ def _parenthetical_alias_pair(
     source_aliases = parenthetical_show_aliases(source_key)
     if source_aliases:
         observed.append(source_aliases)
-    observed.extend(parse.series_aliases for parse in parse_group if parse.series_aliases)
+    observed.extend(
+        parse.series_aliases for parse in parse_group if parse.series_aliases
+    )
     if not observed:
         return ()
 
