@@ -1,0 +1,55 @@
+name: Temporary token expansion integration
+
+on:
+  push:
+    branches:
+      - fix/single-token-title-expansion
+    paths:
+      - .github/workflows/temp-token-expansion-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/single-token-title-expansion
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Add structural token expansion evidence
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('jellyfin_show_organizer/show_structural_evidence.py')
+          text = path.read_text(encoding='utf-8')
+
+          anchor = '''def _provider_subtitle_prefix(source: str, candidate_title: str) -> bool:\n'''
+          helper = '''def _single_token_prefix_expansion_equivalent(\n    source: str, candidate: str\n) -> bool:\n    source_tokens = _normalize(source).split()\n    candidate_tokens = _normalize(candidate).split()\n    if len(source_tokens) < 2 or len(source_tokens) != len(candidate_tokens):\n        return False\n\n    differences = tuple(\n        (source_token, candidate_token)\n        for source_token, candidate_token in zip(source_tokens, candidate_tokens, strict=True)\n        if source_token != candidate_token\n    )\n    if len(differences) != 1:\n        return False\n\n    source_token, candidate_token = differences[0]\n    return (\n        source_token.isalpha()\n        and candidate_token.isalpha()\n        and len(source_token) >= 3\n        and len(candidate_token) >= len(source_token) + 2\n        and candidate_token.startswith(source_token)\n    )\n\n\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('expected structural helper insertion point exactly once')
+          text = text.replace(anchor, helper + anchor, 1)
+
+          scoring_anchor = '''        if _provider_ampersand_equivalent(normalized, candidate_title):\n            return 0.90, ("provider-ampersand-equivalent",)\n\n        source_tokens = normalized.split()\n'''
+          scoring_replacement = '''        if _provider_ampersand_equivalent(normalized, candidate_title):\n            return 0.90, ("provider-ampersand-equivalent",)\n        if _single_token_prefix_expansion_equivalent(normalized, candidate_normalized):\n            return 0.78, ("single-token-prefix-expansion-equivalent",)\n\n        source_tokens = normalized.split()\n'''
+          if text.count(scoring_anchor) != 1:
+              raise SystemExit('expected structural scoring insertion point exactly once')
+          path.write_text(
+              text.replace(scoring_anchor, scoring_replacement, 1),
+              encoding='utf-8',
+          )
+      - name: Format changed Python
+        run: |
+          python -m pip install ruff==0.15.20
+          python -m ruff format jellyfin_show_organizer/show_structural_evidence.py tests/local/test_single_token_title_expansion.py
+      - name: Commit integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jellyfin_show_organizer/show_structural_evidence.py tests/local/test_single_token_title_expansion.py
+          git commit -m "Recognize one-token title expansion evidence"
+          git push origin HEAD:fix/single-token-title-expansion
