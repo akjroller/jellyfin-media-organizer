@@ -156,7 +156,7 @@ def _weak_token_merge_resolution(
     if len(merge_titles) != 1:
         return None
     merge_title = merge_titles[0]
-    retry_reasons = (
+    retry_reasons: tuple[str, ...] = (
         "provider-search-token-merge:attempted",
         "provider-search-token-merge-trigger:weak-exact-candidates",
         f"provider-search-token-merge-query:{normalize_show_identity(merge_title)}",
