@@ -142,7 +142,9 @@ def test_root_title_requires_complete_initialism_expansion() -> None:
         )
         == "Example The Long Alias"
     )
-    assert structural_root_title("Example Serial Complete 1080p", "Example Series") is None
+    assert (
+        structural_root_title("Example Serial Complete 1080p", "Example Series") is None
+    )
     assert structural_root_title("Example TLA Complete 1080p", "Example TLA") is None
 
 
@@ -152,12 +154,9 @@ def test_catalog_confirmed_root_title_resolves() -> None:
     assert result.status is ResolutionStatus.MATCHED
     assert result.show is not None
     assert result.show.provider_identity == ALPHA
+    assert "structural-root-title-fallback:catalog-confirmed" in result.evidence.reasons
     assert (
-        "structural-root-title-fallback:catalog-confirmed" in result.evidence.reasons
-    )
-    assert (
-        "structural-root-title-fallback-winner:fixture:alpha"
-        in result.evidence.reasons
+        "structural-root-title-fallback-winner:fixture:alpha" in result.evidence.reasons
     )
 
 
@@ -231,7 +230,9 @@ def test_catalog_incompatibility_stays_unresolved() -> None:
 
     assert result.status is ResolutionStatus.UNRESOLVED
     assert result.show is None
-    assert "structural-root-title-fallback:catalog-incompatible" in result.evidence.reasons
+    assert (
+        "structural-root-title-fallback:catalog-incompatible" in result.evidence.reasons
+    )
 
 
 def test_single_observation_is_not_enough_for_root_rescue() -> None:
@@ -275,7 +276,9 @@ def test_retried_ambiguity_remains_blocked() -> None:
 
     assert result.status is ResolutionStatus.SUSPICIOUS
     assert result.show is None
-    assert "structural-root-title-fallback:no-unique-root-match" in result.evidence.reasons
+    assert (
+        "structural-root-title-fallback:no-unique-root-match" in result.evidence.reasons
+    )
 
 
 def test_candidate_union_is_deterministic() -> None:
