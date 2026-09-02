@@ -29,10 +29,13 @@ from .schema import (
     stable_plan_hash,
 )
 
+_DUPLICATE_REVIEW_FAMILY = "duplicate-review"
+
 CSV_HEADER = (
     "source",
     "review_ref",
     "status",
+    "review_family",
     "destination",
     "show_title",
     "provider",
@@ -117,6 +120,18 @@ class AuditBundle:
         return tuple(files)
 
 
+def _record_review_family(record: PlanRecord) -> str:
+    """Return report-only review classification without changing plan status."""
+
+    if (
+        record.status is TerminalStatus.SUSPICIOUS
+        and record.duplicate is not None
+        and record.duplicate.winner is None
+    ):
+        return _DUPLICATE_REVIEW_FAMILY
+    return ""
+
+
 def _record_row(record: PlanRecord) -> dict[str, str]:
     parse = record.parse
     show = record.show
@@ -125,6 +140,7 @@ def _record_row(record: PlanRecord) -> dict[str, str]:
         "source": record.source.relative_path,
         "review_ref": stable_review_ref(record.source.relative_path),
         "status": record.status.value,
+        "review_family": _record_review_family(record),
         "destination": record.destination or "",
         "show_title": show.title if show is not None else "",
         "provider": show.provider if show is not None else "",
@@ -321,12 +337,23 @@ def render_summary(
     """Render a concise, path-free status summary tied to both plan fingerprints."""
 
     counts = Counter(record.status for record in plan.records)
+    duplicate_review = sum(
+        _record_review_family(record) == _DUPLICATE_REVIEW_FAMILY
+        for record in plan.records
+    )
     lines = [
         f"plan_sha256={stable_plan_hash(plan)}",
         f"decision_sha256={stable_decision_hash(plan)}",
         f"records={len(plan.records)}",
     ]
     lines.extend(f"{status.value}={counts[status]}" for status in TerminalStatus)
+    lines.extend(
+        (
+            f"duplicate_review={duplicate_review}",
+            "suspicious_excluding_duplicate_review="
+            f"{counts[TerminalStatus.SUSPICIOUS] - duplicate_review}",
+        )
+    )
     companion_counts = Counter(record.status for record in plan.companions)
     lines.append(f"companions={len(plan.companions)}")
     lines.extend(
