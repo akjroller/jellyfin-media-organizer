@@ -176,7 +176,10 @@ def _weak_token_merge_resolution(
     if not exact.shows:
         failed = _token_merge_retry_failure(
             result,
-            (*retry_reasons, "provider-search-token-merge:initial-candidates-not-reproducible"),
+            (
+                *retry_reasons,
+                "provider-search-token-merge:initial-candidates-not-reproducible",
+            ),
         )
         return failed, provider
 
