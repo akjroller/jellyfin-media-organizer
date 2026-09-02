@@ -80,6 +80,7 @@ def _serialize_record_v1(record: PlanRecord) -> dict[str, Any]:
 
     parse = payload.get("parse")
     if isinstance(parse, dict):
+        parse.pop("series_aliases", None)
         embedded = parse.pop("embedded_provider_identity", None)
         if embedded is not None:
             numeric = _legacy_tvmaze_id(
