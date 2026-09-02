@@ -124,6 +124,7 @@ class SourceFile:
 @dataclass(frozen=True, slots=True)
 class ParseResult:
     series_hint: str | None = None
+    series_aliases: tuple[str, ...] = ()
     season: int | None = None
     episodes: tuple[int, ...] = ()
     absolute_episode: int | None = None
@@ -137,6 +138,18 @@ class ParseResult:
     embedded_provider_identity: ProviderIdentity | None = None
 
     def __post_init__(self) -> None:
+        if len(self.series_aliases) > 2:
+            raise ValueError("series_aliases can contain at most two titles")
+        normalized_aliases: set[str] = set()
+        for alias in self.series_aliases:
+            if not alias or alias != alias.strip():
+                raise ValueError("series_aliases must contain non-empty trimmed titles")
+            normalized = unicodedata.normalize("NFKC", alias).casefold()
+            normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
+            normalized = " ".join(normalized.split())
+            if not normalized or normalized in normalized_aliases:
+                raise ValueError("series_aliases must be unique after normalization")
+            normalized_aliases.add(normalized)
         if self.season is not None and self.season < 0:
             raise ValueError("season cannot be negative")
         if any(episode < 0 for episode in self.episodes):
