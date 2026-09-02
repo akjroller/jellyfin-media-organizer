@@ -101,7 +101,7 @@ def _single_token_prefix_expansion_equivalent(source: str, candidate: str) -> bo
         source_token.isalpha()
         and candidate_token.isalpha()
         and len(source_token) >= 3
-        and len(candidate_token) >= len(source_token) + 2
+        and len(candidate_token) >= len(source_token) + 3
         and candidate_token.startswith(source_token)
     )
 
