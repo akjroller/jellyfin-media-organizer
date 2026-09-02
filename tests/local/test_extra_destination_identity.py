@@ -188,7 +188,7 @@ def test_unsafe_semantic_title_is_preserved_then_sanitized_losslessly() -> None:
     assert decision.status is DestinationStatus.READY
     assert decision.relative_path is not None
     assert decision.relative_path.endswith("Season 01 - Part~003AOne~003F.mkv")
-    assert "extra-display-title:Part:One?" in decision.reasons
+    assert "extra-display-title:Season 01 - Part:One?" in decision.reasons
 
 
 def test_generic_extra_without_useful_identity_keeps_safe_fallback() -> None:
