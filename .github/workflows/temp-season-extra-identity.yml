@@ -1,0 +1,84 @@
+name: Temporary season extra identity integration
+
+on:
+  push:
+    branches:
+      - fix/season-scoped-extra-identity
+    paths:
+      - .github/workflows/temp-season-extra-identity.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/season-scoped-extra-identity
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Preserve season identity in extra naming
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('jellyfin_show_organizer/extra_naming.py')
+          text = path.read_text(encoding='utf-8')
+
+          old = '''_STRUCTURAL_EXTRA = re.compile(\n    r"(?i)(?<![A-Za-z0-9])s\\d{1,2}[ ._-]*extras?"\n    r"(?:[ ._-]*(?P<variant>\\d{1,3}))?(?![A-Za-z0-9])"\n)\n_GENERIC_EXTRA = re.compile(r"(?i)(?<![A-Za-z0-9])extras?(?![A-Za-z0-9])")\n'''
+          new = '''_STRUCTURAL_EXTRA = re.compile(\n    r"(?i)(?<![A-Za-z0-9])s(?P<season>\\d{1,2})[ ._-]*extras?"\n    r"(?:[ ._-]*(?P<variant>\\d{1,3}))?(?![A-Za-z0-9])"\n)\n_GENERIC_EXTRA = re.compile(r"(?i)(?<![A-Za-z0-9])extras?(?![A-Za-z0-9])")\n_SEASON_MARKER = re.compile(\n    r"(?i)(?<![A-Za-z0-9])s(?P<season>\\d{1,2})(?![A-Za-z0-9])"\n)\n'''
+          if text.count(old) != 1:
+              raise SystemExit('expected structural extra regex block exactly once')
+          text = text.replace(old, new, 1)
+
+          old = '''def _variant_label(value: str) -> str:\n    number = int(value)\n    return f"{number:02d}" if number < 100 else str(number)\n\n\ndef _finalize(\n'''
+          new = '''def _variant_label(value: str) -> str:\n    number = int(value)\n    return f"{number:02d}" if number < 100 else str(number)\n\n\ndef _season_context_before(value: str, end: int) -> str | None:\n    seasons = {\n        int(match.group("season"))\n        for match in _SEASON_MARKER.finditer(value[:end])\n    }\n    if len(seasons) != 1:\n        return None\n    return f"{next(iter(seasons)):02d}"\n\n\ndef _finalize(\n'''
+          if text.count(old) != 1:
+              raise SystemExit('expected variant helper insertion point exactly once')
+          text = text.replace(old, new, 1)
+
+          old = '''        if match is not None:\n            variant = match.group("variant")\n            title = default_title\n            reasons: tuple[str, ...] = ()\n            if variant is not None:\n                label = _variant_label(variant)\n                title = f"{default_title} {label}"\n                reasons = (f"extra-naming-{kind}-variant:{label}",)\n            _, trimmed = _trim_release_noise(stem[match.end() :])\n            return _finalize(\n                title,\n                source_reason=f"extra-naming-source:{kind}-marker",\n                release_noise_trimmed=trimmed,\n                additional_reasons=reasons,\n            )\n'''
+          new = '''        if match is not None:\n            variant = match.group("variant")\n            title = default_title\n            reasons: tuple[str, ...] = ()\n            if variant is not None:\n                label = _variant_label(variant)\n                title = f"{default_title} {label}"\n                reasons = (f"extra-naming-{kind}-variant:{label}",)\n            season = _season_context_before(stem, match.start())\n            if season is not None:\n                title = f"Season {season} - {title}"\n                reasons = (*reasons, f"extra-naming-season-context:{season}")\n            _, trimmed = _trim_release_noise(stem[match.end() :])\n            return _finalize(\n                title,\n                source_reason=f"extra-naming-source:{kind}-marker",\n                release_noise_trimmed=trimmed,\n                additional_reasons=reasons,\n            )\n'''
+          if text.count(old) != 1:
+              raise SystemExit('expected creditless block exactly once')
+          text = text.replace(old, new, 1)
+
+          old = '''    structural_match = _STRUCTURAL_EXTRA.search(stem)\n    if structural_match is not None:\n        variant = structural_match.group("variant")\n        tail, trimmed = _trim_release_noise(stem[structural_match.end() :])\n        if tail:\n            if variant is not None:\n                label = _variant_label(variant)\n                tail = f"Extra {label} - {tail}"\n                reasons = (f"extra-naming-structural-variant:{label}",)\n            else:\n                reasons = ()\n            return _finalize(\n                tail,\n                source_reason="extra-naming-source:structural-extra-tail",\n                release_noise_trimmed=trimmed,\n                additional_reasons=reasons,\n            )\n        if variant is not None:\n            label = _variant_label(variant)\n            return _finalize(\n                f"Extra {label}",\n                source_reason="extra-naming-source:structural-extra-variant",\n                release_noise_trimmed=trimmed,\n                additional_reasons=(f"extra-naming-structural-variant:{label}",),\n            )\n        return _finalize(\n            default_title,\n            source_reason="extra-naming-source:kind-fallback",\n            release_noise_trimmed=trimmed,\n        )\n'''
+          new = '''    structural_match = _STRUCTURAL_EXTRA.search(stem)\n    if structural_match is not None:\n        season = _variant_label(structural_match.group("season"))\n        season_reason = f"extra-naming-season-context:{season}"\n        variant = structural_match.group("variant")\n        tail, trimmed = _trim_release_noise(stem[structural_match.end() :])\n        if tail:\n            if variant is not None:\n                label = _variant_label(variant)\n                tail = f"Extra {label} - {tail}"\n                reasons = (f"extra-naming-structural-variant:{label}",)\n            else:\n                reasons = ()\n            return _finalize(\n                f"Season {season} - {tail}",\n                source_reason="extra-naming-source:structural-extra-tail",\n                release_noise_trimmed=trimmed,\n                additional_reasons=(*reasons, season_reason),\n            )\n        if variant is not None:\n            label = _variant_label(variant)\n            return _finalize(\n                f"Season {season} - Extra {label}",\n                source_reason="extra-naming-source:structural-extra-variant",\n                release_noise_trimmed=trimmed,\n                additional_reasons=(\n                    f"extra-naming-structural-variant:{label}",\n                    season_reason,\n                ),\n            )\n        return _finalize(\n            f"Season {season} - {default_title}",\n            source_reason="extra-naming-source:kind-fallback",\n            release_noise_trimmed=trimmed,\n            additional_reasons=(season_reason,),\n        )\n'''
+          if text.count(old) != 1:
+              raise SystemExit('expected structural naming block exactly once')
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+
+          test_path = Path('tests/local/test_extra_destination_identity.py')
+          tests = test_path.read_text(encoding='utf-8')
+          replacements = {
+              '"Fixture Series (2026)/extras/How To Draw Character.mkv"': '"Fixture Series (2026)/extras/Season 01 - How To Draw Character.mkv"',
+              '"Fixture Series (2026)/extras/Music Video.mkv"': '"Fixture Series (2026)/extras/Season 01 - Music Video.mkv"',
+              '"extra-display-title:How To Draw Character"': '"extra-display-title:Season 01 - How To Draw Character"',
+              'assert high_naming.display_title == "Cast Reunion"': 'assert high_naming.display_title == "Season 01 - Cast Reunion"',
+              'assert low_naming.display_title == "Cast Reunion"': 'assert low_naming.display_title == "Season 01 - Cast Reunion"',
+              'assert decision.relative_path.endswith("Part~003AOne~003F.mkv")': 'assert decision.relative_path.endswith("Season 01 - Part~003AOne~003F.mkv")',
+              'assert decision.relative_path == "Fixture Series (2026)/extras/Extra.mkv"': 'assert decision.relative_path == (\n        "Fixture Series (2026)/extras/Season 01 - Extra.mkv"\n    )',
+          }
+          for old_value, new_value in replacements.items():
+              if tests.count(old_value) != 1:
+                  raise SystemExit(f'expected test replacement exactly once: {old_value}')
+              tests = tests.replace(old_value, new_value, 1)
+
+          tests += '''\n\ndef test_structural_extra_seasons_do_not_collapse_to_one_destination() -> None:\n    season_one = _destination(\n        "Fixture Series/Fixture.Series.S01EXTRA01.Mission.Overview.1080p.DVD.x264.mkv"\n    )\n    season_two = _destination(\n        "Fixture Series/Fixture.Series.S02EXTRA01.Mission.Overview.1080p.DVD.x264.mkv"\n    )\n\n    assert season_one.status is DestinationStatus.READY\n    assert season_two.status is DestinationStatus.READY\n    assert season_one.relative_path == (\n        "Fixture Series (2026)/extras/Season 01 - Extra 01 - Mission Overview.mkv"\n    )\n    assert season_two.relative_path == (\n        "Fixture Series (2026)/extras/Season 02 - Extra 01 - Mission Overview.mkv"\n    )\n    assert find_destination_collisions((season_one, season_two)) == ()\n    assert "extra-naming-season-context:01" in season_one.reasons\n    assert "extra-naming-season-context:02" in season_two.reasons\n\n\ndef test_creditless_extra_seasons_do_not_collapse_to_one_destination() -> None:\n    season_one = _destination(\n        "Fixture Series/Fixture.Series.S1.NCOP.01.1080p.BluRay.x265.mkv",\n        "creditless-opening",\n    )\n    season_two = _destination(\n        "Fixture Series/Fixture.Series.S2.NCOP.01.1080p.BluRay.x265.mkv",\n        "creditless-opening",\n    )\n\n    assert season_one.relative_path == (\n        "Fixture Series (2026)/extras/Season 01 - Creditless Opening 01.mkv"\n    )\n    assert season_two.relative_path == (\n        "Fixture Series (2026)/extras/Season 02 - Creditless Opening 01.mkv"\n    )\n    assert find_destination_collisions((season_one, season_two)) == ()\n\n\ndef test_ambiguous_season_context_is_not_guessed_for_creditless_extra() -> None:\n    decision = _destination(\n        "Fixture Series/Fixture.Series.S1.S2.NCED.01.1080p.BluRay.x265.mkv",\n        "creditless-ending",\n    )\n\n    assert decision.relative_path == (\n        "Fixture Series (2026)/extras/Creditless Ending 01.mkv"\n    )\n    assert not any(\n        reason.startswith("extra-naming-season-context:") for reason in decision.reasons\n    )\n\n\ndef test_episode_coordinate_is_not_mistaken_for_extra_season_context() -> None:\n    decision = _destination(\n        "Fixture Series/Fixture.Series.S01E03.NCOP.01.1080p.BluRay.x265.mkv",\n        "creditless-opening",\n    )\n\n    assert decision.relative_path == (\n        "Fixture Series (2026)/extras/Creditless Opening 01.mkv"\n    )\n    assert not any(\n        reason.startswith("extra-naming-season-context:") for reason in decision.reasons\n    )\n\n\ndef test_planner_extra_identity_keeps_seasons_distinct() -> None:\n    season_one = _extra_record(\n        "Fixture Series/Fixture.Series.S01EXTRA01.Mission.Overview.mkv"\n    )\n    season_two = _extra_record(\n        "Fixture Series/Fixture.Series.S02EXTRA01.Mission.Overview.mkv"\n    )\n\n    assert _logical_identity(season_one) != _logical_identity(season_two)\n'''
+          test_path.write_text(tests, encoding='utf-8')
+      - name: Format changed Python
+        run: |
+          python -m pip install ruff==0.15.20
+          python -m ruff format jellyfin_show_organizer/extra_naming.py tests/local/test_extra_destination_identity.py
+      - name: Commit integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jellyfin_show_organizer/extra_naming.py tests/local/test_extra_destination_identity.py
+          git commit -m "Preserve season identity for extras"
+          git push origin HEAD:fix/season-scoped-extra-identity
