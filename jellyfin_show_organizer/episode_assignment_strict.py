@@ -564,13 +564,26 @@ def _segment_assignment(
             "missing-segment-hint",
             f"catalog-request:{request_key}",
         )
+    if title_authoritative_aired:
+        assert parse.season is not None
+        coordinates = ",".join(
+            f"S{parse.season:02d}E{number:02d}" for number in parse.episodes
+        )
+        segment_context_reasons = (
+            "title-authoritative-aired-remap",
+            f"segment-coordinate-evidence:{coordinates}",
+        )
+    else:
+        assert parse.segment_hint is not None
+        segment_context_reasons = (f"segment-hint:{parse.segment_hint.casefold()}",)
+
     if parse.title_hint is None or not parse.title_hint.strip():
         return _assignment(
             source.source_key,
             AssignmentStatus.UNRESOLVED,
             "episode-catalog",
             f"numbering-mode:{show.numbering_mode.value}",
-            f"segment-hint:{parse.segment_hint.casefold()}",
+            *segment_context_reasons,
             "missing-segment-title-evidence",
             f"catalog-request:{request_key}",
         )
@@ -596,7 +609,7 @@ def _segment_assignment(
             AssignmentStatus.UNRESOLVED,
             "episode-catalog",
             f"numbering-mode:{show.numbering_mode.value}",
-            f"segment-hint:{parse.segment_hint.casefold()}",
+            *segment_context_reasons,
             f"missing-segment-title-match:{normalized_title}",
             f"catalog-request:{request_key}",
         )
@@ -606,27 +619,16 @@ def _segment_assignment(
             AssignmentStatus.SUSPICIOUS,
             "episode-catalog",
             f"numbering-mode:{show.numbering_mode.value}",
-            f"segment-hint:{parse.segment_hint.casefold()}",
+            *segment_context_reasons,
             f"ambiguous-segment-title-match:{normalized_title}",
             f"catalog-request:{request_key}",
         )
 
     episode = matches[0]
-    reasons = [f"numbering-mode:{show.numbering_mode.value}"]
-    if title_authoritative_aired:
-        assert parse.season is not None
-        coordinates = ",".join(
-            f"S{parse.season:02d}E{number:02d}" for number in parse.episodes
-        )
-        reasons.extend(
-            (
-                "title-authoritative-aired-remap",
-                f"segment-coordinate-evidence:{coordinates}",
-            )
-        )
-    else:
-        assert parse.segment_hint is not None
-        reasons.append(f"segment-hint:{parse.segment_hint.casefold()}")
+    reasons = [
+        f"numbering-mode:{show.numbering_mode.value}",
+        *segment_context_reasons,
+    ]
     reasons.extend(
         (
             f"segment-title-match:{normalized_title}",
