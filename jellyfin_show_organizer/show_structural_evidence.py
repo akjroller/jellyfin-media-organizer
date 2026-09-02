@@ -151,16 +151,23 @@ def _clean_title_hint(value: str) -> str:
 
 
 def _aired_coordinates(parses: tuple[ParseResult, ...]) -> tuple[tuple[int, int], ...]:
+    """Collect clean aired coordinates while ignoring independent numbering families."""
+
     coordinates: set[tuple[int, int]] = set()
     for parse in parses:
-        if (
-            parse.season is None
-            or not parse.episodes
-            or parse.absolute_episode is not None
-            or parse.special_episode is not None
-            or parse.episode_date is not None
-            or parse.segment_hint is not None
-        ):
+        has_aired = parse.season is not None or bool(parse.episodes)
+        if not has_aired:
+            continue
+
+        has_other_numbering = any(
+            (
+                parse.absolute_episode is not None,
+                parse.special_episode is not None,
+                parse.episode_date is not None,
+                parse.segment_hint is not None,
+            )
+        )
+        if parse.season is None or not parse.episodes or has_other_numbering:
             return ()
         coordinates.update((parse.season, episode) for episode in parse.episodes)
     return tuple(sorted(coordinates))
