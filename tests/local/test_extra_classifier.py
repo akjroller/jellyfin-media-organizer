@@ -183,6 +183,27 @@ def test_immediate_extra_folder_can_supply_specific_kind():
     assert result.decision.rule == "extra folder: featurette"
 
 
+@pytest.mark.parametrize(
+    ("filename", "expected_kind"),
+    [
+        ("Northstar.Files.NCOP.01.mkv", ExtraKind.CREDITLESS_OPENING),
+        ("Northstar.Files.NCED.02.mkv", ExtraKind.CREDITLESS_ENDING),
+        ("Northstar.Files.Trailer.mkv", ExtraKind.TRAILER),
+        ("Northstar.Files.Featurette.mkv", ExtraKind.FEATURETTE),
+    ],
+)
+def test_generic_extra_folder_is_compatible_with_specific_filename_marker(
+    filename: str,
+    expected_kind: ExtraKind,
+):
+    result = classify_extra(f"synthetic/Northstar Files/Extras/{filename}")
+
+    assert result.disposition is ExtraDisposition.EXTRA
+    assert result.decision is not None
+    assert result.decision.kind == expected_kind.value
+    assert result.decision.rule == f"filename marker: {expected_kind.value}"
+
+
 def test_classifier_is_deterministic_and_network_independent(monkeypatch):
     def reject_network(*args, **kwargs):
         raise AssertionError("extra classification must not access the network")
