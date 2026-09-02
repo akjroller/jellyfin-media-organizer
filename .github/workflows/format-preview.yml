@@ -1,0 +1,22 @@
+name: Temporary pre-premiere format preview
+
+on:
+  push:
+    branches:
+      - fix/pre-premiere-special-guard
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install "ruff==0.15.20"
+      - run: python -m ruff format --diff jellyfin_show_organizer/mixed_episode_assignment.py tests/local/test_pre_premiere_special_guard.py
