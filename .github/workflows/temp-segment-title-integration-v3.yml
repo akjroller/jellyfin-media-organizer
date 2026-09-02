@@ -39,3 +39,5 @@ jobs:
           git add jellyfin_show_organizer/segment_counted_titles.py jellyfin_show_organizer/show_structural_evidence.py jellyfin_show_organizer/_show_resolver_core.py jellyfin_show_organizer/mixed_episode_assignment.py tests/local/test_segment_counted_title_remap.py
           git commit -m "Resolve segment-counted episodes by exact titles"
           git push origin HEAD:fix/segment-counted-title-remap
+
+# rerun after optional-match type cleanup
