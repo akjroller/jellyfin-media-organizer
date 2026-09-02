@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import PurePosixPath
 
 from .models import ParseResult
+from .parenthetical_aliases import parenthetical_show_aliases
 
 _LEADING_TAGS = re.compile(r"^(?:\[[^\]]+\][ ._-]*)+")
 _TRAILING_YEAR = re.compile(r"(?:^|[\s(])(?P<year>(?:18|19|20|21)\d{2})\)?$")
@@ -73,6 +74,16 @@ def _normalize_text(value: str) -> str:
     value = value.replace("_", " ").replace(".", " ")
     value = re.sub(r"\s+", " ", value)
     return value.strip(" -_.[]()")
+
+
+def _series_aliases(series: str | None, source: str) -> tuple[str, ...]:
+    aliases = parenthetical_show_aliases(source)
+    if series is None or not aliases:
+        return ()
+    combined = _normalize_text(" ".join(aliases))
+    if _normalize_text(series).casefold() != combined.casefold():
+        return ()
+    return aliases
 
 
 def _series_and_year(value: str) -> tuple[str | None, int | None]:
@@ -253,10 +264,12 @@ def _ancestor_episode_context(path: PurePosixPath) -> ParseResult | None:
     for component in reversed(path.parts[:-1]):
         match = _SXE.search(component)
         if match is not None:
-            series, year = _series_and_year(component[: match.start()])
+            source = component[: match.start()]
+            series, year = _series_and_year(source)
             candidates.append(
                 ParseResult(
                     series_hint=series,
+                    series_aliases=_series_aliases(series, source),
                     season=int(match.group("season")),
                     episodes=_episode_list(
                         int(match.group("episode")), match.group("tail")
@@ -269,10 +282,12 @@ def _ancestor_episode_context(path: PurePosixPath) -> ParseResult | None:
 
         match = _X_NOTATION.search(component)
         if match is not None:
-            series, year = _series_and_year(component[: match.start()])
+            source = component[: match.start()]
+            series, year = _series_and_year(source)
             candidates.append(
                 ParseResult(
                     series_hint=series,
+                    series_aliases=_series_aliases(series, source),
                     season=int(match.group("season")),
                     episodes=(int(match.group("episode")),),
                     year=year,
@@ -299,6 +314,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
 
     match = _SXE.search(stem)
     if match is not None:
+        source = stem[: match.start()]
         series, year = _series_for_match(stem, path, match)
         parent_confirmed = _parent_confirmed_prefixed_series(stem, path, match)
         if parent_confirmed is not None:
@@ -306,6 +322,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
         absolute_episode, title_start = _dual_absolute_after_sxe(stem, match)
         return ParseResult(
             series_hint=series,
+            series_aliases=_series_aliases(series, source),
             season=int(match.group("season")),
             episodes=_episode_list(int(match.group("episode")), match.group("tail")),
             absolute_episode=absolute_episode,
@@ -317,9 +334,11 @@ def parse_video_path(relative_path: str) -> ParseResult:
 
     match = _X_NOTATION.search(stem)
     if match is not None:
+        source = stem[: match.start()]
         series, year = _series_for_match(stem, path, match)
         return ParseResult(
             series_hint=series,
+            series_aliases=_series_aliases(series, source),
             season=int(match.group("season")),
             episodes=(int(match.group("episode")),),
             year=year,
@@ -329,9 +348,11 @@ def parse_video_path(relative_path: str) -> ParseResult:
 
     match = _LEGACY_BRACKETED.search(stem)
     if match is not None:
-        series, year = _series_and_year(match.group("series"))
+        source = match.group("series")
+        series, year = _series_and_year(source)
         return ParseResult(
             series_hint=series,
+            series_aliases=_series_aliases(series, source),
             season=int(match.group("season")),
             episodes=(int(match.group("episode")),),
             segment_hint=(match.group("segment") or None),
@@ -342,9 +363,11 @@ def parse_video_path(relative_path: str) -> ParseResult:
 
     match = _SPECIAL_NUMBERING.search(stem)
     if match is not None:
+        source = stem[: match.start()]
         series, year = _series_for_match(stem, path, match)
         return ParseResult(
             series_hint=series,
+            series_aliases=_series_aliases(series, source),
             special_kind=match.group("kind").casefold(),
             special_episode=int(match.group("episode")),
             year=year,
@@ -356,9 +379,11 @@ def parse_video_path(relative_path: str) -> ParseResult:
     if date_match is not None:
         episode_date = _episode_date_value(date_match)
         if episode_date is not None:
+            source = stem[: date_match.start()]
             series, year = _series_for_match(stem, path, date_match)
             return ParseResult(
                 series_hint=series,
+                series_aliases=_series_aliases(series, source),
                 episode_date=episode_date,
                 year=year,
                 embedded_tvmaze_id=embedded_id,
@@ -367,9 +392,11 @@ def parse_video_path(relative_path: str) -> ParseResult:
 
     match = _EPISODE_WORD.search(stem)
     if match is not None:
+        source = stem[: match.start()]
         series, year = _series_for_match(stem, path, match)
         return ParseResult(
             series_hint=series,
+            series_aliases=_series_aliases(series, source),
             absolute_episode=int(match.group("episode")),
             segment_hint=(match.group("segment") or None),
             year=year,
@@ -380,9 +407,11 @@ def parse_video_path(relative_path: str) -> ParseResult:
     cleaned_stem = _TVMAZE_ID.sub(" ", stem)
     match = _PARENTHESIZED_ABSOLUTE.search(cleaned_stem)
     if match is not None:
-        series, year = _series_and_year(match.group("series"))
+        source = match.group("series")
+        series, year = _series_and_year(source)
         return ParseResult(
             series_hint=series,
+            series_aliases=_series_aliases(series, source),
             absolute_episode=int(match.group("episode")),
             year=year,
             embedded_tvmaze_id=embedded_id,
@@ -391,9 +420,11 @@ def parse_video_path(relative_path: str) -> ParseResult:
 
     match = _ABSOLUTE.search(cleaned_stem)
     if match is not None:
-        series, year = _series_and_year(match.group("series"))
+        source = match.group("series")
+        series, year = _series_and_year(source)
         return ParseResult(
             series_hint=series,
+            series_aliases=_series_aliases(series, source),
             absolute_episode=int(match.group("episode")),
             year=year,
             embedded_tvmaze_id=embedded_id,
@@ -402,9 +433,11 @@ def parse_video_path(relative_path: str) -> ParseResult:
 
     match = _BARE_ABSOLUTE.search(cleaned_stem)
     if match is not None and _bare_absolute_is_unambiguous(path, cleaned_stem, match):
-        series, year = _series_and_year(match.group("series"))
+        source = match.group("series")
+        series, year = _series_and_year(source)
         return ParseResult(
             series_hint=series,
+            series_aliases=_series_aliases(series, source),
             absolute_episode=int(match.group("episode")),
             year=year,
             embedded_tvmaze_id=embedded_id,
@@ -415,6 +448,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
     if context is not None:
         return ParseResult(
             series_hint=context.series_hint,
+            series_aliases=context.series_aliases,
             season=context.season,
             episodes=context.episodes,
             absolute_episode=context.absolute_episode,
