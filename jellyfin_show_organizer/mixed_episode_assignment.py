@@ -116,6 +116,174 @@ def _has_pre_premiere_guard_signal(
     )
 
 
+def _is_non_regular_episode(episode: ProviderEpisode) -> bool:
+    return episode.season == 0 or (
+        episode.episode_type is not None and episode.episode_type != "regular"
+    )
+
+
+def _is_missing_special_number_assignment(
+    source: SourceEpisodeInput,
+    assignment: SourceEpisodeAssignment,
+) -> bool:
+    parse = source.parse
+    return (
+        assignment.status is AssignmentStatus.UNRESOLVED
+        and parse.special_kind is not None
+        and parse.special_episode is not None
+        and f"missing-special-catalog-entry:{parse.special_episode}"
+        in assignment.evidence.reasons
+    )
+
+
+def _has_special_fallback_signal(
+    source: SourceEpisodeInput,
+    assignment: SourceEpisodeAssignment,
+) -> bool:
+    return _is_missing_special_number_assignment(source, assignment) and (
+        source.parse.title_hint is not None or bool(_source_dates(source.source_key))
+    )
+
+
+def _special_fallback_assignment(
+    source: SourceEpisodeInput,
+    assignment: SourceEpisodeAssignment,
+    catalog: ProviderEpisodeCatalog,
+) -> SourceEpisodeAssignment:
+    if not _is_missing_special_number_assignment(source, assignment):
+        return assignment
+
+    parse = source.parse
+    assert parse.special_kind is not None
+    assert parse.special_episode is not None
+    candidates = tuple(
+        episode for episode in catalog.episodes if _is_non_regular_episode(episode)
+    )
+    reasons = [
+        *assignment.evidence.reasons,
+        "special-fallback:requested-number-missing",
+        *_catalog_diagnostic_reasons(catalog),
+    ]
+
+    unique_matches: list[tuple[str, ProviderEpisode]] = []
+    if parse.title_hint is not None:
+        normalized_title = _normalize_title(parse.title_hint)
+        title_matches = tuple(
+            episode
+            for episode in candidates
+            if _normalize_title(episode.title) == normalized_title
+        )
+        if len(title_matches) > 1:
+            return SourceEpisodeAssignment(
+                source_key=source.source_key,
+                status=AssignmentStatus.SUSPICIOUS,
+                episodes=(),
+                evidence=MatchEvidence(
+                    method="special-catalog-fallback",
+                    confidence=0.0,
+                    reasons=(
+                        *reasons,
+                        f"special-fallback-title-ambiguous:{normalized_title}",
+                    ),
+                ),
+            )
+        if len(title_matches) == 1:
+            unique_matches.append((f"title:{normalized_title}", title_matches[0]))
+            reasons.append(f"special-fallback-title-match:{normalized_title}")
+
+    source_dates = _source_dates(source.source_key)
+    if len(source_dates) > 1:
+        return SourceEpisodeAssignment(
+            source_key=source.source_key,
+            status=AssignmentStatus.SUSPICIOUS,
+            episodes=(),
+            evidence=MatchEvidence(
+                method="special-catalog-fallback",
+                confidence=0.0,
+                reasons=(
+                    *reasons,
+                    "special-fallback-source-dates-ambiguous:" + ",".join(source_dates),
+                ),
+            ),
+        )
+    if len(source_dates) == 1:
+        source_date = source_dates[0]
+        date_matches = tuple(
+            episode for episode in candidates if episode.airdate == source_date
+        )
+        if len(date_matches) > 1:
+            return SourceEpisodeAssignment(
+                source_key=source.source_key,
+                status=AssignmentStatus.SUSPICIOUS,
+                episodes=(),
+                evidence=MatchEvidence(
+                    method="special-catalog-fallback",
+                    confidence=0.0,
+                    reasons=(
+                        *reasons,
+                        f"special-fallback-date-ambiguous:{source_date}",
+                    ),
+                ),
+            )
+        if len(date_matches) == 1:
+            unique_matches.append((f"date:{source_date}", date_matches[0]))
+            reasons.append(f"special-fallback-date-match:{source_date}")
+
+    unique_identities = {episode.identity for _method, episode in unique_matches}
+    if len(unique_identities) > 1:
+        return SourceEpisodeAssignment(
+            source_key=source.source_key,
+            status=AssignmentStatus.SUSPICIOUS,
+            episodes=(),
+            evidence=MatchEvidence(
+                method="special-catalog-fallback",
+                confidence=0.0,
+                reasons=(
+                    *reasons,
+                    "special-fallback-evidence-conflict:"
+                    + ",".join(method for method, _episode in unique_matches),
+                ),
+            ),
+        )
+    if not unique_matches:
+        return assignment
+
+    episode = unique_matches[0][1]
+    if episode.number is None:
+        return SourceEpisodeAssignment(
+            source_key=source.source_key,
+            status=AssignmentStatus.UNRESOLVED,
+            episodes=(),
+            evidence=MatchEvidence(
+                method="special-catalog-fallback",
+                confidence=0.0,
+                reasons=(
+                    *reasons,
+                    "special-fallback-entry-missing-number",
+                    _episode_identity_reason(episode),
+                ),
+            ),
+        )
+
+    return SourceEpisodeAssignment(
+        source_key=source.source_key,
+        status=AssignmentStatus.MATCHED,
+        episodes=(episode,),
+        evidence=MatchEvidence(
+            method="special-catalog-fallback",
+            confidence=1.0,
+            reasons=(
+                *reasons,
+                f"special-kind:{parse.special_kind}",
+                f"special-requested-number:{parse.special_episode}",
+                f"special-fallback-match:{parse.special_kind.upper()}"
+                f"{parse.special_episode}->S{episode.season:02d}E{episode.number:02d}",
+                _episode_identity_reason(episode),
+            ),
+        ),
+    )
+
+
 def _first_regular_airdate(catalog: ProviderEpisodeCatalog) -> str | None:
     dates = tuple(
         sorted(
@@ -153,11 +321,7 @@ def _non_regular_on_date(
     return tuple(
         episode
         for episode in catalog.episodes
-        if episode.airdate == source_date
-        and (
-            episode.season == 0
-            or (episode.episode_type is not None and episode.episode_type != "regular")
-        )
+        if episode.airdate == source_date and _is_non_regular_episode(episode)
     )
 
 
@@ -393,15 +557,7 @@ def assign_episode_group_with_provider(
     sources: Iterable[SourceEpisodeInput],
     provider: MetadataProvider,
 ) -> EpisodeGroupAssignment:
-    """Assign episodes and fail closed on provable pre-premiere regular claims.
-
-    The existing mixed-family engine remains authoritative. A second provider-catalog
-    pass is used only after that engine has produced a catalog-backed result. Sources
-    with both explicit special context and a canonical date before the regular series
-    boundary are removed from normal numbering, then the remaining sources are
-    re-evaluated without those false claimants so legitimate regular assignments can
-    recover from provider-episode collision protection.
-    """
+    """Assign episodes and run narrowly-scoped provider-evidence recovery passes."""
 
     source_group = tuple(
         sorted(
@@ -410,19 +566,28 @@ def assign_episode_group_with_provider(
         )
     )
     original = _assign_episode_group_core(show, source_group, provider)
-    if (
-        show.numbering_mode not in _PARTITIONABLE_PRIMARY_MODES
-        or original.catalog_request_key is None
-        or show.provider != provider.provider_name
-    ):
+    if original.catalog_request_key is None or show.provider != provider.provider_name:
         return original
 
-    potential_guard_sources = tuple(
+    original_by_source = {
+        assignment.source_key: assignment for assignment in original.assignments
+    }
+    potential_special_sources = tuple(
         source
         for source in source_group
-        if _has_pre_premiere_guard_signal(source, show)
+        if (assignment := original_by_source.get(source.source_key)) is not None
+        and _has_special_fallback_signal(source, assignment)
     )
-    if not potential_guard_sources:
+    potential_guard_sources = (
+        tuple(
+            source
+            for source in source_group
+            if _has_pre_premiere_guard_signal(source, show)
+        )
+        if show.numbering_mode in _PARTITIONABLE_PRIMARY_MODES
+        else ()
+    )
+    if not potential_special_sources and not potential_guard_sources:
         return original
 
     catalog = provider.episode_catalog(show.provider_identity)
@@ -440,23 +605,35 @@ def assign_episode_group_with_provider(
         for source in potential_guard_sources
         if (assignment := _pre_premiere_assignment(source, show, catalog)) is not None
     }
-    if not guarded:
-        return original
-
-    remaining = tuple(
-        source for source in source_group if source.source_key not in guarded
-    )
-    combined: list[SourceEpisodeAssignment] = list(guarded.values())
     request_keys = {catalog.request_key}
-    if remaining:
-        rerun = _assign_episode_group_core(show, remaining, provider)
-        combined.extend(rerun.assignments)
-        if rerun.catalog_request_key is not None:
-            request_keys.add(rerun.catalog_request_key)
+    if guarded:
+        remaining = tuple(
+            source for source in source_group if source.source_key not in guarded
+        )
+        base_assignments = dict(guarded)
+        if remaining:
+            rerun = _assign_episode_group_core(show, remaining, provider)
+            base_assignments.update(
+                {assignment.source_key: assignment for assignment in rerun.assignments}
+            )
+            if rerun.catalog_request_key is not None:
+                request_keys.add(rerun.catalog_request_key)
+    else:
+        base_assignments = dict(original_by_source)
+
+    for source in potential_special_sources:
+        assignment = base_assignments.get(source.source_key)
+        if assignment is None:
+            continue
+        base_assignments[source.source_key] = _special_fallback_assignment(
+            source,
+            assignment,
+            catalog,
+        )
 
     ordered = tuple(
         sorted(
-            combined,
+            base_assignments.values(),
             key=lambda assignment: (
                 assignment.source_key.casefold(),
                 assignment.source_key,
