@@ -8,6 +8,7 @@ from typing import Any
 from . import _show_resolver_core as _core
 from .models import CandidateEvidence, ParseResult, ProviderIdentity
 from .overrides import OverrideCatalog
+from .parenthetical_aliases import parenthetical_show_aliases
 from .provider_aliases import TvmazeAliasProviderAdapter
 from .providers import MetadataProvider, ProviderSearchSnapshot, ProviderShow
 from .show_structural_evidence import token_merge_queries
@@ -86,11 +87,13 @@ class _MergedSearchProvider:
     def __init__(
         self,
         provider: MetadataProvider,
-        search_title: str,
+        search_title: str | tuple[str, ...],
         snapshot: ProviderSearchSnapshot,
     ) -> None:
         self._provider = provider
-        self._search_title = search_title
+        self._search_titles = frozenset(
+            (search_title,) if isinstance(search_title, str) else search_title
+        )
         self._snapshot = snapshot
 
     @property
@@ -98,7 +101,7 @@ class _MergedSearchProvider:
         return self._provider.provider_name
 
     def search_shows(self, title: str) -> ProviderSearchSnapshot:
-        if title == self._search_title:
+        if title in self._search_titles:
             return self._snapshot
         return self._provider.search_shows(title)
 
@@ -107,6 +110,223 @@ class _MergedSearchProvider:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._provider, name)
+
+
+def _parenthetical_alias_pair(
+    source_key: str,
+    parse_group: tuple[ParseResult, ...],
+) -> tuple[str, ...]:
+    observed: list[tuple[str, ...]] = []
+    source_aliases = parenthetical_show_aliases(source_key)
+    if source_aliases:
+        observed.append(source_aliases)
+    observed.extend(parse.series_aliases for parse in parse_group if parse.series_aliases)
+    if not observed:
+        return ()
+
+    normalized_pairs = {
+        tuple(sorted(normalize_show_identity(alias) for alias in pair))
+        for pair in observed
+    }
+    if len(normalized_pairs) != 1:
+        return ()
+
+    normalized_pair = next(iter(normalized_pairs))
+    display_by_identity: dict[str, str] = {}
+    for pair in observed:
+        for alias in pair:
+            identity = normalize_show_identity(alias)
+            previous = display_by_identity.get(identity)
+            if previous is None or (alias.casefold(), alias) < (
+                previous.casefold(),
+                previous,
+            ):
+                display_by_identity[identity] = alias
+    return tuple(display_by_identity[identity] for identity in normalized_pair)
+
+
+def _parenthetical_retry_failure(
+    result: ShowResolution,
+    reasons: tuple[str, ...],
+    *,
+    force_unresolved: bool = False,
+) -> ShowResolution:
+    return replace(
+        result,
+        status=(ResolutionStatus.UNRESOLVED if force_unresolved else result.status),
+        show=None,
+        evidence=replace(
+            result.evidence,
+            method=f"{result.evidence.method}+parenthetical-alias-search",
+            confidence=(0.0 if force_unresolved else result.evidence.confidence),
+            reasons=(*result.evidence.reasons, *reasons),
+        ),
+    )
+
+
+def _parenthetical_alias_resolution(
+    source_key: str,
+    parse_group: tuple[ParseResult, ...],
+    overrides: OverrideCatalog,
+    provider: MetadataProvider,
+    result: ShowResolution,
+) -> tuple[ShowResolution, MetadataProvider] | None:
+    """Retry a non-match using one conservative parenthetical alias pair."""
+
+    if result.status is ResolutionStatus.MATCHED or result.show is not None:
+        return None
+
+    titles = _core._source_titles(parse_group)
+    override_matches = _core._matching_overrides(source_key, titles, overrides)
+    if override_matches or _core._explicit_identities(parse_group, None):
+        return None
+
+    aliases = _parenthetical_alias_pair(source_key, parse_group)
+    if len(aliases) != 2:
+        return None
+
+    source_title = _core._representative_title(titles)
+    if source_title is None:
+        return None
+
+    query_titles = [source_title]
+    seen_queries = {normalize_show_identity(source_title)}
+    for alias in aliases:
+        identity = normalize_show_identity(alias)
+        if identity and identity not in seen_queries:
+            seen_queries.add(identity)
+            query_titles.append(alias)
+    if len(query_titles) < 2:
+        return None
+
+    reasons: list[str] = ["parenthetical-alias-search:attempted"]
+    candidates_by_identity: dict[ProviderIdentity, ProviderShow] = {}
+    snapshots: list[ProviderSearchSnapshot] = []
+    for index, query in enumerate(query_titles):
+        snapshot = provider.search_shows(query)
+        snapshots.append(snapshot)
+        role = "primary" if index == 0 else "alias"
+        reasons.extend(
+            (
+                f"parenthetical-alias-search-{role}-query:"
+                f"{normalize_show_identity(query)}",
+                f"parenthetical-alias-search-request:{snapshot.request_key}",
+            )
+        )
+        if not snapshot.resolved:
+            failed = _parenthetical_retry_failure(
+                result,
+                (
+                    *reasons,
+                    "parenthetical-alias-search:indeterminate",
+                    snapshot.unresolved_reason or "provider-search-unresolved",
+                ),
+                force_unresolved=True,
+            )
+            return failed, provider
+        for candidate in snapshot.shows:
+            previous = candidates_by_identity.get(candidate.identity)
+            if previous is not None and previous != candidate:
+                failed = _parenthetical_retry_failure(
+                    result,
+                    (
+                        *reasons,
+                        "parenthetical-alias-search:conflicting-candidate-metadata",
+                        f"provider-identity:{candidate.identity.key}",
+                    ),
+                    force_unresolved=True,
+                )
+                return failed, provider
+            candidates_by_identity[candidate.identity] = candidate
+
+    reasons.append("parenthetical-alias-search:complete")
+    if not candidates_by_identity:
+        return _parenthetical_retry_failure(result, tuple(reasons)), provider
+
+    combined = ProviderSearchSnapshot(
+        provider=snapshots[0].provider,
+        request_key="|".join(snapshot.request_key for snapshot in snapshots),
+        cache_snapshot_id="|".join(
+            snapshot.cache_snapshot_id for snapshot in snapshots
+        ),
+        shows=tuple(
+            sorted(
+                candidates_by_identity.values(),
+                key=lambda candidate: (
+                    normalize_show_identity(candidate.title),
+                    candidate.title,
+                    candidate.identity.key,
+                ),
+            )
+        ),
+    )
+    retry_provider = _MergedSearchProvider(provider, tuple(query_titles), combined)
+
+    alias_results: list[ShowResolution] = []
+    for alias in aliases:
+        alias_parses = tuple(
+            replace(parse, series_hint=alias, series_aliases=())
+            for parse in parse_group
+        )
+        alias_results.append(
+            _core.resolve_show_group_with_provider(
+                source_key,
+                alias_parses,
+                overrides,
+                retry_provider,
+            )
+        )
+
+    matched = tuple(
+        alias_result
+        for alias_result in alias_results
+        if alias_result.status is ResolutionStatus.MATCHED
+        and alias_result.show is not None
+    )
+    matched_identities = {
+        alias_result.show.provider_identity
+        for alias_result in matched
+        if alias_result.show is not None
+    }
+    has_suspicious = any(
+        alias_result.status is ResolutionStatus.SUSPICIOUS
+        for alias_result in alias_results
+    )
+
+    if len(matched_identities) == 1 and matched and not has_suspicious:
+        winner = matched_identities.pop()
+        chosen = next(
+            alias_result
+            for alias_result in matched
+            if alias_result.show is not None
+            and alias_result.show.provider_identity == winner
+        )
+        chosen = replace(
+            chosen,
+            evidence=replace(
+                chosen.evidence,
+                method=f"{chosen.evidence.method}+parenthetical-alias-search",
+                reasons=(
+                    *reasons,
+                    f"parenthetical-alias-search-winner:{winner.key}",
+                    *chosen.evidence.reasons,
+                ),
+            ),
+        )
+        return chosen, retry_provider
+
+    if len(matched_identities) > 1 or has_suspicious:
+        failed = _parenthetical_retry_failure(
+            result,
+            (*reasons, "parenthetical-alias-search:conflicting-results"),
+        )
+        return failed, retry_provider
+
+    failed = _parenthetical_retry_failure(
+        result,
+        (*reasons, "parenthetical-alias-search:no-unique-match"),
+    )
+    return failed, retry_provider
 
 
 def _token_merge_retry_failure(
@@ -397,11 +617,22 @@ def resolve_show_group_with_provider(
         provider,
     )
     active_provider: MetadataProvider = provider
-    retry = _weak_token_merge_resolution(
+
+    parenthetical = _parenthetical_alias_resolution(
         source_key,
         parse_group,
         overrides,
         provider,
+        result,
+    )
+    if parenthetical is not None:
+        result, active_provider = parenthetical
+
+    retry = _weak_token_merge_resolution(
+        source_key,
+        parse_group,
+        overrides,
+        active_provider,
         result,
     )
     if retry is not None:
