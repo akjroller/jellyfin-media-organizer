@@ -27,25 +27,34 @@ jobs:
 
           path = Path('jellyfin_show_organizer/episode_assignment_strict.py')
           text = path.read_text(encoding='utf-8')
+          segment_def = text.index('def _segment_assignment(')
+          segment_end = text.index('\n\ndef _group_status', segment_def)
+          segment = text[segment_def:segment_end]
 
           anchor = '''    if parse.title_hint is None or not parse.title_hint.strip():\n'''
           context = '''    if title_authoritative_aired:\n        assert parse.season is not None\n        coordinates = ",".join(\n            f"S{parse.season:02d}E{number:02d}" for number in parse.episodes\n        )\n        segment_context_reasons = (\n            "title-authoritative-aired-remap",\n            f"segment-coordinate-evidence:{coordinates}",\n        )\n    else:\n        assert parse.segment_hint is not None\n        segment_context_reasons = (\n            f"segment-hint:{parse.segment_hint.casefold()}",\n        )\n\n'''
-          segment_def = text.index('def _segment_assignment(')
-          anchor_index = text.index(anchor, segment_def)
-          text = text[:anchor_index] + context + text[anchor_index:]
+          if segment.count(anchor) != 1:
+              raise SystemExit('expected title-hint branch exactly once')
+          segment = segment.replace(anchor, context + anchor, 1)
 
-          old_reason = '            f"segment-hint:{parse.segment_hint.casefold()}",\n'
-          segment_end = text.index('\n\ndef _group_status', segment_def)
-          segment = text[segment_def:segment_end]
-          if segment.count(old_reason) != 3:
-              raise SystemExit('expected three optional segment-hint failure reasons')
-          segment = segment.replace(old_reason, '            *segment_context_reasons,\n')
+          old_failure = '            f"segment-hint:{parse.segment_hint.casefold()}",\n'
+          context_end = segment.index(anchor)
+          prefix = segment[:context_end]
+          suffix = segment[context_end:]
+          if suffix.count(old_failure) != 3:
+              raise SystemExit('expected three segment-hint failure reasons')
+          suffix = suffix.replace(
+              old_failure,
+              '            *segment_context_reasons,\n',
+          )
+          segment = prefix + suffix
 
           old_success = '''    episode = matches[0]\n    reasons = [f"numbering-mode:{show.numbering_mode.value}"]\n    if title_authoritative_aired:\n        assert parse.season is not None\n        coordinates = ",".join(\n            f"S{parse.season:02d}E{number:02d}" for number in parse.episodes\n        )\n        reasons.extend(\n            (\n                "title-authoritative-aired-remap",\n                f"segment-coordinate-evidence:{coordinates}",\n            )\n        )\n    else:\n        assert parse.segment_hint is not None\n        reasons.append(f"segment-hint:{parse.segment_hint.casefold()}")\n    reasons.extend(\n'''
           new_success = '''    episode = matches[0]\n    reasons = [\n        f"numbering-mode:{show.numbering_mode.value}",\n        *segment_context_reasons,\n    ]\n    reasons.extend(\n'''
           if segment.count(old_success) != 1:
               raise SystemExit('expected segment success context block exactly once')
           segment = segment.replace(old_success, new_success, 1)
+
           text = text[:segment_def] + segment + text[segment_end:]
           path.write_text(text, encoding='utf-8')
       - name: Format changed Python
