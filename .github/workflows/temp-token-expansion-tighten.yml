@@ -1,0 +1,37 @@
+name: Temporary token expansion tightening
+
+on:
+  push:
+    branches:
+      - fix/single-token-title-expansion
+    paths:
+      - .github/workflows/temp-token-expansion-tighten.yml
+
+permissions:
+  contents: write
+
+jobs:
+  tighten:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/single-token-title-expansion
+      - name: Tighten expansion distance
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('jellyfin_show_organizer/show_structural_evidence.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'len(candidate_token) >= len(source_token) + 2'
+          new = 'len(candidate_token) >= len(source_token) + 3'
+          if text.count(old) != 1:
+              raise SystemExit('expected expansion distance exactly once')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+      - name: Commit tightening
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jellyfin_show_organizer/show_structural_evidence.py
+          git commit -m "Tighten token expansion distance"
+          git push origin HEAD:fix/single-token-title-expansion
