@@ -54,7 +54,9 @@ class FixtureProvider:
             shows=(),
         )
 
-    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
         assert show_identity == SHOW_ID
         return self.catalog
 
@@ -95,8 +97,7 @@ def _short_source(
 ) -> SourceEpisodeInput:
     return SourceEpisodeInput(
         source_key=(
-            f"Fabricated Series/{context}/"
-            f"Fabricated Series - 001 - {source_date}.mkv"
+            f"Fabricated Series/{context}/Fabricated Series - 001 - {source_date}.mkv"
         ),
         parse=ParseResult(absolute_episode=1, title_hint=title_hint),
     )
@@ -150,7 +151,9 @@ def test_pre_series_short_can_match_unique_non_regular_catalog_entry() -> None:
     assert assignments[regular.source_key].episodes[0].identity == REGULAR_ID
 
 
-def test_same_date_pre_series_specials_remain_suspicious_without_title_tiebreak() -> None:
+def test_same_date_pre_series_specials_remain_suspicious_without_title_tiebreak() -> (
+    None
+):
     short = _short_source()
     result = assign_episode_group_with_provider(
         SHOW,
