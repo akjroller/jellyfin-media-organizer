@@ -49,7 +49,7 @@ _VERSION_RE = re.compile(
 _REPACK_RE = re.compile(r"(?<![a-z0-9])repack(?![a-z0-9])", re.IGNORECASE)
 _PROPER_RE = re.compile(r"(?<![a-z0-9])proper(?![a-z0-9])", re.IGNORECASE)
 _REMUX_RE = re.compile(
-    r"(?<![a-z0-9])(?:remux|bdremux)(?![a-z0-9])",
+    r"(?<![a-z0-9])(?:remux|bd[ ._-]?remux)(?![a-z0-9])",
     re.IGNORECASE,
 )
 _SOURCE_PATTERNS: tuple[tuple[ReleaseSourceFamily, re.Pattern[str]], ...] = (
@@ -64,7 +64,7 @@ _SOURCE_PATTERNS: tuple[tuple[ReleaseSourceFamily, re.Pattern[str]], ...] = (
     (
         ReleaseSourceFamily.BLURAY,
         re.compile(
-            r"(?<![a-z0-9])(?:blu[ ._-]?ray|bdrip|bdremux)(?![a-z0-9])",
+            r"(?<![a-z0-9])(?:blu[ ._-]?ray|bdrip|bd[ ._-]?remux)(?![a-z0-9])",
             re.IGNORECASE,
         ),
     ),
