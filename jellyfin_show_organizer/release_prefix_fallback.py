@@ -103,7 +103,10 @@ def resolve_release_prefix_fallback(
 ) -> tuple[_core.ShowResolution, MetadataProvider] | None:
     """Retry one release-prefixed show title and require catalog confirmation."""
 
-    if result.status is not _core.ResolutionStatus.UNRESOLVED or result.show is not None:
+    if (
+        result.status is not _core.ResolutionStatus.UNRESOLVED
+        or result.show is not None
+    ):
         return None
 
     titles = _core._source_titles(parses)
@@ -234,7 +237,9 @@ def resolve_release_prefix_fallback(
         )
 
     catalog = retry_provider.episode_catalog(retried.show.provider_identity)
-    compatible, catalog_reasons = _core._catalog_compatibility_reasons(catalog, observed)
+    compatible, catalog_reasons = _core._catalog_compatibility_reasons(
+        catalog, observed
+    )
     if compatible is None:
         return (
             _annotate(
