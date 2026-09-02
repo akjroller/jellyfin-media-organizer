@@ -23,6 +23,7 @@ from .provider_aliases import TvmazeAliasProviderAdapter
 from .providers import MetadataProvider, ProviderEpisodeCatalog, ProviderShow
 from .show_alias_evidence import (
     catalog_group_rescue,
+    composite_aired_title_rescue,
     enrich_provider_alias_evidence,
 )
 from .show_structural_evidence import (
@@ -864,6 +865,7 @@ def resolve_show_group_with_provider(
     tie_break = None
     title_tie_break = None
     aired_rescue = None
+    composite_rescue = None
     rescue = None
     if not alias_indeterminate:
         mode = _numbering_mode(override)
@@ -985,7 +987,54 @@ def resolve_show_group_with_provider(
                     candidates=aired_rescue.candidates,
                 )
 
-        if tie_break is None and aired_rescue is None:
+        if mode is NumberingMode.AIRED and (
+            aired_rescue is None or aired_rescue.winner is None
+        ):
+            composite_rescue = composite_aired_title_rescue(
+                provider, parse_group, active_ranked
+            )
+            if composite_rescue is not None and composite_rescue.winner is not None:
+                provider_show = next(
+                    candidate
+                    for candidate in provider_candidates
+                    if candidate.identity == composite_rescue.winner
+                )
+                title = _preferred_title(override, source_title, provider_show.title)
+                assert title is not None
+                return ShowResolution(
+                    status=ResolutionStatus.MATCHED,
+                    show=CanonicalShow(
+                        source_key=source_key,
+                        provider_identity=provider_show.identity,
+                        title=title,
+                        year=(
+                            provider_show.year
+                            if provider_show.year is not None
+                            else year_hint
+                        ),
+                        numbering_mode=NumberingMode.SEGMENT_TITLE,
+                    ),
+                    evidence=MatchEvidence(
+                        method=f"{method}+composite-aired-title-rescue",
+                        confidence=top.score,
+                        reasons=(
+                            *search_reasons,
+                            *(alias_result.reasons if alias_result is not None else ()),
+                            *(tie_break.reasons if tie_break is not None else ()),
+                            *(
+                                title_tie_break.reasons
+                                if title_tie_break is not None
+                                else ()
+                            ),
+                            *(aired_rescue.reasons if aired_rescue is not None else ()),
+                            *composite_rescue.reasons,
+                            f"candidate-gap:{gap:.3f}",
+                        ),
+                        candidates=composite_rescue.candidates,
+                    ),
+                )
+
+        if tie_break is None and aired_rescue is None and composite_rescue is None:
             rescue = catalog_group_rescue(provider, parse_group, active_ranked)
             if (
                 rescue is not None
@@ -1036,7 +1085,9 @@ def resolve_show_group_with_provider(
         else "provider-evidence-below-threshold"
     )
     candidates = active_ranked
-    if title_tie_break is not None:
+    if composite_rescue is not None:
+        candidates = composite_rescue.candidates
+    elif title_tie_break is not None:
         candidates = title_tie_break.candidates
     elif aired_rescue is not None:
         candidates = aired_rescue.candidates
@@ -1057,6 +1108,7 @@ def resolve_show_group_with_provider(
                 *(tie_break.reasons if tie_break is not None else ()),
                 *(title_tie_break.reasons if title_tie_break is not None else ()),
                 *(aired_rescue.reasons if aired_rescue is not None else ()),
+                *(composite_rescue.reasons if composite_rescue is not None else ()),
                 *(rescue.reasons if rescue is not None else ()),
                 f"candidate-gap:{gap:.3f}",
             ),

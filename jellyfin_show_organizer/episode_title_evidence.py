@@ -53,6 +53,8 @@ def is_title_authoritative_aired_parse(parse: ParseResult) -> bool:
 
 
 def is_composite_title_authoritative_group(parses: tuple[ParseResult, ...]) -> bool:
-    if len(parses) < 3 or not all(is_title_authoritative_aired_parse(parse) for parse in parses):
+    if len(parses) < 3 or not all(
+        is_title_authoritative_aired_parse(parse) for parse in parses
+    ):
         return False
     return any(len(parse.episodes) == 2 for parse in parses)

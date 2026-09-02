@@ -146,9 +146,7 @@ def _provider(
     )
 
 
-def _resolve(
-    parses: tuple[ParseResult, ...], provider: FixtureProvider
-):
+def _resolve(parses: tuple[ParseResult, ...], provider: FixtureProvider):
     return resolve_show_group_with_provider(
         "Example Stories Collection",
         parses,
@@ -187,7 +185,9 @@ def test_composite_titles_rescue_show_and_assign_by_title_not_coordinate() -> No
     assert [episode.number for episode in by_source["source-2"].episodes] == [2]
     assert [episode.number for episode in by_source["source-3"].episodes] == [3]
     assert "title-authoritative-aired-remap" in by_source["source-3"].evidence.reasons
-    assert "segment-coordinate-evidence:S01E05" in by_source["source-3"].evidence.reasons
+    assert (
+        "segment-coordinate-evidence:S01E05" in by_source["source-3"].evidence.reasons
+    )
 
 
 def test_composite_title_cleanup_is_conservative() -> None:

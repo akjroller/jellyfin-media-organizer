@@ -7,6 +7,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
+from .episode_title_evidence import (
+    is_title_authoritative_aired_parse,
+    normalize_episode_title,
+    normalized_episode_title_hint,
+)
 from .models import (
     CanonicalShow,
     MatchEvidence,
@@ -144,6 +149,13 @@ def _evidence_family(parse: ParseResult, mode: NumberingMode) -> str:
     has_absolute = parse.absolute_episode is not None
     has_special = parse.special_kind is not None or parse.special_episode is not None
     has_date = parse.episode_date is not None
+
+    if (
+        mode is NumberingMode.SEGMENT_TITLE
+        and parse.segment_hint is None
+        and is_title_authoritative_aired_parse(parse)
+    ):
+        return "segment"
 
     if parse.segment_hint is not None:
         if has_absolute or has_special or has_date:
@@ -540,7 +552,10 @@ def _segment_assignment(
     request_key: str,
 ) -> SourceEpisodeAssignment:
     parse = source.parse
-    if parse.segment_hint is None:
+    title_authoritative_aired = (
+        parse.segment_hint is None and is_title_authoritative_aired_parse(parse)
+    )
+    if parse.segment_hint is None and not title_authoritative_aired:
         return _assignment(
             source.source_key,
             AssignmentStatus.UNRESOLVED,
@@ -560,11 +575,20 @@ def _segment_assignment(
             f"catalog-request:{request_key}",
         )
 
-    normalized_title = _normalize_title(parse.title_hint)
+    normalized_title = (
+        normalized_episode_title_hint(parse.title_hint)
+        if title_authoritative_aired
+        else _normalize_title(parse.title_hint)
+    )
     matches = tuple(
         episode
         for episode in catalog.episodes
-        if _normalize_title(episode.title) == normalized_title
+        if (
+            normalize_episode_title(episode.title)
+            if title_authoritative_aired
+            else _normalize_title(episode.title)
+        )
+        == normalized_title
     )
     if not matches:
         return _assignment(
@@ -588,15 +612,33 @@ def _segment_assignment(
         )
 
     episode = matches[0]
+    reasons = [f"numbering-mode:{show.numbering_mode.value}"]
+    if title_authoritative_aired:
+        assert parse.season is not None
+        coordinates = ",".join(
+            f"S{parse.season:02d}E{number:02d}" for number in parse.episodes
+        )
+        reasons.extend(
+            (
+                "title-authoritative-aired-remap",
+                f"segment-coordinate-evidence:{coordinates}",
+            )
+        )
+    else:
+        assert parse.segment_hint is not None
+        reasons.append(f"segment-hint:{parse.segment_hint.casefold()}")
+    reasons.extend(
+        (
+            f"segment-title-match:{normalized_title}",
+            f"catalog-request:{request_key}",
+            _episode_identity_reason(episode),
+        )
+    )
     return _assignment(
         source.source_key,
         AssignmentStatus.MATCHED,
         "episode-catalog",
-        f"numbering-mode:{show.numbering_mode.value}",
-        f"segment-hint:{parse.segment_hint.casefold()}",
-        f"segment-title-match:{normalized_title}",
-        f"catalog-request:{request_key}",
-        _episode_identity_reason(episode),
+        *reasons,
         episodes=(episode,),
         confidence=1.0,
     )
@@ -917,6 +959,7 @@ def assign_episode_group_with_provider(
     assignments = tuple(assign_source(source) for source in source_group)
     if show.numbering_mode is NumberingMode.SEGMENT_TITLE:
         assignments = _protect_segment_identity(source_group, assignments)
+        assignments = _protect_provider_episode_identity(assignments)
     else:
         assignments = _protect_provider_episode_identity(assignments)
     assignments = _append_catalog_diagnostics(assignments, catalog)

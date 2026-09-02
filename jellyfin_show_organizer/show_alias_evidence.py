@@ -5,6 +5,11 @@ import unicodedata
 from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 
+from .episode_title_evidence import (
+    is_composite_title_authoritative_group,
+    normalize_episode_title,
+    normalized_episode_title_hint,
+)
 from .models import CandidateEvidence, NumberingMode, ParseResult, ProviderIdentity
 from .numbering_inference import infer_group_numbering_mode
 from .provider_aliases import ProviderAliasSnapshot, TvmazeAliasProviderAdapter
@@ -301,6 +306,136 @@ def _segment_catalog_compatibility(
 
     reasons.append("segment-catalog-compatible:true")
     return True, tuple(reasons)
+
+
+def _composite_aired_title_catalog_compatibility(
+    parses: tuple[ParseResult, ...],
+    catalog: ProviderEpisodeCatalog,
+) -> tuple[bool | None, tuple[str, ...]]:
+    request_reason = f"composite-aired-title-request:{catalog.request_key}"
+    if not catalog.resolved:
+        return None, (
+            request_reason,
+            "composite-aired-title-rescue:indeterminate-catalog",
+            f"catalog-unresolved:{catalog.unresolved_reason or 'provider-catalog-unresolved'}",
+        )
+    if catalog.errors:
+        return None, (
+            request_reason,
+            "composite-aired-title-rescue:indeterminate-catalog",
+            *(f"catalog-error:{error}" for error in catalog.errors),
+        )
+
+    by_title: dict[str, list[ProviderIdentity]] = {}
+    for episode in catalog.episodes:
+        title = normalize_episode_title(episode.title)
+        if title:
+            by_title.setdefault(title, []).append(episode.identity)
+
+    observed = tuple(
+        normalized_episode_title_hint(parse.title_hint or "") for parse in parses
+    )
+    reasons: list[str] = [request_reason]
+    selected: list[ProviderIdentity] = []
+    for title in observed:
+        if not title:
+            reasons.append("composite-aired-title-empty-observation")
+            return False, tuple(reasons)
+        matches = tuple(by_title.get(title, ()))
+        if not matches:
+            reasons.append(f"composite-aired-title-missing:{title}")
+            return False, tuple(reasons)
+        if len(matches) != 1:
+            reasons.append(f"composite-aired-title-ambiguous:{title}")
+            return False, tuple(reasons)
+        selected.append(matches[0])
+
+    if len(set(selected)) != len(selected):
+        reasons.append("composite-aired-title-distinct-sources-collapse")
+        return False, tuple(reasons)
+
+    reasons.extend(
+        (
+            f"composite-aired-title-exact-matches:{len(selected)}/{len(observed)}",
+            "composite-aired-title-compatible:true",
+        )
+    )
+    return True, tuple(reasons)
+
+
+def composite_aired_title_rescue(
+    provider: MetadataProvider,
+    parses: tuple[ParseResult, ...],
+    ranked: tuple[CandidateEvidence, ...],
+) -> CatalogGroupRescue | None:
+    if not ranked or not is_composite_title_authoritative_group(parses):
+        return None
+
+    compatibility: dict[ProviderIdentity, bool | None] = {}
+    candidate_reasons: dict[ProviderIdentity, tuple[str, ...]] = {}
+    for candidate in sorted(ranked, key=lambda item: item.provider_identity.key):
+        catalog = provider.episode_catalog(candidate.provider_identity)
+        compatible, reasons = _composite_aired_title_catalog_compatibility(
+            parses, catalog
+        )
+        compatibility[candidate.provider_identity] = compatible
+        candidate_reasons[candidate.provider_identity] = reasons
+
+    enriched = tuple(
+        replace(
+            candidate,
+            reasons=(
+                *candidate.reasons,
+                *candidate_reasons.get(candidate.provider_identity, ()),
+            ),
+        )
+        for candidate in ranked
+    )
+    if any(value is None for value in compatibility.values()):
+        return CatalogGroupRescue(
+            winner=None,
+            numbering_mode=None,
+            candidates=enriched,
+            reasons=("composite-aired-title-rescue:indeterminate-candidate-catalog",),
+        )
+
+    winners = tuple(
+        identity
+        for identity, compatible in sorted(
+            compatibility.items(), key=lambda item: item[0].key
+        )
+        if compatible
+    )
+    if len(winners) != 1:
+        return CatalogGroupRescue(
+            winner=None,
+            numbering_mode=None,
+            candidates=enriched,
+            reasons=("composite-aired-title-rescue:no-unique-compatible-candidate",),
+        )
+
+    winner = winners[0]
+    winner_first = tuple(
+        sorted(
+            enriched,
+            key=lambda candidate: (
+                candidate.provider_identity != winner,
+                -candidate.score,
+                _normalize(candidate.title),
+                candidate.provider_identity.key,
+            ),
+        )
+    )
+    return CatalogGroupRescue(
+        winner=winner,
+        numbering_mode=NumberingMode.SEGMENT_TITLE,
+        candidates=winner_first,
+        reasons=(
+            "composite-aired-title-rescue:unique-compatible-candidate",
+            f"composite-aired-title-rescue-winner:{winner.key}",
+            "composite-aired-title-rescue-numbering-mode:segment-title",
+        ),
+    )
 
 
 def catalog_group_rescue(
