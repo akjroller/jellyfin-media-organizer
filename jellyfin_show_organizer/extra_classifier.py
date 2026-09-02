@@ -154,14 +154,12 @@ def _extra_markers(
     if any(kind is ExtraKind.DELETED_SCENE for kind, _ in hits):
         hits = [(kind, reason) for kind, reason in hits if kind is not ExtraKind.CLIP]
 
+    # Generic ``extra`` evidence is an umbrella, not a competing subtype. When a
+    # specific marker is present, retain the specific kind and drop only the
+    # generic kind from conflict detection. Conflicting specific kinds still fail
+    # closed below.
     if any(kind is not ExtraKind.EXTRA for kind, _ in hits):
-        hits = [
-            (kind, reason)
-            for kind, reason in hits
-            if not (
-                kind is ExtraKind.EXTRA and reason == "structural season-extra marker"
-            )
-        ]
+        hits = [(kind, reason) for kind, reason in hits if kind is not ExtraKind.EXTRA]
 
     return tuple(hits)
 
