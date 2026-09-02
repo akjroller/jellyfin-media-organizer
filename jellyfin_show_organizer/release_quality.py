@@ -79,18 +79,21 @@ _SOURCE_PATTERNS: tuple[tuple[ReleaseSourceFamily, re.Pattern[str]], ...] = (
 )
 
 
-def _release_stem(relative_path: str) -> str:
+def _release_text(relative_path: str) -> str:
     normalized = unicodedata.normalize("NFKC", relative_path.replace("\\", "/"))
-    return PurePosixPath(normalized).stem
+    path = PurePosixPath(normalized)
+    if not path.parts:
+        return ""
+    return "/".join((*path.parts[:-1], path.stem))
 
 
 def parse_release_quality(relative_path: str) -> ReleaseQualityEvidence:
-    """Parse only documented, token-delimited release-quality signals."""
+    """Parse documented token-delimited quality signals across a release path."""
 
-    stem = _release_stem(relative_path)
+    release_text = _release_text(relative_path)
     errors: list[str] = []
 
-    resolutions = {int(match) for match in _RESOLUTION_RE.findall(stem)}
+    resolutions = {int(match) for match in _RESOLUTION_RE.findall(release_text)}
     resolution = next(iter(resolutions)) if len(resolutions) == 1 else None
     if len(resolutions) > 1:
         errors.append(
@@ -101,7 +104,7 @@ def parse_release_quality(relative_path: str) -> ReleaseQualityEvidence:
     source_families = {
         family
         for family, pattern in _SOURCE_PATTERNS
-        if pattern.search(stem) is not None
+        if pattern.search(release_text) is not None
     }
     source_family = next(iter(source_families)) if len(source_families) == 1 else None
     if len(source_families) > 1:
@@ -110,7 +113,7 @@ def parse_release_quality(relative_path: str) -> ReleaseQualityEvidence:
             + ",".join(family.value for family in sorted(source_families, key=str))
         )
 
-    version_values = {int(value) for value in _VERSION_RE.findall(stem)}
+    version_values = {int(value) for value in _VERSION_RE.findall(release_text)}
     if len(version_values) > 1:
         errors.append(
             "multiple-release-versions:"
@@ -119,10 +122,10 @@ def parse_release_quality(relative_path: str) -> ReleaseQualityEvidence:
 
     markers: list[str] = []
     revision_rank = 1
-    if _REPACK_RE.search(stem) is not None:
+    if _REPACK_RE.search(release_text) is not None:
         markers.append("repack")
         revision_rank = max(revision_rank, 2)
-    if _PROPER_RE.search(stem) is not None:
+    if _PROPER_RE.search(release_text) is not None:
         markers.append("proper")
         revision_rank = max(revision_rank, 2)
     if len(version_values) == 1:
@@ -133,7 +136,7 @@ def parse_release_quality(relative_path: str) -> ReleaseQualityEvidence:
     return ReleaseQualityEvidence(
         resolution=resolution,
         source_family=source_family,
-        remux=_REMUX_RE.search(stem) is not None,
+        remux=_REMUX_RE.search(release_text) is not None,
         revision_rank=revision_rank,
         revision_markers=tuple(markers),
         errors=tuple(errors),
