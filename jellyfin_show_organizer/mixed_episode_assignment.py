@@ -1,21 +1,32 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import replace
+from datetime import date
 
 from .episode_assignment_strict import (
+    AssignmentStatus,
     EpisodeGroupAssignment,
     SourceEpisodeAssignment,
     SourceEpisodeInput,
     _accessory_special_families_allowed,
+    _catalog_diagnostic_reasons,
+    _episode_identity_reason,
     _evidence_family,
     _expected_family,
     _group_status,
+    _normalize_title,
     _protect_provider_episode_identity,
     assign_episode_group_with_provider as _assign_strict_group,
 )
-from .models import CanonicalShow, NumberingMode
-from .providers import MetadataProvider, TvmazeProviderAdapter
+from .models import CanonicalShow, MatchEvidence, NumberingMode
+from .providers import (
+    MetadataProvider,
+    ProviderEpisode,
+    ProviderEpisodeCatalog,
+    TvmazeProviderAdapter,
+)
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
 _FAMILY_MODE = {
@@ -31,6 +42,13 @@ _PARTITIONABLE_PRIMARY_MODES = frozenset(
         NumberingMode.ABSOLUTE,
         NumberingMode.PARENTHESIZED_ABSOLUTE,
     }
+)
+_SOURCE_DATE = re.compile(
+    r"(?<!\d)(?P<year>(?:18|19|20|21)\d{2})[-._]"
+    r"(?P<month>0[1-9]|1[0-2])[-._](?P<day>0[1-9]|[12]\d|3[01])(?!\d)"
+)
+_PRE_PREMIERE_CONTEXT = re.compile(
+    r"(?i)(?<![a-z0-9])(?P<context>shorts?|pilots?|specials?|unaired)(?![a-z0-9])"
 )
 
 
@@ -65,21 +83,233 @@ def _annotate_accessory(
     )
 
 
-def assign_episode_group_with_provider(
+def _source_dates(source_key: str) -> tuple[str, ...]:
+    values: set[str] = set()
+    for match in _SOURCE_DATE.finditer(source_key):
+        candidate = f"{match.group('year')}-{match.group('month')}-{match.group('day')}"
+        try:
+            values.add(date.fromisoformat(candidate).isoformat())
+        except ValueError:
+            continue
+    return tuple(sorted(values))
+
+
+def _pre_premiere_contexts(source_key: str) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                match.group("context").casefold()
+                for match in _PRE_PREMIERE_CONTEXT.finditer(source_key)
+            }
+        )
+    )
+
+
+def _has_pre_premiere_guard_signal(
+    source: SourceEpisodeInput,
+    show: CanonicalShow,
+) -> bool:
+    return (
+        _evidence_family(source.parse, show.numbering_mode) in {"aired", "absolute"}
+        and bool(_pre_premiere_contexts(source.source_key))
+        and bool(_source_dates(source.source_key))
+    )
+
+
+def _first_regular_airdate(catalog: ProviderEpisodeCatalog) -> str | None:
+    dates = tuple(
+        sorted(
+            episode.airdate
+            for episode in catalog.episodes
+            if episode.airdate is not None
+            and episode.season > 0
+            and episode.number is not None
+            and (episode.episode_type is None or episode.episode_type == "regular")
+        )
+    )
+    return dates[0] if dates else None
+
+
+def _pre_premiere_boundary_reason(
+    source_date: str,
+    show: CanonicalShow,
+    catalog: ProviderEpisodeCatalog,
+) -> str | None:
+    first_regular = _first_regular_airdate(catalog)
+    if first_regular is not None:
+        if source_date < first_regular:
+            return f"pre-premiere-before-first-regular:{first_regular}"
+        return None
+
+    if show.year is not None and int(source_date[:4]) < show.year:
+        return f"pre-premiere-before-show-year:{show.year}"
+    return None
+
+
+def _non_regular_on_date(
+    catalog: ProviderEpisodeCatalog,
+    source_date: str,
+) -> tuple[ProviderEpisode, ...]:
+    return tuple(
+        episode
+        for episode in catalog.episodes
+        if episode.airdate == source_date
+        and (
+            episode.season == 0
+            or (episode.episode_type is not None and episode.episode_type != "regular")
+        )
+    )
+
+
+def _pre_premiere_assignment(
+    source: SourceEpisodeInput,
+    show: CanonicalShow,
+    catalog: ProviderEpisodeCatalog,
+) -> SourceEpisodeAssignment | None:
+    family = _evidence_family(source.parse, show.numbering_mode)
+    if family not in {"aired", "absolute"}:
+        return None
+
+    contexts = _pre_premiere_contexts(source.source_key)
+    if not contexts:
+        return None
+
+    source_dates = _source_dates(source.source_key)
+    if not source_dates:
+        return None
+
+    boundary_reasons = tuple(
+        reason
+        for source_date in source_dates
+        if (reason := _pre_premiere_boundary_reason(source_date, show, catalog))
+        is not None
+    )
+    if not boundary_reasons:
+        return None
+
+    base_reasons = (
+        f"primary-numbering-mode:{show.numbering_mode.value}",
+        "pre-premiere-context:" + ",".join(contexts),
+        f"catalog-request:{catalog.request_key}",
+        *_catalog_diagnostic_reasons(catalog),
+    )
+    if len(source_dates) != 1:
+        return SourceEpisodeAssignment(
+            source_key=source.source_key,
+            status=AssignmentStatus.SUSPICIOUS,
+            episodes=(),
+            evidence=MatchEvidence(
+                method="pre-premiere-catalog",
+                confidence=0.0,
+                reasons=(
+                    *base_reasons,
+                    "ambiguous-pre-premiere-source-dates:" + ",".join(source_dates),
+                    *boundary_reasons,
+                ),
+            ),
+        )
+
+    source_date = source_dates[0]
+    boundary_reason = boundary_reasons[0]
+    candidates = _non_regular_on_date(catalog, source_date)
+    if not candidates:
+        return SourceEpisodeAssignment(
+            source_key=source.source_key,
+            status=AssignmentStatus.UNRESOLVED,
+            episodes=(),
+            evidence=MatchEvidence(
+                method="pre-premiere-catalog",
+                confidence=0.0,
+                reasons=(
+                    *base_reasons,
+                    f"pre-premiere-source-date:{source_date}",
+                    boundary_reason,
+                    f"missing-pre-premiere-catalog-entry:{source_date}",
+                ),
+            ),
+        )
+
+    selected = candidates
+    title_reason: str | None = None
+    if len(candidates) > 1 and source.parse.title_hint is not None:
+        normalized_title = _normalize_title(source.parse.title_hint)
+        title_matches = tuple(
+            episode
+            for episode in candidates
+            if _normalize_title(episode.title) == normalized_title
+        )
+        if len(title_matches) == 1:
+            selected = title_matches
+            title_reason = f"pre-premiere-title-match:{normalized_title}"
+
+    if len(selected) != 1:
+        return SourceEpisodeAssignment(
+            source_key=source.source_key,
+            status=AssignmentStatus.SUSPICIOUS,
+            episodes=(),
+            evidence=MatchEvidence(
+                method="pre-premiere-catalog",
+                confidence=0.0,
+                reasons=(
+                    *base_reasons,
+                    f"pre-premiere-source-date:{source_date}",
+                    boundary_reason,
+                    f"ambiguous-pre-premiere-catalog-entry:{source_date}",
+                ),
+            ),
+        )
+
+    episode = selected[0]
+    if episode.number is None:
+        return SourceEpisodeAssignment(
+            source_key=source.source_key,
+            status=AssignmentStatus.UNRESOLVED,
+            episodes=(),
+            evidence=MatchEvidence(
+                method="pre-premiere-catalog",
+                confidence=0.0,
+                reasons=(
+                    *base_reasons,
+                    f"pre-premiere-source-date:{source_date}",
+                    boundary_reason,
+                    f"pre-premiere-catalog-entry-missing-number:{source_date}",
+                    _episode_identity_reason(episode),
+                ),
+            ),
+        )
+
+    reasons = [
+        *base_reasons,
+        f"pre-premiere-source-date:{source_date}",
+        boundary_reason,
+    ]
+    if title_reason is not None:
+        reasons.append(title_reason)
+    reasons.extend(
+        (
+            f"pre-premiere-catalog-match:{source_date}->"
+            f"S{episode.season:02d}E{episode.number:02d}",
+            _episode_identity_reason(episode),
+        )
+    )
+    return SourceEpisodeAssignment(
+        source_key=source.source_key,
+        status=AssignmentStatus.MATCHED,
+        episodes=(episode,),
+        evidence=MatchEvidence(
+            method="pre-premiere-catalog",
+            confidence=1.0,
+            reasons=tuple(reasons),
+        ),
+    )
+
+
+def _assign_episode_group_core(
     show: CanonicalShow,
     sources: Iterable[SourceEpisodeInput],
     provider: MetadataProvider,
 ) -> EpisodeGroupAssignment:
-    """Assign a resolved show while isolating independent numbering families.
-
-    The strict assignment engine remains authoritative for every individual family.
-    Partitioning is used only when an aired/absolute primary show contains the
-    selected primary family plus independent alternate evidence that the strict
-    group-level guard would otherwise reject wholesale. Explicit date, special, and
-    segment-title policies remain strict group-wide contracts. Each partitioned
-    family is validated against the same provider show catalog, and cross-family
-    provider-episode collisions remain fail-closed.
-    """
+    """Assign a resolved show while isolating independent numbering families."""
 
     source_group = tuple(
         sorted(
@@ -138,6 +368,91 @@ def assign_episode_group_with_provider(
                 primary_mode=show.numbering_mode,
             )
         combined.extend(assignments)
+
+    ordered = tuple(
+        sorted(
+            combined,
+            key=lambda assignment: (
+                assignment.source_key.casefold(),
+                assignment.source_key,
+            ),
+        )
+    )
+    ordered = _protect_provider_episode_identity(ordered)
+    request_key = next(iter(request_keys)) if len(request_keys) == 1 else None
+    return EpisodeGroupAssignment(
+        show=show,
+        status=_group_status(ordered),
+        assignments=ordered,
+        catalog_request_key=request_key,
+    )
+
+
+def assign_episode_group_with_provider(
+    show: CanonicalShow,
+    sources: Iterable[SourceEpisodeInput],
+    provider: MetadataProvider,
+) -> EpisodeGroupAssignment:
+    """Assign episodes and fail closed on provable pre-premiere regular claims.
+
+    The existing mixed-family engine remains authoritative. A second provider-catalog
+    pass is used only after that engine has produced a catalog-backed result. Sources
+    with both explicit special context and a canonical date before the regular series
+    boundary are removed from normal numbering, then the remaining sources are
+    re-evaluated without those false claimants so legitimate regular assignments can
+    recover from provider-episode collision protection.
+    """
+
+    source_group = tuple(
+        sorted(
+            sources,
+            key=lambda source: (source.source_key.casefold(), source.source_key),
+        )
+    )
+    original = _assign_episode_group_core(show, source_group, provider)
+    if (
+        show.numbering_mode not in _PARTITIONABLE_PRIMARY_MODES
+        or original.catalog_request_key is None
+        or show.provider != provider.provider_name
+    ):
+        return original
+
+    potential_guard_sources = tuple(
+        source
+        for source in source_group
+        if _has_pre_premiere_guard_signal(source, show)
+    )
+    if not potential_guard_sources:
+        return original
+
+    catalog = provider.episode_catalog(show.provider_identity)
+    if (
+        catalog.request_key != original.catalog_request_key
+        or catalog.show_identity != show.provider_identity
+        or not catalog.resolved
+        or catalog.errors
+        or not catalog.episodes
+    ):
+        return original
+
+    guarded = {
+        source.source_key: assignment
+        for source in potential_guard_sources
+        if (assignment := _pre_premiere_assignment(source, show, catalog)) is not None
+    }
+    if not guarded:
+        return original
+
+    remaining = tuple(
+        source for source in source_group if source.source_key not in guarded
+    )
+    combined: list[SourceEpisodeAssignment] = list(guarded.values())
+    request_keys = {catalog.request_key}
+    if remaining:
+        rerun = _assign_episode_group_core(show, remaining, provider)
+        combined.extend(rerun.assignments)
+        if rerun.catalog_request_key is not None:
+            request_keys.add(rerun.catalog_request_key)
 
     ordered = tuple(
         sorted(
