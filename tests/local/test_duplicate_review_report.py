@@ -157,11 +157,13 @@ def test_duplicate_report_is_independent_of_record_insertion_order() -> None:
 
 def test_duplicate_review_ref_normalizes_case_slashes_and_candidate_order() -> None:
     first = _selected_decision()
+    equivalent_first = FIRST.upper().replace("/", "\\")
+    equivalent_second = SECOND.upper()
     equivalent = DuplicateDecision(
         destination_key=DESTINATION.upper().replace("/", "\\"),
-        candidates=(SECOND.upper(), FIRST.upper().replace("/", "\\")),
-        winner=SECOND.upper(),
-        losers=(FIRST.upper(),),
+        candidates=(equivalent_second, equivalent_first),
+        winner=equivalent_second,
+        losers=(equivalent_first,),
         confidence=0.8,
         evidence=("different explanatory text does not change group identity",),
     )
