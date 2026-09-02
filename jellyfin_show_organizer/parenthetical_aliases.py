@@ -50,7 +50,7 @@ def _title_prefix(value: str) -> str:
     return normalized.strip(" -_.[]{}")
 
 
-def parenthetical_show_aliases(value: str) -> tuple[str, str] | ():
+def parenthetical_show_aliases(value: str) -> tuple[str, ...]:
     """Return one conservative outer/inner show-title alias pair.
 
     Only a single parenthetical group before episode coordinates is considered.
