@@ -60,7 +60,9 @@ class AliasProvider:
             ),
         )
 
-    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
         return ProviderEpisodeCatalog(
             provider="fixture",
             request_key=f"episodes:{show_identity.value}",
@@ -107,7 +109,9 @@ def test_parenthetical_alias_extractor_rejects_non_title_groups() -> None:
     assert parenthetical_show_aliases("Example Series (12) S01E01") == ()
     assert parenthetical_show_aliases("Example Series (English Dub) S01E01") == ()
     assert parenthetical_show_aliases("Example Series (1080p HEVC) S01E01") == ()
-    assert parenthetical_show_aliases("Example (First Title) (Second Title) S01E01") == ()
+    assert (
+        parenthetical_show_aliases("Example (First Title) (Second Title) S01E01") == ()
+    )
 
 
 def test_parentheses_after_episode_coordinate_are_not_show_aliases() -> None:
@@ -164,7 +168,9 @@ def test_parenthetical_alias_search_keeps_different_exact_candidates_blocked() -
     assert "parenthetical-alias-search:conflicting-results" in result.evidence.reasons
 
 
-def test_parenthetical_alias_search_rejects_conflicting_metadata_for_same_identity() -> None:
+def test_parenthetical_alias_search_rejects_conflicting_metadata_for_same_identity() -> (
+    None
+):
     provider = AliasProvider(
         {
             "Primary Series": _snapshot(
