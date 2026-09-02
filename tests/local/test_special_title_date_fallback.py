@@ -46,7 +46,9 @@ class FixtureProvider:
             shows=(),
         )
 
-    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
         assert show_identity == SHOW_ID
         self.catalog_calls += 1
         return ProviderEpisodeCatalog(
@@ -231,12 +233,8 @@ def test_ambiguous_source_date_stays_suspicious() -> None:
     assignment, _provider = _assignment(
         source,
         (
-            _special(
-                "special-5", number=5, title="One", airdate="2024-02-03"
-            ),
-            _special(
-                "special-6", number=6, title="Two", airdate="2024-02-03"
-            ),
+            _special("special-5", number=5, title="One", airdate="2024-02-03"),
+            _special("special-6", number=6, title="Two", airdate="2024-02-03"),
         ),
     )
 
@@ -297,7 +295,9 @@ def test_existing_exact_special_number_match_remains_authoritative() -> None:
     )
 
     assert assignment.status is AssignmentStatus.MATCHED
-    assert assignment.episodes[0].identity == ProviderIdentity("fixture", "exact-special")
+    assert assignment.episodes[0].identity == ProviderIdentity(
+        "fixture", "exact-special"
+    )
     assert assignment.evidence.method == "episode-catalog"
     assert provider.catalog_calls == 1
 

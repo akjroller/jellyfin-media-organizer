@@ -202,8 +202,7 @@ def _special_fallback_assignment(
                 confidence=0.0,
                 reasons=(
                     *reasons,
-                    "special-fallback-source-dates-ambiguous:"
-                    + ",".join(source_dates),
+                    "special-fallback-source-dates-ambiguous:" + ",".join(source_dates),
                 ),
             ),
         )
@@ -576,9 +575,7 @@ def assign_episode_group_with_provider(
     potential_special_sources = tuple(
         source
         for source in source_group
-        if (
-            assignment := original_by_source.get(source.source_key)
-        ) is not None
+        if (assignment := original_by_source.get(source.source_key)) is not None
         and _has_special_fallback_signal(source, assignment)
     )
     potential_guard_sources = (
@@ -617,10 +614,7 @@ def assign_episode_group_with_provider(
         if remaining:
             rerun = _assign_episode_group_core(show, remaining, provider)
             base_assignments.update(
-                {
-                    assignment.source_key: assignment
-                    for assignment in rerun.assignments
-                }
+                {assignment.source_key: assignment for assignment in rerun.assignments}
             )
             if rerun.catalog_request_key is not None:
                 request_keys.add(rerun.catalog_request_key)
