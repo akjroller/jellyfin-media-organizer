@@ -76,13 +76,15 @@ def analyze_segment_counted_titles(
     """Prove a segment-counted aired family only from repeated exact titles."""
 
     by_season_title: dict[tuple[int, str], list[ProviderEpisode]] = {}
-    for episode in catalog.episodes:
-        if episode.season <= 0 or episode.number is None:
+    for catalog_episode in catalog.episodes:
+        if catalog_episode.season <= 0 or catalog_episode.number is None:
             continue
-        normalized = normalize_episode_title(episode.title)
+        normalized = normalize_episode_title(catalog_episode.title)
         if not normalized:
             continue
-        by_season_title.setdefault((episode.season, normalized), []).append(episode)
+        by_season_title.setdefault(
+            (catalog_episode.season, normalized), []
+        ).append(catalog_episode)
 
     observations: list[SegmentCountedTitleObservation] = []
     for index, parse in enumerate(parses):
@@ -92,17 +94,17 @@ def analyze_segment_counted_titles(
         assert parse.title_hint is not None
         normalized_title = clean_episode_title_hint(parse.title_hint)
         matches = tuple(by_season_title.get((parse.season, normalized_title), ()))
-        episode = matches[0] if len(matches) == 1 else None
+        selected_episode = matches[0] if len(matches) == 1 else None
         observations.append(
             SegmentCountedTitleObservation(
                 parse_index=index,
                 normalized_title=normalized_title,
-                episode=episode,
+                episode=selected_episode,
                 ambiguous=len(matches) > 1,
                 coordinate_disagrees=(
-                    episode is not None
-                    and episode.number is not None
-                    and parse.episodes != (episode.number,)
+                    selected_episode is not None
+                    and selected_episode.number is not None
+                    and parse.episodes != (selected_episode.number,)
                 ),
             )
         )
@@ -110,7 +112,9 @@ def analyze_segment_counted_titles(
     exact = tuple(
         observation for observation in observations if observation.episode is not None
     )
-    identities = tuple(observation.episode.identity for observation in exact if observation.episode)
+    identities = tuple(
+        observation.episode.identity for observation in exact if observation.episode
+    )
     one_to_one = len(identities) == len(set(identities))
     eligible_count = len(observations)
     exact_match_count = len(exact)
