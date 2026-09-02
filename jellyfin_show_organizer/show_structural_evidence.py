@@ -80,6 +80,32 @@ def _initialism_equivalent(source: str, candidate: str) -> bool:
     )
 
 
+def _single_token_prefix_expansion_equivalent(source: str, candidate: str) -> bool:
+    source_tokens = _normalize(source).split()
+    candidate_tokens = _normalize(candidate).split()
+    if len(source_tokens) < 2 or len(source_tokens) != len(candidate_tokens):
+        return False
+
+    differences = tuple(
+        (source_token, candidate_token)
+        for source_token, candidate_token in zip(
+            source_tokens, candidate_tokens, strict=True
+        )
+        if source_token != candidate_token
+    )
+    if len(differences) != 1:
+        return False
+
+    source_token, candidate_token = differences[0]
+    return (
+        source_token.isalpha()
+        and candidate_token.isalpha()
+        and len(source_token) >= 3
+        and len(candidate_token) >= len(source_token) + 3
+        and candidate_token.startswith(source_token)
+    )
+
+
 def _provider_subtitle_prefix(source: str, candidate_title: str) -> bool:
     """Return true when a multi-token source exactly prefixes a colon subtitle."""
 
@@ -122,6 +148,8 @@ def structural_title_score(
             return 0.90, ("token-initialism-equivalent",)
         if _provider_ampersand_equivalent(normalized, candidate_title):
             return 0.90, ("provider-ampersand-equivalent",)
+        if _single_token_prefix_expansion_equivalent(normalized, candidate_normalized):
+            return 0.78, ("single-token-prefix-expansion-equivalent",)
 
         source_tokens = normalized.split()
         if _provider_subtitle_prefix(normalized, candidate_title):
