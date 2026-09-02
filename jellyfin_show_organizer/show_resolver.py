@@ -13,6 +13,9 @@ from .provider_aliases import TvmazeAliasProviderAdapter
 from .providers import MetadataProvider, ProviderSearchSnapshot, ProviderShow
 from .release_prefix_fallback import resolve_release_prefix_fallback
 from .show_structural_evidence import token_merge_queries
+from .structural_root_title_fallback import (
+    resolve_structural_root_title_fallback,
+)
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
 ResolutionStatus = _core.ResolutionStatus
@@ -650,6 +653,16 @@ def resolve_show_group_with_provider(
     )
     if release_prefix is not None:
         result, active_provider = release_prefix
+
+    root_title = resolve_structural_root_title_fallback(
+        source_key,
+        parse_group,
+        overrides,
+        active_provider,
+        result,
+    )
+    if root_title is not None:
+        result, active_provider = root_title
 
     if _structural_year_span(source_key) is None:
         return result
