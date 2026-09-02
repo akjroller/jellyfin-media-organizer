@@ -4,6 +4,24 @@ Jellyfin Media Organizer keeps duplicate handling fail-closed by default. If two
 
 Override schema version 2 can provide explicit local preference evidence for a genuine duplicate group. This is planning input only: it does not move, delete, overwrite, or quarantine media.
 
+## Reviewing duplicate collisions
+
+Every plan audit bundle includes `duplicates.csv`. Unlike `mapping.csv`, which remains one row per video record, `duplicates.csv` is one row per destination collision so the complete duplicate decision can be reviewed together.
+
+Each duplicate row includes:
+
+- `duplicate_ref`: a stable local reference derived only from the normalized destination key and complete candidate set;
+- `destination_key` and `destination`: the normalized collision identity and observed planned destination;
+- `decision_state`: `winner-selected` or `review-required`;
+- `candidates` and `candidate_review_refs`: every source operation competing for the destination and the same stable source refs used by other review output;
+- `winner`, `winner_review_ref`, `losers`, and `loser_review_refs`: the current duplicate decision without implying deletion authority;
+- `confidence` and `evidence`: the duplicate classifier's decision evidence;
+- `record_statuses`, `record_sources`, and `operation_group_ids`: cross-references back to `mapping.csv` and `plan.json`.
+
+Repeated copies of the same immutable duplicate decision are collapsed into one row. If plan records ever carry incompatible duplicate decisions for the same destination key, report generation fails closed instead of publishing contradictory review output.
+
+`duplicates.csv` is an audit view only. Editing it has no effect on planning. Use the local override mechanism below when a genuine duplicate group needs an explicit source preference.
+
 ## Source-specific preferences
 
 Preferences use the source video's normalized path relative to the authorized Shows root. Absolute paths, drive-qualified paths, and `..` traversal are rejected.

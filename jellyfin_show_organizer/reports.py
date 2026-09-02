@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import os
 import shutil
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +15,7 @@ from .decision_hash import stable_decision_hash
 from .models import (
     CompanionPlanRecord,
     CompanionStatus,
+    DuplicateDecision,
     OrganizerPlan,
     PlanRecord,
     TerminalStatus,
@@ -47,6 +50,25 @@ CSV_HEADER = (
     "operation_group_id",
     "provider_episode_ids",
     "reason",
+)
+
+DUPLICATE_CSV_HEADER = (
+    "duplicate_ref",
+    "destination_key",
+    "destination",
+    "decision_state",
+    "candidate_count",
+    "candidates",
+    "candidate_review_refs",
+    "winner",
+    "winner_review_ref",
+    "losers",
+    "loser_review_refs",
+    "confidence",
+    "evidence",
+    "record_statuses",
+    "record_sources",
+    "operation_group_ids",
 )
 
 COMPANION_CSV_HEADER = (
@@ -152,6 +174,115 @@ def _render_record_csv(records: tuple[PlanRecord, ...]) -> bytes:
     return ("\ufeff" + stream.getvalue()).encode("utf-8")
 
 
+def _duplicate_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value.replace("\\", "/"))
+    return normalized.casefold()
+
+
+def stable_duplicate_ref(decision: DuplicateDecision) -> str:
+    """Return a stable local review reference for one duplicate collision."""
+
+    identity = {
+        "destination_key": _duplicate_key(decision.destination_key),
+        "candidates": sorted(_duplicate_key(value) for value in decision.candidates),
+    }
+    payload = json.dumps(
+        identity,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256(payload).hexdigest()[:16]
+    return f"duplicate-{digest}"
+
+
+def _duplicate_groups(
+    plan: OrganizerPlan,
+) -> tuple[tuple[DuplicateDecision, tuple[PlanRecord, ...]], ...]:
+    grouped: dict[str, tuple[DuplicateDecision, list[PlanRecord]]] = {}
+    for record in canonical_records(plan):
+        decision = record.duplicate
+        if decision is None:
+            continue
+        key = _duplicate_key(decision.destination_key)
+        existing = grouped.get(key)
+        if existing is None:
+            grouped[key] = decision, [record]
+            continue
+        existing_decision, records = existing
+        if existing_decision != decision:
+            raise ValueError(
+                "conflicting duplicate decisions for destination key: "
+                f"{decision.destination_key}"
+            )
+        records.append(record)
+
+    return tuple(
+        (decision, tuple(records))
+        for _key, (decision, records) in sorted(grouped.items())
+    )
+
+
+def _duplicate_row(
+    decision: DuplicateDecision,
+    records: tuple[PlanRecord, ...],
+) -> dict[str, str]:
+    candidates = decision.candidates
+    losers = decision.losers
+    destinations = sorted(
+        {record.destination for record in records if record.destination is not None},
+        key=lambda value: (_duplicate_key(value), value),
+    )
+    statuses = sorted({record.status.value for record in records})
+    sources = tuple(record.source.relative_path for record in records)
+    operation_group_ids = sorted(
+        {
+            record.operation_group_id
+            for record in records
+            if record.operation_group_id is not None
+        }
+    )
+    return {
+        "duplicate_ref": stable_duplicate_ref(decision),
+        "destination_key": decision.destination_key,
+        "destination": "|".join(destinations),
+        "decision_state": "winner-selected"
+        if decision.winner is not None
+        else "review-required",
+        "candidate_count": str(len(candidates)),
+        "candidates": "|".join(candidates),
+        "candidate_review_refs": "|".join(
+            stable_review_ref(value) for value in candidates
+        ),
+        "winner": decision.winner or "",
+        "winner_review_ref": (
+            stable_review_ref(decision.winner) if decision.winner is not None else ""
+        ),
+        "losers": "|".join(losers),
+        "loser_review_refs": "|".join(stable_review_ref(value) for value in losers),
+        "confidence": format(decision.confidence, ".6g"),
+        "evidence": "; ".join(decision.evidence),
+        "record_statuses": "|".join(statuses),
+        "record_sources": "|".join(sources),
+        "operation_group_ids": "|".join(operation_group_ids),
+    }
+
+
+def render_duplicates_csv(plan: OrganizerPlan) -> bytes:
+    """Render one deterministic spreadsheet row per duplicate collision group."""
+
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        stream,
+        fieldnames=DUPLICATE_CSV_HEADER,
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for decision, records in _duplicate_groups(plan):
+        writer.writerow(_duplicate_row(decision, records))
+    return ("\ufeff" + stream.getvalue()).encode("utf-8")
+
+
 def _companion_row(record: CompanionPlanRecord) -> dict[str, str]:
     return {
         "source": record.relative_path,
@@ -223,7 +354,6 @@ def render_audit_bundle(
         if record.status in {TerminalStatus.SUSPICIOUS, TerminalStatus.UNRESOLVED}
     )
     extras = tuple(record for record in records if record.extra is not None)
-    duplicates = tuple(record for record in records if record.duplicate is not None)
     preflight_json = None
     preflight_txt = None
     if preflight is not None:
@@ -243,7 +373,7 @@ def render_audit_bundle(
         mapping_csv=_render_record_csv(records),
         unresolved_csv=_render_record_csv(unresolved),
         extras_csv=_render_record_csv(extras),
-        duplicates_csv=_render_record_csv(duplicates),
+        duplicates_csv=render_duplicates_csv(plan),
         sidecars_csv=render_sidecars_csv(plan),
         summary_txt=render_summary(plan, preflight),
         plan_sha256=f"{plan_hash}\n".encode("ascii"),
