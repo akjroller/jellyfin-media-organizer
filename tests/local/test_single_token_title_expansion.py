@@ -106,7 +106,10 @@ def test_structural_score_accepts_one_strict_token_expansion() -> None:
 def test_structural_score_rejects_unsafe_prefix_shapes() -> None:
     assert structural_title_score(("example ab",), "Example Abacus")[0] is None
     assert structural_title_score(("example laboratory",), "Example Lab")[0] is None
-    assert structural_title_score(("example lab show",), "Examples Laboratory Show")[0] is None
+    assert (
+        structural_title_score(("example lab show",), "Examples Laboratory Show")[0]
+        is None
+    )
     assert structural_title_score(("example lab",), "Example Label")[0] is None
 
 
@@ -157,7 +160,9 @@ def test_catalog_incompatibility_remains_blocked() -> None:
 
     assert result.status is ResolutionStatus.SUSPICIOUS
     assert result.show is None
-    assert "aired-catalog-rescue:no-unique-compatible-candidate" in result.evidence.reasons
+    assert (
+        "aired-catalog-rescue:no-unique-compatible-candidate" in result.evidence.reasons
+    )
 
 
 def test_multiple_compatible_candidates_remain_blocked() -> None:
@@ -184,4 +189,6 @@ def test_multiple_compatible_candidates_remain_blocked() -> None:
 
     assert result.status is ResolutionStatus.SUSPICIOUS
     assert result.show is None
-    assert "aired-catalog-rescue:no-unique-compatible-candidate" in result.evidence.reasons
+    assert (
+        "aired-catalog-rescue:no-unique-compatible-candidate" in result.evidence.reasons
+    )
