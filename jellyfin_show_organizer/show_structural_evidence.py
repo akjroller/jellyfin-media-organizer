@@ -199,6 +199,52 @@ def _title_observations(
     )
 
 
+def _mixed_segment_title_observations(
+    parses: tuple[ParseResult, ...],
+) -> tuple[str, ...]:
+    """Collect exact segment titles only from a genuinely mixed aired/segment group."""
+
+    segment_titles: list[str] = []
+    has_plain_aired = False
+    for parse in parses:
+        if parse.segment_hint is None:
+            if (
+                parse.season is not None
+                and bool(parse.episodes)
+                and parse.absolute_episode is None
+                and parse.special_episode is None
+                and parse.episode_date is None
+            ):
+                has_plain_aired = True
+            continue
+
+        if any(
+            (
+                parse.absolute_episode is not None,
+                parse.special_episode is not None,
+                parse.episode_date is not None,
+            )
+        ):
+            return ()
+        if (
+            parse.season is None
+            or len(parse.episodes) != 1
+            or parse.title_hint is None
+            or not parse.title_hint.strip()
+        ):
+            return ()
+        title = _clean_title_hint(parse.title_hint)
+        if not title:
+            return ()
+        segment_titles.append(title)
+
+    if not has_plain_aired or len(segment_titles) < _MIN_TITLE_OBSERVATIONS:
+        return ()
+    if len(set(segment_titles)) != len(segment_titles):
+        return ()
+    return tuple(sorted(segment_titles))
+
+
 def _catalog_coordinate_map(
     catalog: ProviderEpisodeCatalog,
 ) -> dict[tuple[int, int], tuple[str, ...]]:
@@ -320,18 +366,123 @@ def catalog_title_tiebreak(
     )
 
 
+def _mixed_segment_title_rescue(
+    provider: MetadataProvider,
+    parses: tuple[ParseResult, ...],
+    ranked: tuple[CandidateEvidence, ...],
+) -> StructuralCatalogDecision | None:
+    titles = _mixed_segment_title_observations(parses)
+    if len(titles) < _MIN_TITLE_OBSERVATIONS:
+        return None
+
+    outcomes: dict[ProviderIdentity, bool | None] = {}
+    extra_reasons: dict[ProviderIdentity, tuple[str, ...]] = {}
+    for candidate in sorted(ranked, key=lambda item: item.provider_identity.key):
+        catalog = provider.episode_catalog(candidate.provider_identity)
+        request_reason = f"mixed-segment-title-request:{catalog.request_key}"
+        if not catalog.resolved:
+            outcomes[candidate.provider_identity] = None
+            extra_reasons[candidate.provider_identity] = (
+                request_reason,
+                "mixed-segment-title-rescue:indeterminate-catalog",
+            )
+            continue
+        if catalog.errors:
+            outcomes[candidate.provider_identity] = None
+            extra_reasons[candidate.provider_identity] = (
+                request_reason,
+                *(f"mixed-segment-title-error:{error}" for error in catalog.errors),
+            )
+            continue
+
+        by_title: dict[str, list[ProviderIdentity]] = {}
+        for episode in catalog.episodes:
+            title = _normalize(episode.title)
+            if title:
+                by_title.setdefault(title, []).append(episode.identity)
+
+        selected: list[ProviderIdentity] = []
+        reasons: list[str] = [request_reason]
+        compatible = True
+        for title in titles:
+            matches = tuple(by_title.get(title, ()))
+            if len(matches) != 1:
+                compatible = False
+                reason = "missing" if not matches else "ambiguous"
+                reasons.append(f"mixed-segment-title-{reason}:{title}")
+                break
+            selected.append(matches[0])
+        if compatible and len(set(selected)) != len(selected):
+            compatible = False
+            reasons.append("mixed-segment-title-distinct-titles-collapse")
+        reasons.append(f"mixed-segment-title-compatible:{str(compatible).casefold()}")
+        outcomes[candidate.provider_identity] = compatible
+        extra_reasons[candidate.provider_identity] = tuple(reasons)
+
+    enriched = tuple(
+        replace(
+            candidate,
+            reasons=(
+                *candidate.reasons,
+                *extra_reasons.get(candidate.provider_identity, ()),
+            ),
+        )
+        for candidate in ranked
+    )
+    if any(value is None for value in outcomes.values()):
+        return StructuralCatalogDecision(
+            winner=None,
+            candidates=enriched,
+            reasons=("mixed-segment-title-rescue:indeterminate-candidate-catalog",),
+        )
+
+    winners = tuple(
+        identity
+        for identity, compatible in sorted(
+            outcomes.items(), key=lambda item: item[0].key
+        )
+        if compatible
+    )
+    if len(winners) != 1:
+        return StructuralCatalogDecision(
+            winner=None,
+            candidates=enriched,
+            reasons=("mixed-segment-title-rescue:no-unique-compatible-candidate",),
+        )
+
+    winner = winners[0]
+    winner_first = tuple(
+        sorted(
+            enriched,
+            key=lambda candidate: (
+                candidate.provider_identity != winner,
+                -candidate.score,
+                candidate.provider_identity.key,
+            ),
+        )
+    )
+    return StructuralCatalogDecision(
+        winner=winner,
+        candidates=winner_first,
+        reasons=(
+            "mixed-segment-title-rescue:unique-compatible-candidate",
+            f"mixed-segment-title-rescue-winner:{winner.key}",
+        ),
+    )
+
+
 def aired_catalog_rescue(
     provider: MetadataProvider,
     parses: tuple[ParseResult, ...],
     ranked: tuple[CandidateEvidence, ...],
 ) -> StructuralCatalogDecision | None:
-    """Rescue low-text-confidence aired groups only from multiple coordinates."""
+    """Rescue low-text-confidence aired groups from strong catalog evidence."""
 
     if not ranked or ranked[0].score < _MIN_CATALOG_RESCUE_SCORE:
         return None
     coordinates = _aired_coordinates(parses)
     if len(coordinates) < _MIN_COORDINATE_OBSERVATIONS:
-        return None
+        return _mixed_segment_title_rescue(provider, parses, ranked)
 
     outcomes: dict[ProviderIdentity, bool | None] = {}
     extra_reasons: dict[ProviderIdentity, tuple[str, ...]] = {}
