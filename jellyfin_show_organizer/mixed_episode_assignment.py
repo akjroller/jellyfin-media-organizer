@@ -27,6 +27,10 @@ from .providers import (
     ProviderEpisodeCatalog,
     TvmazeProviderAdapter,
 )
+from .segment_counted_titles import (
+    analyze_segment_counted_titles,
+    is_segment_counted_title_candidate,
+)
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
 _FAMILY_MODE = {
@@ -552,6 +556,179 @@ def _assign_episode_group_core(
     )
 
 
+def _has_duplicate_provider_reason(assignment: SourceEpisodeAssignment) -> bool:
+    return any(
+        reason.startswith("duplicate-provider-episode-assignment:")
+        for reason in assignment.evidence.reasons
+    )
+
+
+def _recover_accessory_after_segment_remap(
+    source: SourceEpisodeInput,
+    assignment: SourceEpisodeAssignment,
+    show: CanonicalShow,
+    provider: MetadataProvider,
+) -> SourceEpisodeAssignment:
+    if not _has_duplicate_provider_reason(assignment):
+        return assignment
+    family = _evidence_family(source.parse, show.numbering_mode)
+    mode = _FAMILY_MODE.get(family)
+    if mode is None or family == _expected_family(show.numbering_mode):
+        return assignment
+    result = _assign_strict_group(
+        replace(show, numbering_mode=mode), (source,), provider
+    )
+    recovered = result.assignments
+    if len(recovered) != 1:
+        return assignment
+    return _annotate_accessory(
+        recovered,
+        family=family,
+        primary_mode=show.numbering_mode,
+    )[0]
+
+
+def _apply_segment_counted_title_remap(
+    show: CanonicalShow,
+    sources: tuple[SourceEpisodeInput, ...],
+    assignments: tuple[SourceEpisodeAssignment, ...],
+    provider: MetadataProvider,
+    catalog: ProviderEpisodeCatalog,
+) -> tuple[SourceEpisodeAssignment, ...]:
+    if show.numbering_mode is not NumberingMode.AIRED:
+        return assignments
+
+    parses = tuple(source.parse for source in sources)
+    analysis = analyze_segment_counted_titles(parses, catalog)
+    if not analysis.triggered:
+        return assignments
+
+    by_source = {assignment.source_key: assignment for assignment in assignments}
+    observations = {
+        observation.parse_index: observation for observation in analysis.observations
+    }
+    remapped: list[SourceEpisodeAssignment] = []
+    for index, source in enumerate(sources):
+        assignment = by_source[source.source_key]
+        family = _evidence_family(source.parse, show.numbering_mode)
+        if family != "aired":
+            remapped.append(
+                _recover_accessory_after_segment_remap(
+                    source, assignment, show, provider
+                )
+            )
+            continue
+
+        base_reasons = (
+            f"primary-numbering-mode:{show.numbering_mode.value}",
+            f"catalog-request:{catalog.request_key}",
+            *analysis.reasons,
+        )
+        if not analysis.proven:
+            remapped.append(
+                SourceEpisodeAssignment(
+                    source_key=source.source_key,
+                    status=AssignmentStatus.SUSPICIOUS,
+                    episodes=(),
+                    evidence=MatchEvidence(
+                        method="segment-counted-title-remap",
+                        confidence=0.0,
+                        reasons=(
+                            *base_reasons,
+                            "segment-counted-title-remap:group-proof-rejected",
+                        ),
+                    ),
+                )
+            )
+            continue
+
+        observation = observations.get(index)
+        if observation is None:
+            remapped.append(
+                SourceEpisodeAssignment(
+                    source_key=source.source_key,
+                    status=AssignmentStatus.UNRESOLVED,
+                    episodes=(),
+                    evidence=MatchEvidence(
+                        method="segment-counted-title-remap",
+                        confidence=0.0,
+                        reasons=(
+                            *base_reasons,
+                            "segment-counted-title-remap:group-proven",
+                            "segment-counted-title-remap:missing-title-evidence",
+                        ),
+                    ),
+                )
+            )
+            continue
+        if observation.ambiguous:
+            remapped.append(
+                SourceEpisodeAssignment(
+                    source_key=source.source_key,
+                    status=AssignmentStatus.SUSPICIOUS,
+                    episodes=(),
+                    evidence=MatchEvidence(
+                        method="segment-counted-title-remap",
+                        confidence=0.0,
+                        reasons=(
+                            *base_reasons,
+                            "segment-counted-title-remap:group-proven",
+                            "segment-counted-title-remap:ambiguous-exact-title",
+                            f"segment-counted-title:{observation.normalized_title}",
+                        ),
+                    ),
+                )
+            )
+            continue
+        episode = observation.episode
+        if episode is None:
+            remapped.append(
+                SourceEpisodeAssignment(
+                    source_key=source.source_key,
+                    status=AssignmentStatus.UNRESOLVED,
+                    episodes=(),
+                    evidence=MatchEvidence(
+                        method="segment-counted-title-remap",
+                        confidence=0.0,
+                        reasons=(
+                            *base_reasons,
+                            "segment-counted-title-remap:group-proven",
+                            "segment-counted-title-remap:missing-exact-title-proof",
+                            f"segment-counted-title:{observation.normalized_title}",
+                        ),
+                    ),
+                )
+            )
+            continue
+        assert episode.number is not None
+        assert source.parse.season is not None
+        source_coordinates = ",".join(
+            f"S{source.parse.season:02d}E{number:02d}"
+            for number in source.parse.episodes
+        )
+        remapped.append(
+            SourceEpisodeAssignment(
+                source_key=source.source_key,
+                status=AssignmentStatus.MATCHED,
+                episodes=(episode,),
+                evidence=MatchEvidence(
+                    method="segment-counted-title-remap",
+                    confidence=1.0,
+                    reasons=(
+                        *base_reasons,
+                        "segment-counted-title-remap:group-proven",
+                        f"segment-counted-title:{observation.normalized_title}",
+                        f"segment-counted-source-coordinates:{source_coordinates}",
+                        "segment-counted-provider-coordinate:"
+                        f"S{episode.season:02d}E{episode.number:02d}",
+                        _episode_identity_reason(episode),
+                    ),
+                ),
+            )
+        )
+    return tuple(remapped)
+
+
 def assign_episode_group_with_provider(
     show: CanonicalShow,
     sources: Iterable[SourceEpisodeInput],
@@ -587,7 +764,18 @@ def assign_episode_group_with_provider(
         if show.numbering_mode in _PARTITIONABLE_PRIMARY_MODES
         else ()
     )
-    if not potential_special_sources and not potential_guard_sources:
+    potential_segment_counted = (
+        show.numbering_mode is NumberingMode.AIRED
+        and sum(
+            is_segment_counted_title_candidate(source.parse) for source in source_group
+        )
+        >= 3
+    )
+    if (
+        not potential_special_sources
+        and not potential_guard_sources
+        and not potential_segment_counted
+    ):
         return original
 
     catalog = provider.episode_catalog(show.provider_identity)
@@ -640,6 +828,10 @@ def assign_episode_group_with_provider(
             ),
         )
     )
+    if potential_segment_counted:
+        ordered = _apply_segment_counted_title_remap(
+            show, source_group, ordered, provider, catalog
+        )
     ordered = _protect_provider_episode_identity(ordered)
     request_key = next(iter(request_keys)) if len(request_keys) == 1 else None
     return EpisodeGroupAssignment(

@@ -117,7 +117,9 @@ class Provider:
         self,
         catalogs: Mapping[ProviderIdentity, ProviderEpisodeCatalog] | None = None,
     ) -> None:
-        self.catalogs = dict(catalogs or {ALPHA: _correct_catalog(), BETA: _wrong_catalog()})
+        self.catalogs = dict(
+            catalogs or {ALPHA: _correct_catalog(), BETA: _wrong_catalog()}
+        )
         self.catalog_calls: list[ProviderIdentity] = []
 
     def search_shows(self, title: str) -> ProviderSearchSnapshot:
@@ -149,7 +151,9 @@ def _show() -> CanonicalShow:
     )
 
 
-def _sources(parses: tuple[ParseResult, ...] | None = None) -> tuple[SourceEpisodeInput, ...]:
+def _sources(
+    parses: tuple[ParseResult, ...] | None = None,
+) -> tuple[SourceEpisodeInput, ...]:
     return tuple(
         SourceEpisodeInput(f"source-{index}.mkv", parse)
         for index, parse in enumerate(parses or _parses(), start=1)
@@ -171,7 +175,9 @@ def test_repeated_same_season_titles_prove_segment_counted_family() -> None:
     assert analysis.one_to_one
 
 
-def test_exact_titles_choose_correct_show_even_when_wrong_show_fits_coordinates() -> None:
+def test_exact_titles_choose_correct_show_even_when_wrong_show_fits_coordinates() -> (
+    None
+):
     provider = Provider()
     resolution = resolve_show_group_with_provider(
         "Example Series",

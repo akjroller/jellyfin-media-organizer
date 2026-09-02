@@ -34,6 +34,7 @@ class SegmentCountedTitleAnalysis:
     ambiguous_count: int
     coordinate_disagreement_count: int
     one_to_one: bool
+    triggered: bool
     proven: bool
     reasons: tuple[str, ...]
 
@@ -82,9 +83,9 @@ def analyze_segment_counted_titles(
         normalized = normalize_episode_title(catalog_episode.title)
         if not normalized:
             continue
-        by_season_title.setdefault(
-            (catalog_episode.season, normalized), []
-        ).append(catalog_episode)
+        by_season_title.setdefault((catalog_episode.season, normalized), []).append(
+            catalog_episode
+        )
 
     observations: list[SegmentCountedTitleObservation] = []
     for index, parse in enumerate(parses):
@@ -122,11 +123,14 @@ def analyze_segment_counted_titles(
     disagreement_count = sum(
         observation.coordinate_disagrees for observation in observations
     )
-    proven = (
-        eligible_count >= _MIN_EXACT_MATCHES
-        and exact_match_count >= _MIN_EXACT_MATCHES
-        and exact_match_count * 2 >= eligible_count
+    triggered = (
+        exact_match_count >= _MIN_EXACT_MATCHES
         and disagreement_count >= _MIN_COORDINATE_DISAGREEMENTS
+    )
+    proven = (
+        triggered
+        and eligible_count >= _MIN_EXACT_MATCHES
+        and exact_match_count * 2 >= eligible_count
         and ambiguous_count == 0
         and one_to_one
     )
@@ -137,6 +141,7 @@ def analyze_segment_counted_titles(
         ambiguous_count=ambiguous_count,
         coordinate_disagreement_count=disagreement_count,
         one_to_one=one_to_one,
+        triggered=triggered,
         proven=proven,
         reasons=(
             f"segment-counted-title-eligible:{eligible_count}",
@@ -144,6 +149,7 @@ def analyze_segment_counted_titles(
             f"segment-counted-title-ambiguous:{ambiguous_count}",
             f"segment-counted-title-coordinate-disagreements:{disagreement_count}",
             f"segment-counted-title-one-to-one:{str(one_to_one).casefold()}",
+            f"segment-counted-title-triggered:{str(triggered).casefold()}",
             f"segment-counted-title-compatible:{str(proven).casefold()}",
         ),
     )

@@ -6,6 +6,11 @@ from dataclasses import dataclass, replace
 
 from .models import CandidateEvidence, ParseResult, ProviderIdentity
 from .providers import MetadataProvider, ProviderEpisodeCatalog
+from .segment_counted_titles import (
+    SegmentCountedTitleAnalysis,
+    analyze_segment_counted_titles,
+    is_segment_counted_title_candidate,
+)
 
 _MIN_CATALOG_RESCUE_SCORE = 0.60
 _MIN_TITLE_OBSERVATIONS = 2
@@ -675,5 +680,112 @@ def aired_catalog_rescue(
         reasons=(
             "aired-catalog-rescue:unique-compatible-candidate",
             f"aired-catalog-rescue-winner:{winner.key}",
+        ),
+    )
+
+
+def segment_counted_title_rescue(
+    provider: MetadataProvider,
+    parses: tuple[ParseResult, ...],
+    ranked: tuple[CandidateEvidence, ...],
+    *,
+    minimum_gap: float,
+    suspicious_threshold: float,
+) -> StructuralCatalogDecision | None:
+    """Resolve a same-title show tie only after repeated exact title proof."""
+
+    eligible = tuple(
+        parse for parse in parses if is_segment_counted_title_candidate(parse)
+    )
+    if len(eligible) < 3:
+        return None
+    if len(ranked) < 2 or ranked[0].score < suspicious_threshold:
+        return None
+    top_score = ranked[0].score
+    contenders = tuple(
+        candidate for candidate in ranked if top_score - candidate.score < minimum_gap
+    )
+    if len(contenders) < 2:
+        return None
+
+    analyses: dict[ProviderIdentity, SegmentCountedTitleAnalysis] = {}
+    indeterminate: set[ProviderIdentity] = set()
+    extra_reasons: dict[ProviderIdentity, tuple[str, ...]] = {}
+    for candidate in contenders:
+        catalog = provider.episode_catalog(candidate.provider_identity)
+        request_reason = f"segment-counted-title-request:{catalog.request_key}"
+        if not catalog.resolved:
+            indeterminate.add(candidate.provider_identity)
+            extra_reasons[candidate.provider_identity] = (
+                request_reason,
+                "segment-counted-title-rescue:indeterminate-catalog",
+            )
+            continue
+        if catalog.errors:
+            indeterminate.add(candidate.provider_identity)
+            extra_reasons[candidate.provider_identity] = (
+                request_reason,
+                *(f"segment-counted-title-error:{error}" for error in catalog.errors),
+            )
+            continue
+        analysis = analyze_segment_counted_titles(parses, catalog)
+        analyses[candidate.provider_identity] = analysis
+        extra_reasons[candidate.provider_identity] = (
+            request_reason,
+            *analysis.reasons,
+        )
+
+    triggered = {
+        identity for identity, analysis in analyses.items() if analysis.triggered
+    }
+    if not triggered:
+        return None
+
+    enriched = tuple(
+        replace(
+            candidate,
+            reasons=(
+                *candidate.reasons,
+                *extra_reasons.get(candidate.provider_identity, ()),
+            ),
+        )
+        for candidate in ranked
+    )
+    if indeterminate:
+        return StructuralCatalogDecision(
+            winner=None,
+            candidates=enriched,
+            reasons=("segment-counted-title-rescue:indeterminate-candidate-catalog",),
+        )
+
+    proven = tuple(
+        identity
+        for identity in sorted(triggered, key=lambda item: item.key)
+        if analyses[identity].proven
+    )
+    if len(triggered) != 1 or len(proven) != 1:
+        return StructuralCatalogDecision(
+            winner=None,
+            candidates=enriched,
+            reasons=("segment-counted-title-rescue:no-unique-safe-candidate",),
+        )
+
+    winner = proven[0]
+    winner_first = tuple(
+        sorted(
+            enriched,
+            key=lambda candidate: (
+                candidate.provider_identity != winner,
+                -candidate.score,
+                candidate.provider_identity.key,
+            ),
+        )
+    )
+    return StructuralCatalogDecision(
+        winner=winner,
+        candidates=winner_first,
+        reasons=(
+            "segment-counted-title-rescue:unique-compatible-candidate",
+            f"segment-counted-title-rescue-winner:{winner.key}",
         ),
     )
