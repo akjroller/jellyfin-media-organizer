@@ -314,9 +314,7 @@ def _recover_equivalent_provider_episode_duplicates(
     claims_by_source = {
         source.source_key: claims
         for source in sources
-        if (
-            assignment := assignments.get(source.source_key)
-        ) is not None
+        if (assignment := assignments.get(source.source_key)) is not None
         and assignment.status is AssignmentStatus.SUSPICIOUS
         and (claims := _duplicate_provider_claims(assignment))
     }
@@ -342,7 +340,10 @@ def _recover_equivalent_provider_episode_duplicates(
                 valid = False
                 break
             assignment = result.assignments[0]
-            if assignment.status is not AssignmentStatus.MATCHED or not assignment.episodes:
+            if (
+                assignment.status is not AssignmentStatus.MATCHED
+                or not assignment.episodes
+            ):
                 valid = False
                 break
             complete_set = tuple(
@@ -636,7 +637,10 @@ def _logical_identity(record: PlanRecord) -> str:
 
 def _provider_episode_duplicate_collision_key(record: PlanRecord) -> str | None:
     evidence = record.evidence
-    if evidence is None or _PROVIDER_EPISODE_DUPLICATE_CANDIDATE not in evidence.reasons:
+    if (
+        evidence is None
+        or _PROVIDER_EPISODE_DUPLICATE_CANDIDATE not in evidence.reasons
+    ):
         return None
     if record.show is None or not record.provider_episodes:
         raise PlanningConfigurationError(
@@ -647,8 +651,7 @@ def _provider_episode_duplicate_collision_key(record: PlanRecord) -> str | None:
     )
     return (
         "provider-episode-collision:"
-        f"{record.show.provider_identity.key}:"
-        + ",".join(episode_ids)
+        f"{record.show.provider_identity.key}:" + ",".join(episode_ids)
     )
 
 
