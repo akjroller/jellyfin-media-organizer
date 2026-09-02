@@ -175,6 +175,7 @@ def test_unresolved_compacted_search_fails_closed() -> None:
     noise = ProviderShow(_identity("noise"), "Harbor Patrol", None)
     provider = Provider(
         searches={"Example Hero": (noise,)},
+        catalogs={_identity("noise"): _catalog("noise", ((9, 9),))},
         unresolved_searches=frozenset({"ExampleHero"}),
     )
 
@@ -198,7 +199,8 @@ def test_conflicting_candidate_metadata_from_compacted_search_fails_closed() -> 
             "ExampleHero": (
                 ProviderShow(_identity("shared"), "ExampleHero Adventures", None),
             ),
-        }
+        },
+        catalogs={_identity("shared"): _catalog("shared", ((9, 9),))},
     )
 
     result = resolve_show_group_with_provider(
