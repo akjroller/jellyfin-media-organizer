@@ -29,7 +29,9 @@ def _show(identity: ProviderIdentity, title: str, year: int = 2024) -> ProviderS
     return ProviderShow(identity, title, year)
 
 
-def _episode(identity: str, season: int, number: int, title: str = "Episode") -> ProviderEpisode:
+def _episode(
+    identity: str, season: int, number: int, title: str = "Episode"
+) -> ProviderEpisode:
     return ProviderEpisode(
         identity=ProviderIdentity("fixture", identity),
         season=season,
@@ -172,7 +174,9 @@ def test_legitimate_hyphenated_title_is_not_rewritten_after_normal_match() -> No
     assert result.status is ResolutionStatus.MATCHED
     assert result.show is not None
     assert result.show.provider_identity == ALPHA
-    assert all("release-prefix-fallback" not in reason for reason in result.evidence.reasons)
+    assert all(
+        "release-prefix-fallback" not in reason for reason in result.evidence.reasons
+    )
     assert "Man Adventures" not in provider.search_calls
 
 
@@ -306,8 +310,6 @@ def test_candidate_union_is_deterministic() -> None:
 
 
 def test_parent_confirmed_parser_stripping_remains_stronger_path() -> None:
-    parsed = parse_video_path(
-        "Example Series S01E01/TAG-Example Series S01E01.mkv"
-    )
+    parsed = parse_video_path("Example Series S01E01/TAG-Example Series S01E01.mkv")
 
     assert parsed.series_hint == "Example Series"
