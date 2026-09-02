@@ -322,3 +322,335 @@ def test_mixed_segment_rescue_is_input_order_deterministic() -> None:
     second = _resolve(MixedSegmentProvider(catalogs), tuple(reversed(_mixed_parses())))
 
     assert first == second
+
+
+def test_mixed_segment_rescue_allows_one_missing_title_with_strong_unique_evidence() -> (
+    None
+):
+    parses = (
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(1,),
+            segment_hint="a",
+            title_hint="First Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(1,),
+            segment_hint="b",
+            title_hint="Second Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(2,),
+            segment_hint="a",
+            title_hint="Third Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(2,),
+            segment_hint="b",
+            title_hint="Variant Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(3,),
+            title_hint="Full Episode",
+        ),
+    )
+    provider = MixedSegmentProvider(
+        {
+            ALPHA: _catalog(
+                ALPHA,
+                (
+                    _episode("alpha", "one", 1, 1, "First Story"),
+                    _episode("alpha", "two", 1, 2, "Second Story"),
+                    _episode("alpha", "three", 1, 3, "Third Story"),
+                ),
+            ),
+            BETA: _catalog(BETA, (_episode("beta", "other", 1, 1, "Unrelated Story"),)),
+        }
+    )
+
+    result = _resolve(provider, parses)
+
+    assert result.status is ResolutionStatus.MATCHED
+    assert result.show is not None
+    assert result.show.provider_identity == ALPHA
+    assert (
+        "mixed-segment-title-rescue:unique-partial-candidate" in result.evidence.reasons
+    )
+    alpha = next(
+        candidate
+        for candidate in result.evidence.candidates
+        if candidate.provider_identity == ALPHA
+    )
+    assert "mixed-segment-title-exact-matches:3/4" in alpha.reasons
+    assert "mixed-segment-title-missing:variant story" in alpha.reasons
+
+
+def test_mixed_segment_rescue_partial_evidence_requires_three_exact_titles() -> None:
+    parses = (
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(1,),
+            segment_hint="a",
+            title_hint="First Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(1,),
+            segment_hint="b",
+            title_hint="Second Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(2,),
+            segment_hint="a",
+            title_hint="Variant Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(3,),
+            title_hint="Full Episode",
+        ),
+    )
+    provider = MixedSegmentProvider(
+        {
+            ALPHA: _catalog(
+                ALPHA,
+                (
+                    _episode("alpha", "one", 1, 1, "First Story"),
+                    _episode("alpha", "two", 1, 2, "Second Story"),
+                ),
+            ),
+            BETA: _catalog(BETA, (_episode("beta", "other", 1, 1, "Unrelated Story"),)),
+        }
+    )
+
+    result = _resolve(provider, parses)
+
+    assert result.status is ResolutionStatus.SUSPICIOUS
+    assert result.show is None
+
+
+def test_mixed_segment_rescue_partial_evidence_requires_unique_best_candidate() -> None:
+    parses = (
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(1,),
+            segment_hint="a",
+            title_hint="First Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(1,),
+            segment_hint="b",
+            title_hint="Second Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(2,),
+            segment_hint="a",
+            title_hint="Third Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(2,),
+            segment_hint="b",
+            title_hint="Variant Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(3,),
+            title_hint="Full Episode",
+        ),
+    )
+    shared = (
+        _episode("shared", "one", 1, 1, "First Story"),
+        _episode("shared", "two", 1, 2, "Second Story"),
+        _episode("shared", "three", 1, 3, "Third Story"),
+    )
+    provider = MixedSegmentProvider(
+        {
+            ALPHA: _catalog(ALPHA, shared),
+            BETA: _catalog(BETA, shared),
+        }
+    )
+
+    result = _resolve(provider, parses)
+
+    assert result.status is ResolutionStatus.SUSPICIOUS
+    assert result.show is None
+    assert (
+        "mixed-segment-title-rescue:no-unique-compatible-candidate"
+        in result.evidence.reasons
+    )
+
+
+def test_mixed_segment_rescue_partial_evidence_requires_two_match_margin() -> None:
+    parses = (
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(1,),
+            segment_hint="a",
+            title_hint="First Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(1,),
+            segment_hint="b",
+            title_hint="Second Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(2,),
+            segment_hint="a",
+            title_hint="Third Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(2,),
+            segment_hint="b",
+            title_hint="Fourth Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(3,),
+            segment_hint="a",
+            title_hint="Variant Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(4,),
+            title_hint="Full Episode",
+        ),
+    )
+    provider = MixedSegmentProvider(
+        {
+            ALPHA: _catalog(
+                ALPHA,
+                (
+                    _episode("alpha", "one", 1, 1, "First Story"),
+                    _episode("alpha", "two", 1, 2, "Second Story"),
+                    _episode("alpha", "three", 1, 3, "Third Story"),
+                    _episode("alpha", "four", 1, 4, "Fourth Story"),
+                ),
+            ),
+            BETA: _catalog(
+                BETA,
+                (
+                    _episode("beta", "one", 1, 1, "First Story"),
+                    _episode("beta", "two", 1, 2, "Second Story"),
+                    _episode("beta", "three", 1, 3, "Third Story"),
+                ),
+            ),
+        }
+    )
+
+    result = _resolve(provider, parses)
+
+    assert result.status is ResolutionStatus.SUSPICIOUS
+    assert result.show is None
+    assert (
+        "mixed-segment-title-rescue:partial-margin-insufficient"
+        in result.evidence.reasons
+    )
+
+
+def test_mixed_segment_rescue_partial_evidence_requires_half_title_coverage() -> None:
+    parses = (
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(1,),
+            segment_hint="a",
+            title_hint="First Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(1,),
+            segment_hint="b",
+            title_hint="Second Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(2,),
+            segment_hint="a",
+            title_hint="Third Story",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(2,),
+            segment_hint="b",
+            title_hint="Missing Four",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(3,),
+            segment_hint="a",
+            title_hint="Missing Five",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(3,),
+            segment_hint="b",
+            title_hint="Missing Six",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(4,),
+            segment_hint="a",
+            title_hint="Missing Seven",
+        ),
+        ParseResult(
+            series_hint="Example Collection",
+            season=1,
+            episodes=(5,),
+            title_hint="Full Episode",
+        ),
+    )
+    provider = MixedSegmentProvider(
+        {
+            ALPHA: _catalog(
+                ALPHA,
+                (
+                    _episode("alpha", "one", 1, 1, "First Story"),
+                    _episode("alpha", "two", 1, 2, "Second Story"),
+                    _episode("alpha", "three", 1, 3, "Third Story"),
+                ),
+            ),
+            BETA: _catalog(BETA, (_episode("beta", "other", 1, 1, "Unrelated Story"),)),
+        }
+    )
+
+    result = _resolve(provider, parses)
+
+    assert result.status is ResolutionStatus.SUSPICIOUS
+    assert result.show is None
