@@ -97,7 +97,9 @@ class FixtureProvider:
             shows=(),
         )
 
-    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
         assert show_identity == SHOW_ID
         return self.catalog
 
@@ -130,8 +132,7 @@ def _records(
     catalog = overrides or OverrideCatalog(schema_version=2, shows=())
     sources = tuple(source for source, _parse in source_parses)
     classifications = {
-        source.relative_path: _classification(parse)
-        for source, parse in source_parses
+        source.relative_path: _classification(parse) for source, parse in source_parses
     }
     planned = _plan_resolved_group(
         sources,
@@ -169,9 +170,7 @@ def test_equivalent_provider_episode_claims_use_release_quality_winner() -> None
     assert decision.losers == (low.relative_path,)
     assert decision.destination_key.startswith("provider-episode-collision:")
     assert "release-quality-winner:" + high.relative_path in decision.evidence
-    assert any(
-        "no deletion is authorized" in reason for reason in decision.evidence
-    )
+    assert any("no deletion is authorized" in reason for reason in decision.evidence)
 
 
 def test_equal_quality_provider_episode_claims_remain_blocking() -> None:
@@ -271,7 +270,8 @@ def test_identical_multi_episode_claim_sets_can_reach_duplicate_selection() -> N
     assert records[high.relative_path].status is TerminalStatus.MATCHED
     assert records[low.relative_path].status is TerminalStatus.DUPLICATE
     assert [
-        episode.provider_identity for episode in records[high.relative_path].provider_episodes
+        episode.provider_identity
+        for episode in records[high.relative_path].provider_episodes
     ] == [EPISODE_1.identity, EPISODE_2.identity]
 
 
@@ -382,7 +382,9 @@ def test_provider_episode_duplicate_selection_is_input_order_deterministic() -> 
 
 
 def test_bd_remux_tokens_are_bluray_remux_without_changing_mode_policy() -> None:
-    spaced = parse_release_quality("Fabricated Series/Fabricated.S01E01.1080p.BD Remux.mkv")
+    spaced = parse_release_quality(
+        "Fabricated Series/Fabricated.S01E01.1080p.BD Remux.mkv"
+    )
     hyphenated = parse_release_quality(
         "Fabricated Series/Fabricated.S01E01.1080p.BD-Remux.mkv"
     )
