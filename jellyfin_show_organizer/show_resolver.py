@@ -9,7 +9,8 @@ from . import _show_resolver_core as _core
 from .models import CandidateEvidence, ParseResult, ProviderIdentity
 from .overrides import OverrideCatalog
 from .provider_aliases import TvmazeAliasProviderAdapter
-from .providers import MetadataProvider, ProviderShow
+from .providers import MetadataProvider, ProviderSearchSnapshot, ProviderShow
+from .show_structural_evidence import token_merge_queries
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
 ResolutionStatus = _core.ResolutionStatus
@@ -77,6 +78,180 @@ def _structural_candidate_reasons(
         f"provider-year:{show.year}",
         f"structural-year-compatible:{str(start <= show.year <= end).casefold()}",
     )
+
+
+class _MergedSearchProvider:
+    """Serve one augmented search snapshot while delegating all other metadata."""
+
+    def __init__(
+        self,
+        provider: MetadataProvider,
+        search_title: str,
+        snapshot: ProviderSearchSnapshot,
+    ) -> None:
+        self._provider = provider
+        self._search_title = search_title
+        self._snapshot = snapshot
+
+    @property
+    def provider_name(self) -> str:
+        return self._provider.provider_name
+
+    def search_shows(self, title: str) -> ProviderSearchSnapshot:
+        if title == self._search_title:
+            return self._snapshot
+        return self._provider.search_shows(title)
+
+    def episode_catalog(self, show_identity: ProviderIdentity):
+        return self._provider.episode_catalog(show_identity)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._provider, name)
+
+
+def _token_merge_retry_failure(
+    result: ShowResolution,
+    reasons: tuple[str, ...],
+) -> ShowResolution:
+    return replace(
+        result,
+        evidence=replace(
+            result.evidence,
+            method=f"{result.evidence.method}+weak-token-merge-retry",
+            reasons=(*result.evidence.reasons, *reasons),
+        ),
+    )
+
+
+def _weak_token_merge_resolution(
+    source_key: str,
+    parse_group: tuple[ParseResult, ...],
+    overrides: OverrideCatalog,
+    provider: MetadataProvider,
+    result: ShowResolution,
+) -> tuple[ShowResolution, MetadataProvider] | None:
+    """Retry deterministic token compaction only after weak exact-search evidence."""
+
+    if result.status is not ResolutionStatus.UNRESOLVED or result.show is not None:
+        return None
+    if "provider-evidence-below-threshold" not in result.evidence.reasons:
+        return None
+    if "provider-search-token-merge:attempted" in result.evidence.reasons:
+        return None
+
+    titles = _core._source_titles(parse_group)
+    source_title = _core._representative_title(titles)
+    override_matches = _core._matching_overrides(source_key, titles, overrides)
+    if len(override_matches) > 1:
+        return None
+    override = override_matches[0] if override_matches else None
+
+    search_title = source_title
+    if override is not None and override.preferred_title:
+        search_title = override.preferred_title
+    if search_title is None:
+        return None
+
+    merge_titles = token_merge_queries(search_title)
+    if len(merge_titles) != 1:
+        return None
+    merge_title = merge_titles[0]
+    retry_reasons = (
+        "provider-search-token-merge:attempted",
+        "provider-search-token-merge-trigger:weak-exact-candidates",
+        f"provider-search-token-merge-query:{normalize_show_identity(merge_title)}",
+    )
+
+    exact = provider.search_shows(search_title)
+    if not exact.resolved:
+        failed = _token_merge_retry_failure(
+            result,
+            (
+                *retry_reasons,
+                "provider-search-token-merge:exact-search-indeterminate",
+                exact.unresolved_reason or "provider-search-unresolved",
+            ),
+        )
+        return failed, provider
+    if not exact.shows:
+        failed = _token_merge_retry_failure(
+            result,
+            (*retry_reasons, "provider-search-token-merge:initial-candidates-not-reproducible"),
+        )
+        return failed, provider
+
+    merged = provider.search_shows(merge_title)
+    retry_reasons = (
+        *retry_reasons,
+        f"provider-search-token-merge-request:{merged.request_key}",
+        f"provider-search-token-merge-snapshot:{merged.cache_snapshot_id}",
+    )
+    if not merged.resolved:
+        failed = _token_merge_retry_failure(
+            result,
+            (
+                *retry_reasons,
+                "provider-search-token-merge:indeterminate",
+                merged.unresolved_reason or "provider-search-unresolved",
+            ),
+        )
+        return failed, provider
+
+    candidates_by_identity: dict[ProviderIdentity, ProviderShow] = {
+        candidate.identity: candidate for candidate in exact.shows
+    }
+    new_identity = False
+    for candidate in merged.shows:
+        previous = candidates_by_identity.get(candidate.identity)
+        if previous is not None and previous != candidate:
+            failed = _token_merge_retry_failure(
+                result,
+                (
+                    *retry_reasons,
+                    "provider-search-token-merge:conflicting-candidate-metadata",
+                    f"provider-identity:{candidate.identity.key}",
+                ),
+            )
+            return failed, provider
+        if previous is None:
+            new_identity = True
+        candidates_by_identity[candidate.identity] = candidate
+
+    complete_reasons = (*retry_reasons, "provider-search-token-merge:complete")
+    if not new_identity:
+        return _token_merge_retry_failure(result, complete_reasons), provider
+
+    combined = ProviderSearchSnapshot(
+        provider=exact.provider,
+        request_key=f"{exact.request_key}|{merged.request_key}",
+        cache_snapshot_id=f"{exact.cache_snapshot_id}|{merged.cache_snapshot_id}",
+        shows=tuple(
+            sorted(
+                candidates_by_identity.values(),
+                key=lambda candidate: (
+                    normalize_show_identity(candidate.title),
+                    candidate.title,
+                    candidate.identity.key,
+                ),
+            )
+        ),
+    )
+    retry_provider = _MergedSearchProvider(provider, search_title, combined)
+    retried = _core.resolve_show_group_with_provider(
+        source_key,
+        parse_group,
+        overrides,
+        retry_provider,
+    )
+    retried = replace(
+        retried,
+        evidence=replace(
+            retried.evidence,
+            method=f"{retried.evidence.method}+weak-token-merge-retry",
+            reasons=(*complete_reasons, *retried.evidence.reasons),
+        ),
+    )
+    return retried, retry_provider
 
 
 def _structural_year_resolution(
@@ -218,13 +393,24 @@ def resolve_show_group_with_provider(
         overrides,
         provider,
     )
+    active_provider: MetadataProvider = provider
+    retry = _weak_token_merge_resolution(
+        source_key,
+        parse_group,
+        overrides,
+        provider,
+        result,
+    )
+    if retry is not None:
+        result, active_provider = retry
+
     if _structural_year_span(source_key) is None:
         return result
     structural = _structural_year_resolution(
         source_key,
         parse_group,
         overrides,
-        provider,
+        active_provider,
         result,
     )
     return structural if structural is not None else result
