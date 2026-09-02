@@ -375,20 +375,26 @@ def _mixed_segment_title_rescue(
     if len(titles) < _MIN_TITLE_OBSERVATIONS:
         return None
 
-    outcomes: dict[ProviderIdentity, bool | None] = {}
+    match_counts: dict[ProviderIdentity, int | None] = {}
+    exact_compatibility: dict[ProviderIdentity, bool] = {}
+    partial_qualification: dict[ProviderIdentity, bool] = {}
     extra_reasons: dict[ProviderIdentity, tuple[str, ...]] = {}
     for candidate in sorted(ranked, key=lambda item: item.provider_identity.key):
         catalog = provider.episode_catalog(candidate.provider_identity)
         request_reason = f"mixed-segment-title-request:{catalog.request_key}"
         if not catalog.resolved:
-            outcomes[candidate.provider_identity] = None
+            match_counts[candidate.provider_identity] = None
+            exact_compatibility[candidate.provider_identity] = False
+            partial_qualification[candidate.provider_identity] = False
             extra_reasons[candidate.provider_identity] = (
                 request_reason,
                 "mixed-segment-title-rescue:indeterminate-catalog",
             )
             continue
         if catalog.errors:
-            outcomes[candidate.provider_identity] = None
+            match_counts[candidate.provider_identity] = None
+            exact_compatibility[candidate.provider_identity] = False
+            partial_qualification[candidate.provider_identity] = False
             extra_reasons[candidate.provider_identity] = (
                 request_reason,
                 *(f"mixed-segment-title-error:{error}" for error in catalog.errors),
@@ -402,21 +408,48 @@ def _mixed_segment_title_rescue(
                 by_title.setdefault(title, []).append(episode.identity)
 
         selected: list[ProviderIdentity] = []
+        missing = 0
+        ambiguous = 0
         reasons: list[str] = [request_reason]
-        compatible = True
         for title in titles:
             matches = tuple(by_title.get(title, ()))
-            if len(matches) != 1:
-                compatible = False
-                reason = "missing" if not matches else "ambiguous"
-                reasons.append(f"mixed-segment-title-{reason}:{title}")
-                break
-            selected.append(matches[0])
-        if compatible and len(set(selected)) != len(selected):
-            compatible = False
-            reasons.append("mixed-segment-title-distinct-titles-collapse")
-        reasons.append(f"mixed-segment-title-compatible:{str(compatible).casefold()}")
-        outcomes[candidate.provider_identity] = compatible
+            if len(matches) == 1:
+                selected.append(matches[0])
+            elif not matches:
+                missing += 1
+                reasons.append(f"mixed-segment-title-missing:{title}")
+            else:
+                ambiguous += 1
+                reasons.append(f"mixed-segment-title-ambiguous:{title}")
+
+        if len(set(selected)) != len(selected):
+            match_counts[candidate.provider_identity] = 0
+            exact_compatibility[candidate.provider_identity] = False
+            partial_qualification[candidate.provider_identity] = False
+            reasons.extend(
+                (
+                    "mixed-segment-title-distinct-titles-collapse",
+                    f"mixed-segment-title-exact-matches:0/{len(titles)}",
+                    "mixed-segment-title-compatible:false",
+                    "mixed-segment-title-partial-qualified:false",
+                )
+            )
+            extra_reasons[candidate.provider_identity] = tuple(reasons)
+            continue
+
+        exact_matches = len(selected)
+        exact = missing == 0 and ambiguous == 0 and exact_matches == len(titles)
+        partial = not exact and exact_matches >= 3 and exact_matches * 2 >= len(titles)
+        match_counts[candidate.provider_identity] = exact_matches
+        exact_compatibility[candidate.provider_identity] = exact
+        partial_qualification[candidate.provider_identity] = partial
+        reasons.extend(
+            (
+                f"mixed-segment-title-exact-matches:{exact_matches}/{len(titles)}",
+                f"mixed-segment-title-compatible:{str(exact).casefold()}",
+                f"mixed-segment-title-partial-qualified:{str(partial).casefold()}",
+            )
+        )
         extra_reasons[candidate.provider_identity] = tuple(reasons)
 
     enriched = tuple(
@@ -429,28 +462,74 @@ def _mixed_segment_title_rescue(
         )
         for candidate in ranked
     )
-    if any(value is None for value in outcomes.values()):
+    if any(value is None for value in match_counts.values()):
         return StructuralCatalogDecision(
             winner=None,
             candidates=enriched,
             reasons=("mixed-segment-title-rescue:indeterminate-candidate-catalog",),
         )
 
-    winners = tuple(
+    exact_winners = tuple(
         identity
         for identity, compatible in sorted(
-            outcomes.items(), key=lambda item: item[0].key
+            exact_compatibility.items(), key=lambda item: item[0].key
         )
         if compatible
     )
-    if len(winners) != 1:
+    if len(exact_winners) > 1:
         return StructuralCatalogDecision(
             winner=None,
             candidates=enriched,
             reasons=("mixed-segment-title-rescue:no-unique-compatible-candidate",),
         )
 
-    winner = winners[0]
+    partial_winner = False
+    if exact_winners:
+        winner = exact_winners[0]
+    else:
+        qualified = tuple(
+            identity
+            for identity, is_qualified in sorted(
+                partial_qualification.items(), key=lambda item: item[0].key
+            )
+            if is_qualified
+        )
+        if not qualified:
+            return StructuralCatalogDecision(
+                winner=None,
+                candidates=enriched,
+                reasons=("mixed-segment-title-rescue:no-unique-compatible-candidate",),
+            )
+
+        best_count = max(match_counts[identity] or 0 for identity in qualified)
+        best = tuple(
+            identity
+            for identity in qualified
+            if (match_counts[identity] or 0) == best_count
+        )
+        if len(best) != 1:
+            return StructuralCatalogDecision(
+                winner=None,
+                candidates=enriched,
+                reasons=("mixed-segment-title-rescue:no-unique-compatible-candidate",),
+            )
+        winner = best[0]
+        runner_up_count = max(
+            (
+                count or 0
+                for identity, count in match_counts.items()
+                if identity != winner
+            ),
+            default=0,
+        )
+        if best_count - runner_up_count < 2:
+            return StructuralCatalogDecision(
+                winner=None,
+                candidates=enriched,
+                reasons=("mixed-segment-title-rescue:partial-margin-insufficient",),
+            )
+        partial_winner = True
+
     winner_first = tuple(
         sorted(
             enriched,
@@ -465,7 +544,11 @@ def _mixed_segment_title_rescue(
         winner=winner,
         candidates=winner_first,
         reasons=(
-            "mixed-segment-title-rescue:unique-compatible-candidate",
+            (
+                "mixed-segment-title-rescue:unique-partial-candidate"
+                if partial_winner
+                else "mixed-segment-title-rescue:unique-compatible-candidate"
+            ),
             f"mixed-segment-title-rescue-winner:{winner.key}",
         ),
     )
