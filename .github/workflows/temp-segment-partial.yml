@@ -1,0 +1,60 @@
+name: Segment counted partial ambiguity check
+
+on:
+  push:
+    branches:
+      - fix/segment-counted-partial-ambiguity
+    paths:
+      - .github/workflows/temp-segment-partial.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/segment-counted-partial-ambiguity
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply focused change
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          segment = Path('jellyfin_show_organizer/segment_counted_titles.py')
+          text = segment.read_text(encoding='utf-8')
+          old = '''        and exact_match_count * 2 >= eligible_count\n        and ambiguous_count == 0\n        and one_to_one\n'''
+          new = '''        and exact_match_count * 2 >= eligible_count\n        and one_to_one\n'''
+          if text.count(old) != 1:
+              raise SystemExit('segment proof integration point changed')
+          segment.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          tests = Path('tests/local/test_segment_counted_title_remap.py')
+          text = tests.read_text(encoding='utf-8')
+          old_test = '''def test_ambiguous_catalog_title_blocks_family_proof() -> None:\n    catalog = _catalog(\n        ALPHA,\n        (\n            *_correct_catalog().episodes,\n            ProviderEpisode(\n                identity=ProviderIdentity("fixture", "alpha-duplicate"),\n                season=1,\n                number=8,\n                title="Fifth Story",\n            ),\n        ),\n    )\n    analysis = analyze_segment_counted_titles(_parses(), catalog)\n\n    assert not analysis.proven\n    assert analysis.ambiguous_count == 1\n\n\n'''
+          new_test = '''def test_ambiguous_catalog_title_does_not_poison_independent_family_proof() -> None:\n    catalog = _catalog(\n        ALPHA,\n        (\n            *_correct_catalog().episodes,\n            ProviderEpisode(\n                identity=ProviderIdentity("fixture", "alpha-duplicate"),\n                season=1,\n                number=8,\n                title="Fifth Story",\n            ),\n        ),\n    )\n    analysis = analyze_segment_counted_titles(_parses(), catalog)\n\n    assert analysis.proven\n    assert analysis.exact_match_count == 3\n    assert analysis.ambiguous_count == 1\n    assert analysis.one_to_one\n\n\ndef test_ambiguous_member_stays_blocked_while_unique_titles_remap() -> None:\n    catalog = _catalog(\n        ALPHA,\n        (\n            *_correct_catalog().episodes,\n            ProviderEpisode(\n                identity=ProviderIdentity("fixture", "alpha-duplicate"),\n                season=1,\n                number=8,\n                title="Fifth Story",\n            ),\n        ),\n    )\n    result = assign_episode_group_with_provider(\n        _show(),\n        _sources(),\n        Provider({ALPHA: catalog}),\n    )\n    by_source = {assignment.source_key: assignment for assignment in result.assignments}\n\n    assert result.status is AssignmentStatus.SUSPICIOUS\n    assert by_source["source-1.mkv"].status is AssignmentStatus.MATCHED\n    assert by_source["source-2.mkv"].status is AssignmentStatus.MATCHED\n    assert by_source["source-4.mkv"].status is AssignmentStatus.MATCHED\n    assert [\n        by_source[source].episodes[0].identity.value\n        for source in ("source-1.mkv", "source-2.mkv", "source-4.mkv")\n    ] == ["alpha-1", "alpha-2", "alpha-4"]\n    ambiguous = by_source["source-3.mkv"]\n    assert ambiguous.status is AssignmentStatus.SUSPICIOUS\n    assert not ambiguous.episodes\n    assert "segment-counted-title-remap:ambiguous-exact-title" in (\n        ambiguous.evidence.reasons\n    )\n\n\n'''
+          if text.count(old_test) != 1:
+              raise SystemExit('ambiguous regression integration point changed')
+          tests.write_text(text.replace(old_test, new_test, 1), encoding='utf-8')
+          PY
+      - name: Install development dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Format and check
+        run: |
+          python -m ruff format jellyfin_show_organizer/segment_counted_titles.py tests/local/test_segment_counted_title_remap.py
+          python -m ruff check jellyfin_show_organizer/segment_counted_titles.py tests/local/test_segment_counted_title_remap.py
+          python -m ruff format --check jellyfin_show_organizer/segment_counted_titles.py tests/local/test_segment_counted_title_remap.py
+          python -m mypy jellyfin_show_organizer tests
+          python -m pytest tests/local/test_segment_counted_title_remap.py
+      - name: Commit focused change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jellyfin_show_organizer/segment_counted_titles.py tests/local/test_segment_counted_title_remap.py
+          git commit -m "Isolate ambiguous segment title members"
+          git push origin HEAD:fix/segment-counted-partial-ambiguity
