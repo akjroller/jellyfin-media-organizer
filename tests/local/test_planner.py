@@ -121,10 +121,19 @@ def test_end_to_end_plan_is_cached_deterministic_and_non_mutating(
         "plan.sha256",
         "preflight.json",
         "preflight.txt",
+        "run-provenance.json",
         "sidecars.csv",
         "summary.txt",
         "unresolved.csv",
     }
+
+    provenance_payload = json.loads(
+        (tmp_path / "audit-first" / "run-provenance.json").read_text(encoding="utf-8")
+    )
+    assert provenance_payload["plan_sha256"] == first.preflight.plan_hash
+    assert provenance_payload["provider"]["mode"] == "online"
+    assert provenance_payload["provider"]["cache_snapshot_count"] == 2
+    assert str(tmp_path) not in json.dumps(provenance_payload)
 
     def reject_network(
         _url: str,

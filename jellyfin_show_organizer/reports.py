@@ -98,6 +98,7 @@ class AuditBundle:
     extras_csv: bytes
     duplicates_csv: bytes
     sidecars_csv: bytes
+    run_provenance_json: bytes | None = None
     preflight_json: bytes | None = None
     preflight_txt: bytes | None = None
 
@@ -116,6 +117,8 @@ class AuditBundle:
             files.append(("preflight.json", self.preflight_json))
         if self.preflight_txt is not None:
             files.append(("preflight.txt", self.preflight_txt))
+        if self.run_provenance_json is not None:
+            files.append(("run-provenance.json", self.run_provenance_json))
         files.append(("plan.json", self.plan_json))
         return tuple(files)
 
@@ -369,6 +372,8 @@ def render_summary(
 def render_audit_bundle(
     plan: OrganizerPlan,
     preflight: PreflightResult | None = None,
+    *,
+    run_provenance_json: bytes | None = None,
 ) -> AuditBundle:
     """Render every public audit artifact from the same immutable plan object."""
 
@@ -402,6 +407,7 @@ def render_audit_bundle(
         extras_csv=_render_record_csv(extras),
         duplicates_csv=render_duplicates_csv(plan),
         sidecars_csv=render_sidecars_csv(plan),
+        run_provenance_json=run_provenance_json,
         summary_txt=render_summary(plan, preflight),
         plan_sha256=f"{plan_hash}\n".encode("ascii"),
         decision_sha256=f"{decision_hash}\n".encode("ascii"),
@@ -423,6 +429,8 @@ def write_audit_bundle(
     output_dir: Path,
     plan: OrganizerPlan,
     preflight: PreflightResult | None = None,
+    *,
+    run_provenance_json: bytes | None = None,
 ) -> AuditBundle:
     """Publish an audit bundle without leaving a half-valid plan on failure.
 
@@ -431,7 +439,9 @@ def write_audit_bundle(
     marker. Any ordinary exception removes the newly created output directory.
     """
 
-    bundle = render_audit_bundle(plan, preflight)
+    bundle = render_audit_bundle(
+        plan, preflight, run_provenance_json=run_provenance_json
+    )
     output_dir.mkdir(parents=False, exist_ok=False)
     try:
         for name, data in bundle.files():

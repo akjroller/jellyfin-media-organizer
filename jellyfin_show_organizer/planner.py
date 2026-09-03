@@ -62,6 +62,11 @@ from .preflight import (
 )
 from .providers import MetadataProvider, ProviderEpisode, TvmazeProviderAdapter
 from .reports import AuditBundle, write_audit_bundle
+from .run_provenance import (
+    build_run_provenance,
+    detect_source_revision,
+    render_run_provenance,
+)
 from .schema import PLAN_SCHEMA_VERSION, stable_plan_hash
 from .show_resolver import (
     ResolutionStatus,
@@ -1107,9 +1112,28 @@ def execute_plan(
         max_path_length=config.max_path_length,
         max_component_length=config.max_component_length,
     )
-    bundle = write_audit_bundle(output_dir, plan, preflight)
     provider_failure = any(
         record.state is not CacheState.OK for record in cache.records.values()
+    )
+    provider_mode = (
+        "offline" if config.offline else "refresh" if config.refresh else "online"
+    )
+    run_provenance = build_run_provenance(
+        plan,
+        source_revision=detect_source_revision(),
+        provider_mode=provider_mode,
+        provider_failure=provider_failure,
+        max_path_length=config.max_path_length,
+        max_component_length=config.max_component_length,
+        overrides_configured=config.overrides_path is not None,
+        preflight_ready=preflight.ready,
+        preflight_finding_count=len(preflight.findings),
+    )
+    bundle = write_audit_bundle(
+        output_dir,
+        plan,
+        preflight,
+        run_provenance_json=render_run_provenance(run_provenance),
     )
     return PlanningOutcome(
         plan=plan,
