@@ -81,16 +81,38 @@ _SEGMENT_MIN_NEAR_TITLE_LENGTH = 8
 _SEGMENT_TRAILING_BRACKET_TAG = re.compile(
     r"\s*\[[^\]\r\n]{0,48}\d[^\]\r\n]{0,48}\]\s*$"
 )
+_SEGMENT_SOURCE_TRAILING_BRACKET_TAG = re.compile(
+    r"\[([^\]\r\n]{0,48}\d[^\]\r\n]{0,48})\](?=\.[A-Za-z0-9]{1,12}$|$)"
+)
 
 
-def _segment_source_title(value: str) -> str:
+def _segment_source_title(value: str, source_key: str) -> tuple[str, tuple[str, ...]]:
     cleaned = unicodedata.normalize("NFKC", value).strip()
     while True:
         trimmed = _SEGMENT_TRAILING_BRACKET_TAG.sub("", cleaned).rstrip(" ._-")
         if trimmed == cleaned:
             break
         cleaned = trimmed
-    return clean_episode_title_hint(cleaned)
+
+    normalized_title = clean_episode_title_hint(cleaned)
+    match = _SEGMENT_SOURCE_TRAILING_BRACKET_TAG.search(
+        unicodedata.normalize("NFKC", source_key)
+    )
+    if match is None:
+        return normalized_title, ()
+
+    normalized_tag = normalize_episode_title(match.group(1))
+    title_tokens = normalized_title.split()
+    tag_tokens = normalized_tag.split()
+    if (
+        not tag_tokens
+        or len(title_tokens) <= len(tag_tokens)
+        or title_tokens[-len(tag_tokens) :] != tag_tokens
+    ):
+        return normalized_title, ()
+
+    normalized_title = " ".join(title_tokens[: -len(tag_tokens)])
+    return normalized_title, (f"segment-title-source-bracket-tag:{normalized_tag}",)
 
 
 def _segment_equivalence_key(normalized_title: str) -> str:
@@ -600,7 +622,9 @@ def _segment_assignment(
             f"catalog-request:{request_key}",
         )
 
-    normalized_title = _segment_source_title(parse.title_hint)
+    normalized_title, source_title_reasons = _segment_source_title(
+        parse.title_hint, source.source_key
+    )
     candidates = _segment_catalog_candidates(parse, catalog)
     matches = tuple(
         episode
@@ -616,13 +640,17 @@ def _segment_assignment(
             "episode-catalog",
             f"numbering-mode:{show.numbering_mode.value}",
             f"segment-hint:{parse.segment_hint.casefold()}",
+            *source_title_reasons,
             f"ambiguous-segment-title-match:{normalized_title}",
             f"catalog-request:{request_key}",
         )
 
     if len(matches) == 1:
         episode = matches[0]
-        match_reasons = (f"segment-title-match:{normalized_title}",)
+        match_reasons = (
+            *source_title_reasons,
+            f"segment-title-match:{normalized_title}",
+        )
     else:
         equivalence_key = _segment_equivalence_key(normalized_title)
         equivalent = tuple(
@@ -639,12 +667,16 @@ def _segment_assignment(
                 "episode-catalog",
                 f"numbering-mode:{show.numbering_mode.value}",
                 f"segment-hint:{parse.segment_hint.casefold()}",
+                *source_title_reasons,
                 f"ambiguous-segment-title-equivalent-match:{normalized_title}",
                 f"catalog-request:{request_key}",
             )
         if len(equivalent) == 1:
             episode = equivalent[0]
-            match_reasons = (f"segment-title-equivalent-match:{normalized_title}",)
+            match_reasons = (
+                *source_title_reasons,
+                f"segment-title-equivalent-match:{normalized_title}",
+            )
         else:
             source_key = _segment_equivalence_key(normalized_title)
             scored: list[tuple[float, ProviderEpisode]] = []
@@ -671,6 +703,7 @@ def _segment_assignment(
                     "episode-catalog",
                     f"numbering-mode:{show.numbering_mode.value}",
                     f"segment-hint:{parse.segment_hint.casefold()}",
+                    *source_title_reasons,
                     f"missing-segment-title-match:{normalized_title}",
                     f"catalog-request:{request_key}",
                 )
@@ -684,6 +717,7 @@ def _segment_assignment(
                     "episode-catalog",
                     f"numbering-mode:{show.numbering_mode.value}",
                     f"segment-hint:{parse.segment_hint.casefold()}",
+                    *source_title_reasons,
                     f"ambiguous-segment-title-near-match:{normalized_title}",
                     f"segment-title-near-score:{top_score:.3f}",
                     f"segment-title-near-runner:{runner_score:.3f}",
@@ -691,6 +725,7 @@ def _segment_assignment(
                 )
             episode = top_episode
             match_reasons = (
+                *source_title_reasons,
                 f"segment-title-near-match:{normalized_title}",
                 f"segment-title-near-score:{top_score:.3f}",
             )

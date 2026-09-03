@@ -462,3 +462,83 @@ def test_segment_title_uses_source_season_to_disambiguate_repeated_title(
     assignment = result.assignments[0]
     assert assignment.status is AssignmentStatus.MATCHED
     assert assignment.episodes[0].tvmaze_episode_id == 3006
+
+
+def test_segment_title_recovers_flattened_numeric_bracket_tag(tmp_path: Path) -> None:
+    catalog = [{"id": 3010, "season": 1, "number": 20, "name": "Hooky"}]
+    result = assign_episode_group(
+        _show(NumberingMode.SEGMENT_TITLE),
+        (
+            SourceEpisodeInput(
+                "Show - S01E20a - Hooky [Fester1500].mkv",
+                ParseResult(
+                    season=1,
+                    episodes=(20,),
+                    segment_hint="a",
+                    title_hint="Hooky Fester1500",
+                ),
+            ),
+        ),
+        TvmazeCatalogCache(tmp_path / "cache"),
+        CountingGetter(catalog),
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].tvmaze_episode_id == 3010
+    assert "segment-title-source-bracket-tag:fester1500" in assignment.evidence.reasons
+    assert "segment-title-match:hooky" in assignment.evidence.reasons
+
+
+def test_segment_title_does_not_strip_unproven_plain_suffix(tmp_path: Path) -> None:
+    catalog = [{"id": 3011, "season": 1, "number": 20, "name": "Hooky"}]
+    result = assign_episode_group(
+        _show(NumberingMode.SEGMENT_TITLE),
+        (
+            SourceEpisodeInput(
+                "Show - S01E20a - Hooky Fester1500.mkv",
+                ParseResult(
+                    season=1,
+                    episodes=(20,),
+                    segment_hint="a",
+                    title_hint="Hooky Fester1500",
+                ),
+            ),
+        ),
+        TvmazeCatalogCache(tmp_path / "cache"),
+        CountingGetter(catalog),
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.UNRESOLVED
+    assert not assignment.episodes
+    assert not any(
+        reason.startswith("segment-title-source-bracket-tag:")
+        for reason in assignment.evidence.reasons
+    )
+
+
+def test_segment_title_keeps_nonnumeric_bracket_suffix_conservative(
+    tmp_path: Path,
+) -> None:
+    catalog = [{"id": 3012, "season": 1, "number": 20, "name": "Hooky"}]
+    result = assign_episode_group(
+        _show(NumberingMode.SEGMENT_TITLE),
+        (
+            SourceEpisodeInput(
+                "Show - S01E20a - Hooky [Remastered].mkv",
+                ParseResult(
+                    season=1,
+                    episodes=(20,),
+                    segment_hint="a",
+                    title_hint="Hooky Remastered",
+                ),
+            ),
+        ),
+        TvmazeCatalogCache(tmp_path / "cache"),
+        CountingGetter(catalog),
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.UNRESOLVED
+    assert not assignment.episodes
