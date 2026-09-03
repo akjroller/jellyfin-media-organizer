@@ -260,7 +260,7 @@ def test_insufficient_exact_title_evidence_does_not_prove_remap() -> None:
     assert analysis.exact_match_count == 2
 
 
-def test_ambiguous_catalog_title_blocks_family_proof() -> None:
+def test_ambiguous_catalog_title_does_not_poison_independent_family_proof() -> None:
     catalog = _catalog(
         ALPHA,
         (
@@ -275,8 +275,46 @@ def test_ambiguous_catalog_title_blocks_family_proof() -> None:
     )
     analysis = analyze_segment_counted_titles(_parses(), catalog)
 
-    assert not analysis.proven
+    assert analysis.proven
+    assert analysis.exact_match_count == 3
     assert analysis.ambiguous_count == 1
+    assert analysis.one_to_one
+
+
+def test_ambiguous_member_stays_blocked_while_unique_titles_remap() -> None:
+    catalog = _catalog(
+        ALPHA,
+        (
+            *_correct_catalog().episodes,
+            ProviderEpisode(
+                identity=ProviderIdentity("fixture", "alpha-duplicate"),
+                season=1,
+                number=8,
+                title="Fifth Story",
+            ),
+        ),
+    )
+    result = assign_episode_group_with_provider(
+        _show(),
+        _sources(),
+        Provider({ALPHA: catalog}),
+    )
+    by_source = {assignment.source_key: assignment for assignment in result.assignments}
+
+    assert result.status is AssignmentStatus.SUSPICIOUS
+    assert by_source["source-1.mkv"].status is AssignmentStatus.MATCHED
+    assert by_source["source-2.mkv"].status is AssignmentStatus.MATCHED
+    assert by_source["source-4.mkv"].status is AssignmentStatus.MATCHED
+    assert [
+        by_source[source].episodes[0].identity.value
+        for source in ("source-1.mkv", "source-2.mkv", "source-4.mkv")
+    ] == ["alpha-1", "alpha-2", "alpha-4"]
+    ambiguous = by_source["source-3.mkv"]
+    assert ambiguous.status is AssignmentStatus.SUSPICIOUS
+    assert not ambiguous.episodes
+    assert "segment-counted-title-remap:ambiguous-exact-title" in (
+        ambiguous.evidence.reasons
+    )
 
 
 def test_multiple_sources_cannot_collapse_to_same_provider_episode() -> None:

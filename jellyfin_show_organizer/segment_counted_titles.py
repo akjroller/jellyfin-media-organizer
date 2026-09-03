@@ -131,7 +131,6 @@ def analyze_segment_counted_titles(
         triggered
         and eligible_count >= _MIN_EXACT_MATCHES
         and exact_match_count * 2 >= eligible_count
-        and ambiguous_count == 0
         and one_to_one
     )
     return SegmentCountedTitleAnalysis(
