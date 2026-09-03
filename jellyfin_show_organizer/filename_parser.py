@@ -64,6 +64,10 @@ _SEASON_NOISE = re.compile(
     r"(?=$|[ ._\-\])])"
 )
 _GENERIC_SEASON_DIR = re.compile(r"(?i)^(?:season[ ._-]*\d{1,2}|s\d{1,2})$")
+_SEASON_COLLECTION = re.compile(
+    r"(?i)^(?P<series>.+?)[ ._-]+(?:s|season[ ._-]*)(?P<season>\d{1,2})"
+    r"(?=$|[ ._-])"
+)
 _CHECKSUM = re.compile(r"(?i)(?:^|\s)[A-F0-9]{8}(?=$|\s)")
 _UNBRACKETED_RELEASE_PREFIX = re.compile(r"^(?P<tag>[A-Za-z0-9]+)-(?P<series>.+)$")
 
@@ -177,6 +181,85 @@ def _fallback_series(path: PurePosixPath) -> tuple[str | None, int | None]:
     return None, None
 
 
+def _compact_parent_abbreviation_matches(compact: str, parent: str) -> bool:
+    compact_tokens = re.findall(r"[A-Za-z0-9]+", _normalize_text(compact).casefold())
+    parent_tokens = re.findall(r"[A-Za-z0-9]+", _normalize_text(parent).casefold())
+    if len(compact_tokens) != 1 or not 2 <= len(parent_tokens) <= 5:
+        return False
+    if any(len(token) < 3 for token in parent_tokens):
+        return False
+
+    value = compact_tokens[0]
+    solutions = 0
+
+    def walk(token_index: int, offset: int, shortened: bool) -> None:
+        nonlocal solutions
+        if solutions > 1:
+            return
+        if token_index == len(parent_tokens):
+            if offset == len(value) and shortened:
+                solutions += 1
+            return
+        token = parent_tokens[token_index]
+        remaining_tokens = len(parent_tokens) - token_index - 1
+        max_length = min(len(token), len(value) - offset - 2 * remaining_tokens)
+        for length in range(2, max_length + 1):
+            piece = value[offset : offset + length]
+            if token.startswith(piece):
+                walk(
+                    token_index + 1,
+                    offset + length,
+                    shortened or length < len(token),
+                )
+
+    walk(0, 0, False)
+    return solutions == 1
+
+
+def _season_collection_context(
+    path: PurePosixPath,
+    leaf_series: str | None,
+    episode: int,
+) -> tuple[str, int, int | None] | None:
+    if leaf_series is None or episode <= 0:
+        return None
+    leaf_tokens = re.findall(r"[A-Za-z0-9]+", _normalize_text(leaf_series).casefold())
+    if len(leaf_tokens) < 3:
+        return None
+
+    candidates: list[tuple[str, int, int | None]] = []
+    for component in reversed(path.parts[:-1]):
+        match = _SEASON_COLLECTION.search(component)
+        if match is None:
+            continue
+        parent_series, parent_year = _series_and_year(match.group("series"))
+        if parent_series is None:
+            continue
+        parent_tokens = re.findall(
+            r"[A-Za-z0-9]+", _normalize_text(parent_series).casefold()
+        )
+        if len(parent_tokens) < 2:
+            continue
+        exact = leaf_tokens == parent_tokens
+        one_suffix = (
+            len(leaf_tokens) == len(parent_tokens) + 1
+            and leaf_tokens[: len(parent_tokens)] == parent_tokens
+            and len(leaf_tokens[-1]) >= 3
+            and not leaf_tokens[-1].isdigit()
+        )
+        if not exact and not one_suffix:
+            continue
+        candidates.append((parent_series, int(match.group("season")), parent_year))
+
+    unique = {
+        (series.casefold(), season, year): (series, season, year)
+        for series, season, year in candidates
+    }
+    if len(unique) != 1:
+        return None
+    return next(iter(unique.values()))
+
+
 def _parent_confirmed_prefixed_series(
     stem: str,
     path: PurePosixPath,
@@ -211,7 +294,10 @@ def _parent_confirmed_prefixed_series(
     parent_series, parent_year = _series_and_year(parent[: parent_match.start()])
     if remainder_series is None or parent_series is None:
         return None
-    if remainder_series.casefold() != parent_series.casefold():
+    if (
+        remainder_series.casefold() != parent_series.casefold()
+        and not _compact_parent_abbreviation_matches(remainder_series, parent_series)
+    ):
         return None
     if (
         remainder_year is not None
@@ -422,10 +508,22 @@ def parse_video_path(relative_path: str) -> ParseResult:
     if match is not None:
         source = match.group("series")
         series, year = _series_and_year(source)
+        episode = int(match.group("episode"))
+        season_context = _season_collection_context(path, series, episode)
+        if season_context is not None:
+            context_series, context_season, context_year = season_context
+            return ParseResult(
+                series_hint=context_series,
+                season=context_season,
+                episodes=(episode,),
+                year=year if year is not None else context_year,
+                embedded_tvmaze_id=embedded_id,
+                title_hint=_title_hint(cleaned_stem, match.end()),
+            )
         return ParseResult(
             series_hint=series,
             series_aliases=_series_aliases(series, source),
-            absolute_episode=int(match.group("episode")),
+            absolute_episode=episode,
             year=year,
             embedded_tvmaze_id=embedded_id,
             title_hint=_title_hint(cleaned_stem, match.end()),
@@ -435,10 +533,22 @@ def parse_video_path(relative_path: str) -> ParseResult:
     if match is not None and _bare_absolute_is_unambiguous(path, cleaned_stem, match):
         source = match.group("series")
         series, year = _series_and_year(source)
+        episode = int(match.group("episode"))
+        season_context = _season_collection_context(path, series, episode)
+        if season_context is not None:
+            context_series, context_season, context_year = season_context
+            return ParseResult(
+                series_hint=context_series,
+                season=context_season,
+                episodes=(episode,),
+                year=year if year is not None else context_year,
+                embedded_tvmaze_id=embedded_id,
+                title_hint=_title_hint(cleaned_stem, match.end()),
+            )
         return ParseResult(
             series_hint=series,
             series_aliases=_series_aliases(series, source),
-            absolute_episode=int(match.group("episode")),
+            absolute_episode=episode,
             year=year,
             embedded_tvmaze_id=embedded_id,
             title_hint=_title_hint(cleaned_stem, match.end()),

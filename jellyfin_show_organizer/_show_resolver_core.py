@@ -69,7 +69,10 @@ class _CatalogTieBreak:
 
 
 def normalize_show_identity(value: str) -> str:
-    normalized = unicodedata.normalize("NFKC", value).casefold()
+    decomposed = unicodedata.normalize("NFKD", value)
+    normalized = "".join(
+        character for character in decomposed if unicodedata.category(character) != "Mn"
+    ).casefold()
     normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
     return " ".join(normalized.split())
 

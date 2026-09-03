@@ -30,6 +30,7 @@ from .providers import (
 from .segment_counted_titles import (
     analyze_segment_counted_titles,
     is_segment_counted_title_candidate,
+    recover_unique_near_segment_titles,
 )
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
@@ -661,6 +662,10 @@ def _apply_segment_counted_title_remap(
     observations = {
         observation.parse_index: observation for observation in analysis.observations
     }
+    recoveries = {
+        recovery.parse_index: recovery
+        for recovery in recover_unique_near_segment_titles(parses, catalog, analysis)
+    }
     remapped: list[SourceEpisodeAssignment] = []
     for index, source in enumerate(sources):
         assignment = by_source[source.source_key]
@@ -735,25 +740,33 @@ def _apply_segment_counted_title_remap(
             )
             continue
         episode = observation.episode
+        recovery_reasons: tuple[str, ...] = ()
         if episode is None:
-            remapped.append(
-                SourceEpisodeAssignment(
-                    source_key=source.source_key,
-                    status=AssignmentStatus.UNRESOLVED,
-                    episodes=(),
-                    evidence=MatchEvidence(
-                        method="segment-counted-title-remap",
-                        confidence=0.0,
-                        reasons=(
-                            *base_reasons,
-                            "segment-counted-title-remap:group-proven",
-                            "segment-counted-title-remap:missing-exact-title-proof",
-                            f"segment-counted-title:{observation.normalized_title}",
+            recovery = recoveries.get(index)
+            if recovery is None:
+                remapped.append(
+                    SourceEpisodeAssignment(
+                        source_key=source.source_key,
+                        status=AssignmentStatus.UNRESOLVED,
+                        episodes=(),
+                        evidence=MatchEvidence(
+                            method="segment-counted-title-remap",
+                            confidence=0.0,
+                            reasons=(
+                                *base_reasons,
+                                "segment-counted-title-remap:group-proven",
+                                "segment-counted-title-remap:missing-exact-title-proof",
+                                f"segment-counted-title:{observation.normalized_title}",
+                            ),
                         ),
-                    ),
+                    )
                 )
+                continue
+            episode = recovery.episode
+            recovery_reasons = (
+                "segment-counted-title-remap:unique-near-title-proof",
+                f"segment-counted-title-near-score:{recovery.score:.3f}",
             )
-            continue
         assert episode.number is not None
         assert source.parse.season is not None
         source_coordinates = ",".join(
@@ -771,6 +784,7 @@ def _apply_segment_counted_title_remap(
                     reasons=(
                         *base_reasons,
                         "segment-counted-title-remap:group-proven",
+                        *recovery_reasons,
                         f"segment-counted-title:{observation.normalized_title}",
                         f"segment-counted-source-coordinates:{source_coordinates}",
                         "segment-counted-provider-coordinate:"
