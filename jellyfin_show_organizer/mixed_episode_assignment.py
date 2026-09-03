@@ -51,6 +51,40 @@ _SOURCE_DATE = re.compile(
     r"(?<!\d)(?P<year>(?:18|19|20|21)\d{2})[-._]"
     r"(?P<month>0[1-9]|1[0-2])[-._](?P<day>0[1-9]|[12]\d|3[01])(?!\d)"
 )
+_SOURCE_AIRED_DATE = re.compile(
+    r"(?i)(?<![a-z0-9])aired(?![a-z0-9])[ ._(:-]*"
+    r"(?P<month>jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
+    r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|"
+    r"nov(?:ember)?|dec(?:ember)?)[ ._-]+"
+    r"(?P<day>\d{1,2})(?:st|nd|rd|th)?[,]?[ ._-]+"
+    r"(?P<year>\d{2}|\d{4})(?!\d)"
+)
+_MONTH_NUMBERS = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
 _PRE_PREMIERE_CONTEXT = re.compile(
     r"(?i)(?<![a-z0-9])(?P<context>shorts?|pilots?|specials?|unaired)(?![a-z0-9])"
 )
@@ -87,12 +121,32 @@ def _annotate_accessory(
     )
 
 
+def _expand_two_digit_year(value: int) -> int:
+    """Expand human aired years with a fixed 1950/2050 pivot."""
+
+    if value < 0 or value > 99:
+        raise ValueError("two-digit year must be between 0 and 99")
+    return 2000 + value if value < 50 else 1900 + value
+
+
 def _source_dates(source_key: str) -> tuple[str, ...]:
     values: set[str] = set()
     for match in _SOURCE_DATE.finditer(source_key):
         candidate = f"{match.group('year')}-{match.group('month')}-{match.group('day')}"
         try:
             values.add(date.fromisoformat(candidate).isoformat())
+        except ValueError:
+            continue
+
+    for match in _SOURCE_AIRED_DATE.finditer(source_key):
+        month = _MONTH_NUMBERS[match.group("month").casefold()]
+        day = int(match.group("day"))
+        year_text = match.group("year")
+        year = int(year_text)
+        if len(year_text) == 2:
+            year = _expand_two_digit_year(year)
+        try:
+            values.add(date(year, month, day).isoformat())
         except ValueError:
             continue
     return tuple(sorted(values))

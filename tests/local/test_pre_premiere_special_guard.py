@@ -7,6 +7,7 @@ from jellyfin_show_organizer.episode_assignment import (
     SourceEpisodeInput,
     assign_episode_group_with_provider,
 )
+from jellyfin_show_organizer.mixed_episode_assignment import _source_dates
 from jellyfin_show_organizer.models import (
     CanonicalShow,
     NumberingMode,
@@ -110,6 +111,20 @@ def _regular_source() -> SourceEpisodeInput:
     )
 
 
+def _human_aired_source(
+    aired_text: str,
+    *,
+    context: str = "Shorts",
+) -> SourceEpisodeInput:
+    return SourceEpisodeInput(
+        source_key=(
+            "Fabricated Series/"
+            f"{context}/Fabricated Series - 001 - Early Short ({aired_text}).mkv"
+        ),
+        parse=ParseResult(absolute_episode=1, title_hint="Early Short"),
+    )
+
+
 def _by_source(result):
     return {assignment.source_key: assignment for assignment in result.assignments}
 
@@ -131,6 +146,84 @@ def test_pre_series_short_without_provider_special_stays_unresolved() -> None:
     )
     assert assignments[regular.source_key].status is AssignmentStatus.MATCHED
     assert assignments[regular.source_key].episodes[0].identity == REGULAR_ID
+
+
+def test_human_aired_date_activates_pre_premiere_guard() -> None:
+    short = _human_aired_source("aired Sep 4 98")
+    special = _special(SPECIAL_A_ID, "Early Short", airdate="1998-09-04")
+    result = assign_episode_group_with_provider(
+        SHOW,
+        (short,),
+        FixtureProvider((special, _regular())),
+    )
+    assignment = result.assignments[0]
+
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].identity == SPECIAL_A_ID
+    assert "pre-premiere-source-date:1998-09-04" in assignment.evidence.reasons
+
+
+def test_full_month_four_digit_human_aired_date_is_supported() -> None:
+    short = _human_aired_source("aired September 4, 1998")
+    special = _special(SPECIAL_A_ID, "Early Short", airdate="1998-09-04")
+    result = assign_episode_group_with_provider(
+        SHOW,
+        (short,),
+        FixtureProvider((special, _regular())),
+    )
+
+    assert result.assignments[0].status is AssignmentStatus.MATCHED
+    assert result.assignments[0].episodes[0].identity == SPECIAL_A_ID
+
+
+def test_human_aired_two_digit_year_uses_fixed_pivot() -> None:
+    assert _source_dates("aired Jan 2 49") == ("2049-01-02",)
+    assert _source_dates("aired Jan 2 50") == ("1950-01-02",)
+
+
+def test_invalid_human_aired_date_is_ignored() -> None:
+    source = _human_aired_source("aired Feb 30 98")
+    result = assign_episode_group_with_provider(
+        SHOW,
+        (source,),
+        FixtureProvider((_regular(),)),
+    )
+
+    assert result.assignments[0].status is AssignmentStatus.MATCHED
+    assert result.assignments[0].episodes[0].identity == REGULAR_ID
+    assert result.assignments[0].evidence.method == "episode-catalog"
+
+
+def test_month_text_without_aired_marker_is_not_a_date_signal() -> None:
+    source = _human_aired_source("Sep 4 98")
+    result = assign_episode_group_with_provider(
+        SHOW,
+        (source,),
+        FixtureProvider((_regular(),)),
+    )
+
+    assert result.assignments[0].status is AssignmentStatus.MATCHED
+    assert result.assignments[0].episodes[0].identity == REGULAR_ID
+    assert result.assignments[0].evidence.method == "episode-catalog"
+
+
+def test_human_aired_date_without_special_context_keeps_normal_assignment() -> None:
+    source = SourceEpisodeInput(
+        source_key=(
+            "Fabricated Series/Archive/"
+            "Fabricated Series - 001 - Opening Story (aired Sep 4 98).mkv"
+        ),
+        parse=ParseResult(absolute_episode=1, title_hint="Opening Story"),
+    )
+    result = assign_episode_group_with_provider(
+        SHOW,
+        (source,),
+        FixtureProvider((_regular(),)),
+    )
+
+    assert result.assignments[0].status is AssignmentStatus.MATCHED
+    assert result.assignments[0].episodes[0].identity == REGULAR_ID
+    assert result.assignments[0].evidence.method == "episode-catalog"
 
 
 def test_pre_series_short_can_match_unique_non_regular_catalog_entry() -> None:
