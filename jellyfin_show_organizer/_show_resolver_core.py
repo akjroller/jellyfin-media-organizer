@@ -27,6 +27,7 @@ from .show_alias_evidence import (
 )
 from .show_structural_evidence import (
     aired_catalog_rescue,
+    catalog_coordinate_title_rescue,
     catalog_title_tiebreak,
     segment_counted_title_rescue,
     structural_title_score,
@@ -868,6 +869,7 @@ def resolve_show_group_with_provider(
     tie_break = None
     title_tie_break = None
     aired_rescue = None
+    coordinate_title_rescue = None
     rescue = None
     if not alias_indeterminate:
         mode = _numbering_mode(override)
@@ -1010,6 +1012,49 @@ def resolve_show_group_with_provider(
                 )
 
         if mode is NumberingMode.AIRED:
+            coordinate_title_rescue = catalog_coordinate_title_rescue(
+                provider, parse_group, active_ranked
+            )
+            if (
+                coordinate_title_rescue is not None
+                and coordinate_title_rescue.winner is not None
+            ):
+                provider_show = next(
+                    candidate
+                    for candidate in provider_candidates
+                    if candidate.identity == coordinate_title_rescue.winner
+                )
+                title = _preferred_title(override, source_title, provider_show.title)
+                assert title is not None
+                return _resolved_show_result(
+                    source_key=source_key,
+                    parse_group=parse_group,
+                    override=override,
+                    provider=provider,
+                    provider_identity=provider_show.identity,
+                    title=title,
+                    year=(
+                        provider_show.year
+                        if provider_show.year is not None
+                        else year_hint
+                    ),
+                    method=f"{method}+catalog-coordinate-title-rescue",
+                    confidence=top.score,
+                    reasons=(
+                        *search_reasons,
+                        *(alias_result.reasons if alias_result is not None else ()),
+                        *(tie_break.reasons if tie_break is not None else ()),
+                        *(
+                            title_tie_break.reasons
+                            if title_tie_break is not None
+                            else ()
+                        ),
+                        *coordinate_title_rescue.reasons,
+                        f"candidate-gap:{gap:.3f}",
+                    ),
+                    candidates=coordinate_title_rescue.candidates,
+                )
+
             aired_rescue = aired_catalog_rescue(provider, parse_group, active_ranked)
             if aired_rescue is not None and aired_rescue.winner is not None:
                 provider_show = next(
@@ -1101,6 +1146,8 @@ def resolve_show_group_with_provider(
     candidates = active_ranked
     if title_tie_break is not None:
         candidates = title_tie_break.candidates
+    elif coordinate_title_rescue is not None:
+        candidates = coordinate_title_rescue.candidates
     elif aired_rescue is not None:
         candidates = aired_rescue.candidates
     elif tie_break is not None:
@@ -1119,6 +1166,11 @@ def resolve_show_group_with_provider(
                 *(alias_result.reasons if alias_result is not None else ()),
                 *(tie_break.reasons if tie_break is not None else ()),
                 *(title_tie_break.reasons if title_tie_break is not None else ()),
+                *(
+                    coordinate_title_rescue.reasons
+                    if coordinate_title_rescue is not None
+                    else ()
+                ),
                 *(aired_rescue.reasons if aired_rescue is not None else ()),
                 *(rescue.reasons if rescue is not None else ()),
                 f"candidate-gap:{gap:.3f}",
