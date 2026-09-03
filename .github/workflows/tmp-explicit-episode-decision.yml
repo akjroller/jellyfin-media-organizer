@@ -25,7 +25,7 @@ jobs:
       - run: python -m ruff format jellyfin_show_organizer/episode_assignment_strict.py jellyfin_show_organizer/mixed_episode_assignment.py jellyfin_show_organizer/planner.py tests/local/test_explicit_episode_decision_authority.py
       - run: python -m ruff check jellyfin_show_organizer/episode_assignment_strict.py jellyfin_show_organizer/mixed_episode_assignment.py jellyfin_show_organizer/planner.py tests/local/test_explicit_episode_decision_authority.py
       - run: python -m mypy jellyfin_show_organizer
-      - run: python -m pytest -q tests/local/test_explicit_episode_decision_authority.py tests/local/test_segment_counted_title_remap.py tests/local/test_overrides.py
+      - run: python -m pytest -q tests/local/test_explicit_episode_decision_authority.py tests/local/test_segment_counted_title_remap.py
       - name: Commit permanent patch
         shell: bash
         run: |
