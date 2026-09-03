@@ -25,6 +25,7 @@ jobs:
           python .github/scripts/temp_cleanup_parser.py
           python .github/scripts/temp_cleanup_segment.py
           python .github/scripts/temp_cleanup_tests.py
+          python .github/scripts/temp_cleanup_fixture_fix.py
       - name: Install development dependencies
         run: python -m pip install -e '.[dev]'
       - name: Format and focused checks
