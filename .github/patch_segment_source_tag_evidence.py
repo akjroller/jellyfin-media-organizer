@@ -15,63 +15,29 @@ def patch_strict() -> None:
         raise RuntimeError("segment source title helper anchor not found")
     text = text.replace(old_helper, new_helper, 1)
 
-    text = text.replace(
-        "    normalized_title = _segment_source_title(parse.title_hint)\n",
+    old_call = "    normalized_title = _segment_source_title(parse.title_hint)\n"
+    new_call = (
         "    normalized_title, source_title_reasons = _segment_source_title(\n"
         "        parse.title_hint, source.source_key\n"
-        "    )\n",
-        1,
+        "    )\n"
     )
+    if old_call not in text:
+        raise RuntimeError("segment source title call anchor not found")
+    text = text.replace(old_call, new_call, 1)
 
-    # Add source-structure evidence to every branch that consumes normalized_title.
-    anchors = (
-        '            f"segment-hint:{parse.segment_hint.casefold()}",\n            f"ambiguous-segment-title-match:{normalized_title}",',
-        '                f"segment-hint:{parse.segment_hint.casefold()}",\n                f"ambiguous-segment-title-equivalent-match:{normalized_title}",',
-        '                    f"segment-hint:{parse.segment_hint.casefold()}",\n                    f"missing-segment-title-match:{normalized_title}",',
-        '                    f"segment-hint:{parse.segment_hint.casefold()}",\n                    f"ambiguous-segment-title-near-match:{normalized_title}",',
-    )
-    for anchor in anchors:
-        if anchor not in text:
-            raise RuntimeError(f"assignment reason anchor not found: {anchor}")
-        text = text.replace(
-            anchor,
-            anchor.replace(
-                f'f"{anchor.split("f\\\"")[1].split(":")[0]}',
-                f'f"{anchor.split("f\\\"")[1].split(":")[0]}',
-            ),
-            0,
-        )
-
-    # Use straightforward exact replacements rather than clever rewriting.
     replacements = {
         '''            f"segment-hint:{parse.segment_hint.casefold()}",\n            f"ambiguous-segment-title-match:{normalized_title}",''': '''            f"segment-hint:{parse.segment_hint.casefold()}",\n            *source_title_reasons,\n            f"ambiguous-segment-title-match:{normalized_title}",''',
         '''                f"segment-hint:{parse.segment_hint.casefold()}",\n                f"ambiguous-segment-title-equivalent-match:{normalized_title}",''': '''                f"segment-hint:{parse.segment_hint.casefold()}",\n                *source_title_reasons,\n                f"ambiguous-segment-title-equivalent-match:{normalized_title}",''',
         '''                    f"segment-hint:{parse.segment_hint.casefold()}",\n                    f"missing-segment-title-match:{normalized_title}",''': '''                    f"segment-hint:{parse.segment_hint.casefold()}",\n                    *source_title_reasons,\n                    f"missing-segment-title-match:{normalized_title}",''',
         '''                    f"segment-hint:{parse.segment_hint.casefold()}",\n                    f"ambiguous-segment-title-near-match:{normalized_title}",''': '''                    f"segment-hint:{parse.segment_hint.casefold()}",\n                    *source_title_reasons,\n                    f"ambiguous-segment-title-near-match:{normalized_title}",''',
+        '''        match_reasons = (f"segment-title-match:{normalized_title}",)\n''': '''        match_reasons = (\n            *source_title_reasons,\n            f"segment-title-match:{normalized_title}",\n        )\n''',
+        '''            match_reasons = (f"segment-title-equivalent-match:{normalized_title}",)\n''': '''            match_reasons = (\n                *source_title_reasons,\n                f"segment-title-equivalent-match:{normalized_title}",\n            )\n''',
+        '''            match_reasons = (\n                f"segment-title-near-match:{normalized_title}",\n                f"segment-title-near-score:{top_score:.3f}",\n            )\n''': '''            match_reasons = (\n                *source_title_reasons,\n                f"segment-title-near-match:{normalized_title}",\n                f"segment-title-near-score:{top_score:.3f}",\n            )\n''',
     }
     for old, new in replacements.items():
         if old not in text:
             raise RuntimeError(f"assignment replacement anchor not found: {old}")
         text = text.replace(old, new, 1)
-
-    text = text.replace(
-        '        match_reasons = (f"segment-title-match:{normalized_title}",)\n',
-        '        match_reasons = (\n'
-        '            *source_title_reasons,\n'
-        '            f"segment-title-match:{normalized_title}",\n'
-        '        )\n',
-        1,
-    )
-    text = text.replace(
-        '''            match_reasons = (f"segment-title-equivalent-match:{normalized_title}",)\n''',
-        '''            match_reasons = (\n                *source_title_reasons,\n                f"segment-title-equivalent-match:{normalized_title}",\n            )\n''',
-        1,
-    )
-    text = text.replace(
-        '''            match_reasons = (\n                f"segment-title-near-match:{normalized_title}",\n                f"segment-title-near-score:{top_score:.3f}",\n            )\n''',
-        '''            match_reasons = (\n                *source_title_reasons,\n                f"segment-title-near-match:{normalized_title}",\n                f"segment-title-near-score:{top_score:.3f}",\n            )\n''',
-        1,
-    )
 
     STRICT.write_text(text, encoding="utf-8")
 
