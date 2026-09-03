@@ -669,6 +669,9 @@ def _apply_segment_counted_title_remap(
     remapped: list[SourceEpisodeAssignment] = []
     for index, source in enumerate(sources):
         assignment = by_source[source.source_key]
+        if source.explicit_decision:
+            remapped.append(assignment)
+            continue
         family = _evidence_family(source.parse, show.numbering_mode)
         if family != "aired":
             remapped.append(
@@ -820,14 +823,16 @@ def assign_episode_group_with_provider(
     potential_special_sources = tuple(
         source
         for source in source_group
-        if (assignment := original_by_source.get(source.source_key)) is not None
+        if not source.explicit_decision
+        and (assignment := original_by_source.get(source.source_key)) is not None
         and _has_special_fallback_signal(source, assignment)
     )
     potential_guard_sources = (
         tuple(
             source
             for source in source_group
-            if _has_pre_premiere_guard_signal(source, show)
+            if not source.explicit_decision
+            and _has_pre_premiere_guard_signal(source, show)
         )
         if show.numbering_mode in _PARTITIONABLE_PRIMARY_MODES
         else ()
@@ -835,7 +840,9 @@ def assign_episode_group_with_provider(
     potential_segment_counted = (
         show.numbering_mode is NumberingMode.AIRED
         and sum(
-            is_segment_counted_title_candidate(source.parse) for source in source_group
+            is_segment_counted_title_candidate(source.parse)
+            for source in source_group
+            if not source.explicit_decision
         )
         >= 3
     )

@@ -39,7 +39,9 @@ class Provider:
     def search_shows(self, title: str) -> ProviderSearchSnapshot:
         raise AssertionError("show search is not expected during assignment")
 
-    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
         assert show_identity == SHOW_ID
         return ProviderEpisodeCatalog(
             provider="fixture",
