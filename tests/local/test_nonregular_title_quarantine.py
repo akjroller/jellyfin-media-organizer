@@ -63,7 +63,9 @@ class Provider:
     def search_shows(self, title: str) -> ProviderSearchSnapshot:
         raise AssertionError("show search is not expected during assignment")
 
-    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
         assert show_identity == SHOW
         self.catalog_calls += 1
         return self.catalog
@@ -118,9 +120,9 @@ def test_unnumbered_nonregular_title_is_quarantined_from_regular_coordinate() ->
     by_source = {assignment.source_key: assignment for assignment in result.assignments}
 
     assert by_source["regular.mkv"].status is AssignmentStatus.MATCHED
-    assert [episode.identity.value for episode in by_source["regular.mkv"].episodes] == [
-        "regular-1"
-    ]
+    assert [
+        episode.identity.value for episode in by_source["regular.mkv"].episodes
+    ] == ["regular-1"]
 
     movie = by_source["movie.mkv"]
     assert movie.status is AssignmentStatus.UNRESOLVED
