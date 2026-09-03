@@ -1,10 +1,10 @@
 # Apply safety contract foundation
 
-The repository still has **no enabled media-mutating apply command**. Issue #15 remains blocked by release-candidate approval in #14. This document describes the apply-safety primitives that can be implemented and tested before that gate is cleared.
+The repository still has **no enabled media-mutating apply command**. Issue #15 remains blocked by fresh release-candidate approval. This document describes the apply-safety primitives that can be implemented and tested before that gate is cleared.
 
 ## Exact approval context
 
-A future apply executor must consume one already-generated immutable plan. It must not rerun parsing, provider resolution, episode matching, duplicate selection, or destination construction.
+A future apply executor must consume one already-generated immutable plan. It must not rerun parsing, provider resolution, episode matching, duplicate selection, destination construction, or source-hold review.
 
 Before an executor may perform any filesystem operation, the apply contract requires all of the following to agree exactly:
 
@@ -20,7 +20,9 @@ Any mismatch fails closed before filesystem access.
 
 ## Operation groups
 
-The contract derives immutable operation groups from the approved manifest. One group contains exactly one video and any associated companions that share its `operation_group_id`. Duplicate losers and explicitly ignored companions are non-moving. Unresolved or suspicious videos/companions are rejected at the apply boundary.
+The contract derives immutable operation groups from the approved manifest. One group contains exactly one moving video and any associated moving companions that share its `operation_group_id`. Duplicate losers, explicitly held videos, and explicitly ignored companions are non-moving. Unresolved or suspicious videos/companions are rejected at the apply boundary.
+
+A held video is an audited plan decision to leave one exact source untouched. It has no destination and is excluded from apply mutation groups; its associated companions are non-moving with it. Apply never reinterprets a held source as matched media or invents a destination for it.
 
 A group is retained when at least one member would change path. This allows a video no-op and a companion rename to remain one indivisible operation group instead of splitting sidecar handling from the video decision.
 
@@ -67,4 +69,4 @@ This foundation does **not** implement or expose:
 - verification after moves;
 - rollback or recovery writes.
 
-Those operations remain gated until #14 approves an exact immutable plan hash and the later #15 implementation adds platform-safe no-overwrite filesystem operations plus fault-injection coverage. Cross-filesystem copy+delete remains explicitly out of scope for the first apply release.
+Those operations remain gated until a fresh exact immutable plan is approved and the later #15 implementation adds platform-safe no-overwrite filesystem operations plus fault-injection coverage. Cross-filesystem copy+delete remains explicitly out of scope for the first apply release.
