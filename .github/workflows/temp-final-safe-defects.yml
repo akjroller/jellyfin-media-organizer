@@ -21,7 +21,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Apply final safe defects
-        run: python .github/scripts/temp_final_safe_defects.py
+        run: |
+          python .github/scripts/temp_final_safe_defects.py
+          python .github/scripts/temp_final_safe_defects_fix.py
       - name: Install development dependencies
         run: python -m pip install -e '.[dev]'
       - name: Format and focused checks
