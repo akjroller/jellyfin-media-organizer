@@ -118,6 +118,42 @@ def test_release_prefix_split_is_deliberately_narrow() -> None:
     assert release_prefix_title("tag-Example Series") is None
 
 
+def test_long_lowercase_release_prefix_can_be_catalog_confirmed() -> None:
+    assert release_prefix_title("packtag-Example Long Program Title") == (
+        "packtag",
+        "Example Long Program Title",
+    )
+
+    provider = ReleasePrefixProvider(
+        {
+            "packtag-Example Long Program Title": _snapshot(
+                "packtag-Example Long Program Title"
+            ),
+            "Example Long Program Title": _snapshot(
+                "Example Long Program Title",
+                _show(ALPHA, "Example Long Program Title"),
+            ),
+        },
+        {ALPHA: _catalog(ALPHA, _episode("alpha-1", 1, 1, "Pilot"))},
+    )
+
+    result = _resolve(
+        "packtag-Example Long Program Title S01E01.mkv",
+        provider,
+    )
+
+    assert result.status is ResolutionStatus.MATCHED
+    assert result.show is not None
+    assert result.show.provider_identity == ALPHA
+    assert "release-prefix-fallback:catalog-confirmed" in result.evidence.reasons
+
+
+def test_lowercase_prefix_rule_rejects_short_or_two_word_natural_titles() -> None:
+    assert release_prefix_title("tag-Example Long Program Title") is None
+    assert release_prefix_title("legend-Example Series") is None
+    assert release_prefix_title("spider-man adventures") is None
+
+
 def test_catalog_confirmed_release_prefix_resolves() -> None:
     provider = ReleasePrefixProvider(
         {

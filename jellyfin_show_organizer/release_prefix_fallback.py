@@ -17,12 +17,19 @@ from .providers import (
 _RELEASE_PREFIX = re.compile(
     r"^(?P<prefix>[A-Z0-9][A-Z0-9._]{1,15})-(?P<title>[^-].+)$"
 )
+_LOWER_RELEASE_PREFIX = re.compile(
+    r"^(?P<prefix>[a-z][a-z0-9._]{4,14})-(?P<title>[^-].+)$"
+)
 
 
 def release_prefix_title(value: str) -> tuple[str, str] | None:
     """Return one conservative release-token/title split or ``None``."""
 
     match = _RELEASE_PREFIX.fullmatch(value.strip())
+    lower_prefix = False
+    if match is None:
+        match = _LOWER_RELEASE_PREFIX.fullmatch(value.strip())
+        lower_prefix = match is not None
     if match is None:
         return None
 
@@ -30,11 +37,15 @@ def release_prefix_title(value: str) -> tuple[str, str] | None:
     title = match.group("title").strip(" ._-")
     if not title or not any(character.isalpha() for character in prefix):
         return None
-    if _RELEASE_PREFIX.fullmatch(title) is not None:
+    if (
+        _RELEASE_PREFIX.fullmatch(title) is not None
+        or _LOWER_RELEASE_PREFIX.fullmatch(title) is not None
+    ):
         return None
 
     title_words = re.findall(r"[^\W\d_]+", title, flags=re.UNICODE)
-    if len(title_words) < 2:
+    minimum_words = 4 if lower_prefix else 2
+    if len(title_words) < minimum_words:
         return None
     if _core.normalize_show_identity(title) == _core.normalize_show_identity(value):
         return None
