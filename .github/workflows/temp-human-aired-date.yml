@@ -1,0 +1,77 @@
+name: Human aired date safeguard check
+
+on:
+  push:
+    branches:
+      - fix/human-aired-date-safeguard
+    paths:
+      - .github/workflows/temp-human-aired-date.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/human-aired-date-safeguard
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply focused change
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          target = Path('jellyfin_show_organizer/mixed_episode_assignment.py')
+          text = target.read_text(encoding='utf-8')
+          old = '''_SOURCE_DATE = re.compile(\n    r"(?<!\\d)(?P<year>(?:18|19|20|21)\\d{2})[-._]"\n    r"(?P<month>0[1-9]|1[0-2])[-._](?P<day>0[1-9]|[12]\\d|3[01])(?!\\d)"\n)\n_PRE_PREMIERE_CONTEXT = re.compile(\n'''
+          new = '''_SOURCE_DATE = re.compile(\n    r"(?<!\\d)(?P<year>(?:18|19|20|21)\\d{2})[-._]"\n    r"(?P<month>0[1-9]|1[0-2])[-._](?P<day>0[1-9]|[12]\\d|3[01])(?!\\d)"\n)\n_SOURCE_AIRED_DATE = re.compile(\n    r"(?i)(?<![a-z0-9])aired(?![a-z0-9])[ ._(:-]*"\n    r"(?P<month>jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"\n    r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|"\n    r"nov(?:ember)?|dec(?:ember)?)[ ._-]+"\n    r"(?P<day>\\d{1,2})(?:st|nd|rd|th)?[,]?[ ._-]+"\n    r"(?P<year>\\d{2}|\\d{4})(?!\\d)"\n)\n_MONTH_NUMBERS = {\n    "jan": 1,\n    "january": 1,\n    "feb": 2,\n    "february": 2,\n    "mar": 3,\n    "march": 3,\n    "apr": 4,\n    "april": 4,\n    "may": 5,\n    "jun": 6,\n    "june": 6,\n    "jul": 7,\n    "july": 7,\n    "aug": 8,\n    "august": 8,\n    "sep": 9,\n    "sept": 9,\n    "september": 9,\n    "oct": 10,\n    "october": 10,\n    "nov": 11,\n    "november": 11,\n    "dec": 12,\n    "december": 12,\n}\n_PRE_PREMIERE_CONTEXT = re.compile(\n'''
+          if text.count(old) != 1:
+              raise SystemExit('date regex integration point changed')
+          text = text.replace(old, new, 1)
+
+          old = '''def _source_dates(source_key: str) -> tuple[str, ...]:\n    values: set[str] = set()\n    for match in _SOURCE_DATE.finditer(source_key):\n        candidate = f"{match.group('year')}-{match.group('month')}-{match.group('day')}"\n        try:\n            values.add(date.fromisoformat(candidate).isoformat())\n        except ValueError:\n            continue\n    return tuple(sorted(values))\n'''
+          new = '''def _expand_two_digit_year(value: int) -> int:\n    """Expand human aired years with a fixed 1950/2050 pivot."""\n\n    if value < 0 or value > 99:\n        raise ValueError("two-digit year must be between 0 and 99")\n    return 2000 + value if value < 50 else 1900 + value\n\n\ndef _source_dates(source_key: str) -> tuple[str, ...]:\n    values: set[str] = set()\n    for match in _SOURCE_DATE.finditer(source_key):\n        candidate = f"{match.group('year')}-{match.group('month')}-{match.group('day')}"\n        try:\n            values.add(date.fromisoformat(candidate).isoformat())\n        except ValueError:\n            continue\n\n    for match in _SOURCE_AIRED_DATE.finditer(source_key):\n        month = _MONTH_NUMBERS[match.group('month').casefold()]\n        day = int(match.group('day'))\n        year_text = match.group('year')\n        year = int(year_text)\n        if len(year_text) == 2:\n            year = _expand_two_digit_year(year)\n        try:\n            values.add(date(year, month, day).isoformat())\n        except ValueError:\n            continue\n    return tuple(sorted(values))\n'''
+          if text.count(old) != 1:
+              raise SystemExit('source date integration point changed')
+          target.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          tests = Path('tests/local/test_pre_premiere_special_guard.py')
+          text = tests.read_text(encoding='utf-8')
+          text = text.replace(
+              'from jellyfin_show_organizer.episode_assignment import (\n',
+              'from jellyfin_show_organizer.episode_assignment import (\n',
+              1,
+          )
+          marker = '''def _regular_source() -> SourceEpisodeInput:\n    return SourceEpisodeInput(\n        source_key="Fabricated Series/Fabricated Series - 001.mkv",\n        parse=ParseResult(absolute_episode=1),\n    )\n\n\ndef _by_source(result):\n'''
+          replacement = '''def _regular_source() -> SourceEpisodeInput:\n    return SourceEpisodeInput(\n        source_key="Fabricated Series/Fabricated Series - 001.mkv",\n        parse=ParseResult(absolute_episode=1),\n    )\n\n\ndef _human_aired_source(\n    aired_text: str,\n    *,\n    context: str = "Shorts",\n) -> SourceEpisodeInput:\n    return SourceEpisodeInput(\n        source_key=(\n            "Fabricated Series/"\n            f"{context}/Fabricated Series - 001 - Early Short ({aired_text}).mkv"\n        ),\n        parse=ParseResult(absolute_episode=1, title_hint="Early Short"),\n    )\n\n\ndef _by_source(result):\n'''
+          if text.count(marker) != 1:
+              raise SystemExit('test helper integration point changed')
+          text = text.replace(marker, replacement, 1)
+
+          marker = '''def test_pre_series_short_can_match_unique_non_regular_catalog_entry() -> None:\n'''
+          new_tests = '''def test_human_aired_date_activates_pre_premiere_guard() -> None:\n    short = _human_aired_source("aired Sep 4 98")\n    special = _special(SPECIAL_A_ID, "Early Short", airdate="1998-09-04")\n    result = assign_episode_group_with_provider(\n        SHOW,\n        (short,),\n        FixtureProvider((special, _regular())),\n    )\n    assignment = result.assignments[0]\n\n    assert assignment.status is AssignmentStatus.MATCHED\n    assert assignment.episodes[0].identity == SPECIAL_A_ID\n    assert "pre-premiere-source-date:1998-09-04" in assignment.evidence.reasons\n\n\ndef test_full_month_four_digit_human_aired_date_is_supported() -> None:\n    short = _human_aired_source("aired September 4, 1998")\n    special = _special(SPECIAL_A_ID, "Early Short", airdate="1998-09-04")\n    result = assign_episode_group_with_provider(\n        SHOW,\n        (short,),\n        FixtureProvider((special, _regular())),\n    )\n\n    assert result.assignments[0].status is AssignmentStatus.MATCHED\n    assert result.assignments[0].episodes[0].identity == SPECIAL_A_ID\n\n\ndef test_invalid_human_aired_date_is_ignored() -> None:\n    source = _human_aired_source("aired Feb 30 98")\n    result = assign_episode_group_with_provider(\n        SHOW,\n        (source,),\n        FixtureProvider((_regular(),)),\n    )\n\n    assert result.assignments[0].status is AssignmentStatus.MATCHED\n    assert result.assignments[0].episodes[0].identity == REGULAR_ID\n    assert result.assignments[0].evidence.method == "episode-catalog"\n\n\ndef test_month_text_without_aired_marker_is_not_a_date_signal() -> None:\n    source = _human_aired_source("Sep 4 98")\n    result = assign_episode_group_with_provider(\n        SHOW,\n        (source,),\n        FixtureProvider((_regular(),)),\n    )\n\n    assert result.assignments[0].status is AssignmentStatus.MATCHED\n    assert result.assignments[0].episodes[0].identity == REGULAR_ID\n    assert result.assignments[0].evidence.method == "episode-catalog"\n\n\ndef test_human_aired_date_without_special_context_keeps_normal_assignment() -> None:\n    source = _human_aired_source("aired Sep 4 98", context="Archive")\n    result = assign_episode_group_with_provider(\n        SHOW,\n        (source,),\n        FixtureProvider((_regular(),)),\n    )\n\n    assert result.assignments[0].status is AssignmentStatus.MATCHED\n    assert result.assignments[0].episodes[0].identity == REGULAR_ID\n    assert result.assignments[0].evidence.method == "episode-catalog"\n\n\ndef test_pre_series_short_can_match_unique_non_regular_catalog_entry() -> None:\n'''
+          if text.count(marker) != 1:
+              raise SystemExit('test insertion point changed')
+          tests.write_text(text.replace(marker, new_tests, 1), encoding='utf-8')
+          PY
+      - name: Install development dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Format and check
+        run: |
+          python -m ruff format jellyfin_show_organizer/mixed_episode_assignment.py tests/local/test_pre_premiere_special_guard.py
+          python -m ruff check jellyfin_show_organizer/mixed_episode_assignment.py tests/local/test_pre_premiere_special_guard.py
+          python -m ruff format --check jellyfin_show_organizer/mixed_episode_assignment.py tests/local/test_pre_premiere_special_guard.py
+          python -m mypy jellyfin_show_organizer tests
+          python -m pytest tests/local/test_pre_premiere_special_guard.py
+      - name: Commit focused change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jellyfin_show_organizer/mixed_episode_assignment.py tests/local/test_pre_premiere_special_guard.py
+          git commit -m "Recognize explicit human aired dates"
+          git push origin HEAD:fix/human-aired-date-safeguard
