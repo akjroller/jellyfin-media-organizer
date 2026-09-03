@@ -33,6 +33,7 @@ class AssignmentStatus(StrEnum):
 class SourceEpisodeInput:
     source_key: str
     parse: ParseResult
+    explicit_decision: bool = False
 
     def __post_init__(self) -> None:
         if not self.source_key:

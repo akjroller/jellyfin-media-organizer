@@ -531,6 +531,7 @@ def _plan_resolved_group(
             SourceEpisodeInput(
                 source_key=source.relative_path,
                 parse=effective_parse,
+                explicit_decision=decision is not None,
             )
         )
 
