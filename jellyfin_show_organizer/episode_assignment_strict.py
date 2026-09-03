@@ -5,6 +5,7 @@ import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from difflib import SequenceMatcher
 from enum import StrEnum
 
 from .models import (
@@ -19,6 +20,10 @@ from .providers import (
     ProviderEpisode,
     ProviderEpisodeCatalog,
     TvmazeProviderAdapter,
+)
+from .segment_counted_titles import (
+    clean_episode_title_hint,
+    normalize_episode_title,
 )
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
@@ -68,6 +73,40 @@ def _normalize_title(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()
     normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
     return " ".join(normalized.split())
+
+
+_SEGMENT_NEAR_TITLE_THRESHOLD = 0.92
+_SEGMENT_NEAR_TITLE_GAP = 0.08
+_SEGMENT_MIN_NEAR_TITLE_LENGTH = 8
+_SEGMENT_TRAILING_BRACKET_TAG = re.compile(
+    r"\s*\[[^\]\r\n]{0,48}\d[^\]\r\n]{0,48}\]\s*$"
+)
+
+
+def _segment_source_title(value: str) -> str:
+    cleaned = unicodedata.normalize("NFKC", value).strip()
+    while True:
+        trimmed = _SEGMENT_TRAILING_BRACKET_TAG.sub("", cleaned).rstrip(" ._-")
+        if trimmed == cleaned:
+            break
+        cleaned = trimmed
+    return clean_episode_title_hint(cleaned)
+
+
+def _segment_equivalence_key(normalized_title: str) -> str:
+    return "".join(token for token in normalized_title.split() if token != "and")
+
+
+def _segment_catalog_candidates(
+    parse: ParseResult,
+    catalog: ProviderEpisodeCatalog,
+) -> tuple[ProviderEpisode, ...]:
+    candidates = tuple(
+        episode for episode in catalog.episodes if episode.number is not None
+    )
+    if parse.season is None:
+        return candidates
+    return tuple(episode for episode in candidates if episode.season == parse.season)
 
 
 def _episode_identity_reason(episode: ProviderEpisode) -> str:
@@ -561,22 +600,15 @@ def _segment_assignment(
             f"catalog-request:{request_key}",
         )
 
-    normalized_title = _normalize_title(parse.title_hint)
+    normalized_title = _segment_source_title(parse.title_hint)
+    candidates = _segment_catalog_candidates(parse, catalog)
     matches = tuple(
         episode
-        for episode in catalog.episodes
-        if _normalize_title(episode.title) == normalized_title
+        for episode in candidates
+        if normalize_episode_title(episode.title) == normalized_title
     )
-    if not matches:
-        return _assignment(
-            source.source_key,
-            AssignmentStatus.UNRESOLVED,
-            "episode-catalog",
-            f"numbering-mode:{show.numbering_mode.value}",
-            f"segment-hint:{parse.segment_hint.casefold()}",
-            f"missing-segment-title-match:{normalized_title}",
-            f"catalog-request:{request_key}",
-        )
+    match_reasons: tuple[str, ...] = ()
+
     if len(matches) > 1:
         return _assignment(
             source.source_key,
@@ -588,14 +620,88 @@ def _segment_assignment(
             f"catalog-request:{request_key}",
         )
 
-    episode = matches[0]
+    if len(matches) == 1:
+        episode = matches[0]
+        match_reasons = (f"segment-title-match:{normalized_title}",)
+    else:
+        equivalence_key = _segment_equivalence_key(normalized_title)
+        equivalent = tuple(
+            episode
+            for episode in candidates
+            if equivalence_key
+            and _segment_equivalence_key(normalize_episode_title(episode.title))
+            == equivalence_key
+        )
+        if len(equivalent) > 1:
+            return _assignment(
+                source.source_key,
+                AssignmentStatus.SUSPICIOUS,
+                "episode-catalog",
+                f"numbering-mode:{show.numbering_mode.value}",
+                f"segment-hint:{parse.segment_hint.casefold()}",
+                f"ambiguous-segment-title-equivalent-match:{normalized_title}",
+                f"catalog-request:{request_key}",
+            )
+        if len(equivalent) == 1:
+            episode = equivalent[0]
+            match_reasons = (f"segment-title-equivalent-match:{normalized_title}",)
+        else:
+            source_key = _segment_equivalence_key(normalized_title)
+            scored: list[tuple[float, ProviderEpisode]] = []
+            if (
+                parse.season is not None
+                and len(source_key) >= _SEGMENT_MIN_NEAR_TITLE_LENGTH
+            ):
+                for candidate in candidates:
+                    candidate_key = _segment_equivalence_key(
+                        normalize_episode_title(candidate.title)
+                    )
+                    if len(candidate_key) < _SEGMENT_MIN_NEAR_TITLE_LENGTH:
+                        continue
+                    score = SequenceMatcher(
+                        None, source_key, candidate_key, autojunk=False
+                    ).ratio()
+                    scored.append((score, candidate))
+                scored.sort(key=lambda item: (-item[0], item[1].identity.key))
+
+            if not scored or scored[0][0] < _SEGMENT_NEAR_TITLE_THRESHOLD:
+                return _assignment(
+                    source.source_key,
+                    AssignmentStatus.UNRESOLVED,
+                    "episode-catalog",
+                    f"numbering-mode:{show.numbering_mode.value}",
+                    f"segment-hint:{parse.segment_hint.casefold()}",
+                    f"missing-segment-title-match:{normalized_title}",
+                    f"catalog-request:{request_key}",
+                )
+
+            top_score, top_episode = scored[0]
+            runner_score = scored[1][0] if len(scored) > 1 else 0.0
+            if top_score - runner_score < _SEGMENT_NEAR_TITLE_GAP:
+                return _assignment(
+                    source.source_key,
+                    AssignmentStatus.SUSPICIOUS,
+                    "episode-catalog",
+                    f"numbering-mode:{show.numbering_mode.value}",
+                    f"segment-hint:{parse.segment_hint.casefold()}",
+                    f"ambiguous-segment-title-near-match:{normalized_title}",
+                    f"segment-title-near-score:{top_score:.3f}",
+                    f"segment-title-near-runner:{runner_score:.3f}",
+                    f"catalog-request:{request_key}",
+                )
+            episode = top_episode
+            match_reasons = (
+                f"segment-title-near-match:{normalized_title}",
+                f"segment-title-near-score:{top_score:.3f}",
+            )
+
     return _assignment(
         source.source_key,
         AssignmentStatus.MATCHED,
         "episode-catalog",
         f"numbering-mode:{show.numbering_mode.value}",
         f"segment-hint:{parse.segment_hint.casefold()}",
-        f"segment-title-match:{normalized_title}",
+        *match_reasons,
         f"catalog-request:{request_key}",
         _episode_identity_reason(episode),
         episodes=(episode,),
