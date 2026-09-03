@@ -404,7 +404,22 @@ def catalog_coordinate_title_rescue(
     parses: tuple[ParseResult, ...],
     ranked: tuple[CandidateEvidence, ...],
 ) -> StructuralCatalogDecision | None:
-    """Confirm a borderline aired show only by exact title at the same coordinate."""
+    """Confirm one borderline aired source by exact title at the same coordinate."""
+
+    if len(parses) != 1:
+        return None
+    parse = parses[0]
+    if (
+        parse.season is None
+        or len(parse.episodes) != 1
+        or parse.title_hint is None
+        or not parse.title_hint.strip()
+        or parse.segment_hint is not None
+        or parse.absolute_episode is not None
+        or parse.special_episode is not None
+        or parse.episode_date is not None
+    ):
+        return None
 
     observations = _title_observations(parses)
     contenders = tuple(
