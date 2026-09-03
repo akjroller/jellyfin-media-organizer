@@ -399,6 +399,125 @@ def catalog_title_tiebreak(
     )
 
 
+def catalog_coordinate_title_rescue(
+    provider: MetadataProvider,
+    parses: tuple[ParseResult, ...],
+    ranked: tuple[CandidateEvidence, ...],
+) -> StructuralCatalogDecision | None:
+    """Confirm one borderline aired source by exact title at the same coordinate."""
+
+    if len(parses) != 1:
+        return None
+    parse = parses[0]
+    if (
+        parse.season is None
+        or len(parse.episodes) != 1
+        or parse.title_hint is None
+        or not parse.title_hint.strip()
+        or parse.segment_hint is not None
+        or parse.absolute_episode is not None
+        or parse.special_episode is not None
+        or parse.episode_date is not None
+    ):
+        return None
+
+    observations = _title_observations(parses)
+    contenders = tuple(
+        candidate
+        for candidate in ranked
+        if candidate.score >= _MIN_CATALOG_RESCUE_SCORE
+    )
+    if not observations or not contenders:
+        return None
+
+    outcomes: dict[ProviderIdentity, bool | None] = {}
+    extra_reasons: dict[ProviderIdentity, tuple[str, ...]] = {}
+    for candidate in contenders:
+        catalog = provider.episode_catalog(candidate.provider_identity)
+        request_reason = f"catalog-coordinate-title-request:{catalog.request_key}"
+        if not catalog.resolved or catalog.errors:
+            outcomes[candidate.provider_identity] = None
+            extra_reasons[candidate.provider_identity] = (
+                request_reason,
+                "catalog-coordinate-title-rescue:indeterminate-catalog",
+                *(
+                    f"catalog-coordinate-title-error:{error}"
+                    for error in catalog.errors
+                ),
+            )
+            continue
+
+        by_coordinate = _catalog_coordinate_map(catalog)
+        compatible = True
+        reasons: list[str] = [request_reason]
+        for season, episode, observed_title in observations:
+            titles = by_coordinate.get((season, episode), ())
+            if len(titles) != 1 or titles[0] != observed_title:
+                compatible = False
+                reasons.append(
+                    f"catalog-coordinate-title-mismatch:S{season:02d}E{episode:02d}"
+                )
+                break
+        reasons.append(
+            f"catalog-coordinate-title-compatible:{str(compatible).casefold()}"
+        )
+        outcomes[candidate.provider_identity] = compatible
+        extra_reasons[candidate.provider_identity] = tuple(reasons)
+
+    enriched = tuple(
+        replace(
+            candidate,
+            reasons=(
+                *candidate.reasons,
+                *extra_reasons.get(candidate.provider_identity, ()),
+            ),
+        )
+        for candidate in ranked
+    )
+    if any(value is None for value in outcomes.values()):
+        return StructuralCatalogDecision(
+            winner=None,
+            candidates=enriched,
+            reasons=(
+                "catalog-coordinate-title-rescue:indeterminate-candidate-catalog",
+            ),
+        )
+
+    winners = tuple(
+        identity
+        for identity, compatible in sorted(
+            outcomes.items(), key=lambda item: item[0].key
+        )
+        if compatible
+    )
+    if len(winners) != 1:
+        return StructuralCatalogDecision(
+            winner=None,
+            candidates=enriched,
+            reasons=("catalog-coordinate-title-rescue:no-unique-compatible-candidate",),
+        )
+
+    winner = winners[0]
+    winner_first = tuple(
+        sorted(
+            enriched,
+            key=lambda candidate: (
+                candidate.provider_identity != winner,
+                -candidate.score,
+                candidate.provider_identity.key,
+            ),
+        )
+    )
+    return StructuralCatalogDecision(
+        winner=winner,
+        candidates=winner_first,
+        reasons=(
+            "catalog-coordinate-title-rescue:unique-compatible-candidate",
+            f"catalog-coordinate-title-rescue-winner:{winner.key}",
+        ),
+    )
+
+
 def _mixed_segment_title_rescue(
     provider: MetadataProvider,
     parses: tuple[ParseResult, ...],
