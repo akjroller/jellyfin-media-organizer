@@ -66,7 +66,9 @@ reasons = ["provider has no safe episode coordinate"]
     assert len(catalog.snapshot_id) == 64
 
 
-def test_source_hold_cannot_overlap_episode_or_duplicate_decision(tmp_path: Path) -> None:
+def test_source_hold_cannot_overlap_episode_or_duplicate_decision(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "overrides.toml"
     path.write_text(
         """schema_version = 4

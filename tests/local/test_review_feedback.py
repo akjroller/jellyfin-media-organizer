@@ -48,7 +48,7 @@ def _review_plan() -> OrganizerPlan:
         numbering_mode=NumberingMode.AIRED,
     )
     return OrganizerPlan(
-        schema_version=1,
+        schema_version=2,
         overrides_version=2,
         records=(
             PlanRecord(
