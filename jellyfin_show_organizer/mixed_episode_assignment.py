@@ -618,6 +618,74 @@ def _has_duplicate_provider_reason(assignment: SourceEpisodeAssignment) -> bool:
     )
 
 
+def _nonregular_title_quarantine_assignment(
+    source: SourceEpisodeInput,
+    assignment: SourceEpisodeAssignment,
+    catalog: ProviderEpisodeCatalog,
+) -> SourceEpisodeAssignment | None:
+    parse = source.parse
+    if (
+        not _has_duplicate_provider_reason(assignment)
+        or parse.title_hint is None
+        or parse.season is None
+        or len(parse.episodes) != 1
+    ):
+        return None
+
+    normalized_title = _normalize_title(parse.title_hint)
+    title_matches = tuple(
+        episode
+        for episode in catalog.episodes
+        if _normalize_title(episode.title) == normalized_title
+    )
+    if len(title_matches) != 1:
+        return None
+    title_episode = title_matches[0]
+    if not _is_non_regular_episode(title_episode) or title_episode.number is not None:
+        return None
+
+    source_episode = parse.episodes[0]
+    coordinate_matches = tuple(
+        episode
+        for episode in catalog.episodes
+        if episode.season == parse.season
+        and episode.number == source_episode
+        and not _is_non_regular_episode(episode)
+    )
+    if len(coordinate_matches) != 1:
+        return None
+    coordinate_episode = coordinate_matches[0]
+    if _normalize_title(coordinate_episode.title) == normalized_title:
+        return None
+
+    return SourceEpisodeAssignment(
+        source_key=source.source_key,
+        status=AssignmentStatus.UNRESOLVED,
+        episodes=(),
+        evidence=MatchEvidence(
+            method="nonregular-title-quarantine",
+            confidence=0.0,
+            reasons=(
+                *assignment.evidence.reasons,
+                f"catalog-request:{catalog.request_key}",
+                "nonregular-title-quarantine:unique-exact-title",
+                f"nonregular-title:{normalized_title}",
+                "nonregular-title-quarantine:provider-entry-missing-number",
+                f"nonregular-title-quarantine:parsed-coordinate:S{parse.season:02d}E{source_episode:02d}",
+                "nonregular-title-quarantine:coordinate-title-conflict",
+                _episode_identity_reason(title_episode),
+            ),
+        ),
+    )
+
+
+def _is_nonregular_title_quarantine(assignment: SourceEpisodeAssignment) -> bool:
+    return any(
+        reason.startswith("nonregular-title-quarantine:")
+        for reason in assignment.evidence.reasons
+    )
+
+
 def _recover_accessory_after_segment_remap(
     source: SourceEpisodeInput,
     assignment: SourceEpisodeAssignment,
@@ -669,7 +737,7 @@ def _apply_segment_counted_title_remap(
     remapped: list[SourceEpisodeAssignment] = []
     for index, source in enumerate(sources):
         assignment = by_source[source.source_key]
-        if source.explicit_decision:
+        if source.explicit_decision or _is_nonregular_title_quarantine(assignment):
             remapped.append(assignment)
             continue
         family = _evidence_family(source.parse, show.numbering_mode)
@@ -846,10 +914,21 @@ def assign_episode_group_with_provider(
         )
         >= 3
     )
+    potential_quarantine_sources = tuple(
+        source
+        for source in source_group
+        if not source.explicit_decision
+        and source.parse.title_hint is not None
+        and source.parse.season is not None
+        and len(source.parse.episodes) == 1
+        and (assignment := original_by_source.get(source.source_key)) is not None
+        and _has_duplicate_provider_reason(assignment)
+    )
     if (
         not potential_special_sources
         and not potential_guard_sources
         and not potential_segment_counted
+        and not potential_quarantine_sources
     ):
         return original
 
@@ -868,12 +947,27 @@ def assign_episode_group_with_provider(
         for source in potential_guard_sources
         if (assignment := _pre_premiere_assignment(source, show, catalog)) is not None
     }
-    request_keys = {catalog.request_key}
-    if guarded:
-        remaining = tuple(
-            source for source in source_group if source.source_key not in guarded
+    quarantined = {
+        source.source_key: assignment
+        for source in potential_quarantine_sources
+        if (original_assignment := original_by_source.get(source.source_key))
+        is not None
+        and (
+            assignment := _nonregular_title_quarantine_assignment(
+                source, original_assignment, catalog
+            )
         )
-        base_assignments = dict(guarded)
+        is not None
+    }
+    protected_assignments = {**guarded, **quarantined}
+    request_keys = {catalog.request_key}
+    if protected_assignments:
+        remaining = tuple(
+            source
+            for source in source_group
+            if source.source_key not in protected_assignments
+        )
+        base_assignments = dict(protected_assignments)
         if remaining:
             rerun = _assign_episode_group_core(show, remaining, provider)
             base_assignments.update(
