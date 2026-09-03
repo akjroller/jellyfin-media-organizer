@@ -295,3 +295,170 @@ def test_warm_cache_replays_equivalent_group_without_http_calls(tmp_path: Path) 
     assert cold == warm
     assert len(cold_getter.calls) == 1
     assert warm_getter.calls == []
+
+
+def test_segment_title_accepts_spacing_and_conjunction_equivalence(
+    tmp_path: Path,
+) -> None:
+    catalog = [
+        {
+            "id": 3001,
+            "season": 1,
+            "number": 7,
+            "name": "Sandy, SpongeBob & the Worm",
+        }
+    ]
+    result = assign_episode_group(
+        _show(NumberingMode.SEGMENT_TITLE),
+        (
+            SourceEpisodeInput(
+                "segment-a.mkv",
+                ParseResult(
+                    season=1,
+                    episodes=(18,),
+                    segment_hint="a",
+                    title_hint="Sandy, Sponge Bob, and the Worm",
+                ),
+            ),
+        ),
+        TvmazeCatalogCache(tmp_path / "cache"),
+        CountingGetter(catalog),
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].tvmaze_episode_id == 3001
+    assert "segment-title-equivalent-match:sandy sponge bob and the worm" in (
+        assignment.evidence.reasons
+    )
+
+
+def test_segment_title_accepts_unique_high_confidence_typo(tmp_path: Path) -> None:
+    catalog = [
+        {
+            "id": 3002,
+            "season": 1,
+            "number": 8,
+            "name": "Squidward the Unfriendly Ghost",
+        }
+    ]
+    result = assign_episode_group(
+        _show(NumberingMode.SEGMENT_TITLE),
+        (
+            SourceEpisodeInput(
+                "segment-b.mkv",
+                ParseResult(
+                    season=1,
+                    episodes=(11,),
+                    segment_hint="b",
+                    title_hint="Squidward, the Unfreindly Ghost",
+                ),
+            ),
+        ),
+        TvmazeCatalogCache(tmp_path / "cache"),
+        CountingGetter(catalog),
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].tvmaze_episode_id == 3002
+    assert "segment-title-near-match:squidward the unfreindly ghost" in (
+        assignment.evidence.reasons
+    )
+
+
+def test_segment_title_strips_trailing_bracketed_release_tag(tmp_path: Path) -> None:
+    catalog = [{"id": 3003, "season": 1, "number": 9, "name": "Hooky"}]
+    result = assign_episode_group(
+        _show(NumberingMode.SEGMENT_TITLE),
+        (
+            SourceEpisodeInput(
+                "segment-a.mkv",
+                ParseResult(
+                    season=1,
+                    episodes=(20,),
+                    segment_hint="a",
+                    title_hint="Hooky [Fester1500]",
+                ),
+            ),
+        ),
+        TvmazeCatalogCache(tmp_path / "cache"),
+        CountingGetter(catalog),
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].tvmaze_episode_id == 3003
+    assert "segment-title-match:hooky" in assignment.evidence.reasons
+
+
+def test_segment_title_near_match_fails_closed_when_runner_up_is_too_close(
+    tmp_path: Path,
+) -> None:
+    catalog = [
+        {
+            "id": 3004,
+            "season": 1,
+            "number": 10,
+            "name": "Mermaid Man and Barnacle Boy",
+        },
+        {
+            "id": 3005,
+            "season": 1,
+            "number": 11,
+            "name": "Mermaid Fan and Barnacle Boy",
+        },
+    ]
+    result = assign_episode_group(
+        _show(NumberingMode.SEGMENT_TITLE),
+        (
+            SourceEpisodeInput(
+                "segment-b.mkv",
+                ParseResult(
+                    season=1,
+                    episodes=(20,),
+                    segment_hint="b",
+                    title_hint="Mermaid Nan and Barnacle Boy",
+                ),
+            ),
+        ),
+        TvmazeCatalogCache(tmp_path / "cache"),
+        CountingGetter(catalog),
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.SUSPICIOUS
+    assert not assignment.episodes
+    assert any(
+        reason.startswith("ambiguous-segment-title-near-match:")
+        for reason in assignment.evidence.reasons
+    )
+
+
+def test_segment_title_uses_source_season_to_disambiguate_repeated_title(
+    tmp_path: Path,
+) -> None:
+    catalog = [
+        {"id": 3006, "season": 1, "number": 12, "name": "Return"},
+        {"id": 3007, "season": 2, "number": 12, "name": "Return"},
+    ]
+    result = assign_episode_group(
+        _show(NumberingMode.SEGMENT_TITLE),
+        (
+            SourceEpisodeInput(
+                "segment-a.mkv",
+                ParseResult(
+                    season=1,
+                    episodes=(12,),
+                    segment_hint="a",
+                    title_hint="Return",
+                ),
+            ),
+        ),
+        TvmazeCatalogCache(tmp_path / "cache"),
+        CountingGetter(catalog),
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].tvmaze_episode_id == 3006
