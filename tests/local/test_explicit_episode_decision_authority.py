@@ -50,7 +50,7 @@ class Provider:
                 _episode(1, "First Story / Second Story"),
                 _episode(2, "Third Story / Fourth Story"),
                 _episode(3, "Fifth Story"),
-                _episode(4, "Override Target"),
+                _episode(6, "Override Target"),
             ),
         )
 
@@ -99,7 +99,7 @@ def test_explicit_decision_survives_segment_counted_recovery() -> None:
             ParseResult(
                 series_hint="Example Series",
                 season=1,
-                episodes=(4,),
+                episodes=(6,),
                 title_hint="A title that does not match the provider",
             ),
             explicit_decision=True,
@@ -111,7 +111,7 @@ def test_explicit_decision_survives_segment_counted_recovery() -> None:
 
     explicit = by_source["explicit.mkv"]
     assert explicit.status is AssignmentStatus.MATCHED
-    assert [episode.number for episode in explicit.episodes] == [4]
+    assert [episode.number for episode in explicit.episodes] == [6]
     assert "segment-counted-title-remap:missing-exact-title-proof" not in (
         explicit.evidence.reasons
     )
