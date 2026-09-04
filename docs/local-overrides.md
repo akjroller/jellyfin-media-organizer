@@ -6,7 +6,7 @@ Local override files are **plan-only configuration**. They do not authorize medi
 
 ## Current scope
 
-Override schema versions 1, 2, and 3 are accepted. The packaged synthetic defaults remain schema version 1 for compatibility. Supported show-level decisions include:
+Override schema versions 1, 2, 3, and 4 are accepted. The packaged synthetic defaults remain schema version 1 for compatibility. Supported show-level decisions include:
 
 - an explicit provider show identity;
 - aliases used to identify the source show group;
@@ -14,7 +14,7 @@ Override schema versions 1, 2, and 3 are accepted. The packaged synthetic defaul
 - numbering mode;
 - title preference and an optional preferred title.
 
-Schema version 2 additionally supports explicit local duplicate preferences. Schema version 3 adds exact-source episode decisions for cases where review establishes the intended numbering evidence but the filename alone is not safe to interpret.
+Schema version 2 additionally supports explicit local duplicate preferences. Schema version 3 adds exact-source episode decisions for cases where review establishes the intended numbering evidence but the filename alone is not safe to interpret. Schema version 4 adds exact-source `source_holds` for reviewed media that must remain untouched because no safe provider-backed destination can be established.
 
 The end-to-end planner accepts an explicitly selected local override file:
 
@@ -46,7 +46,7 @@ The command validates the current plan manifest, groups unresolved records by so
 
 Observed provider IDs remain comments such as `# observed_tvmaze_id = 45001`; they are **not** promoted into active override decisions automatically. Review the generated file and deliberately add or change identity, aliases, numbering policy, year, or title preference before using it with `plan --overrides`.
 
-The starter intentionally does not invent episode decisions. A reviewer must add any schema-version-3 `episode_decisions` entry deliberately.
+The starter intentionally does not invent episode decisions or source holds. A reviewer must add schema-version-3 `episode_decisions` or schema-version-4 `source_holds` deliberately.
 
 ## Narrow episode decisions
 
@@ -91,6 +91,24 @@ The `show_provider` and `show_provider_id` fields are a safety binding, not a se
 
 The resulting plan records the episode-decision evidence together with the ordinary show-resolution and catalog evidence, so the local intervention is visible in audit output and participates in deterministic plan hashing through the override snapshot.
 
+## Exact-source leave-in-place decisions
+
+A schema-version-4 source hold is an explicit review decision that one exact video source must remain where it is. It is intended for cases where the file is known to be real media but the active provider cannot supply a safe coordinate or other destination identity. Holds are never inferred automatically.
+
+```toml
+schema_version = 4
+
+[[source_holds]]
+source = "Example Series/Unsupported Special.mkv"
+reasons = ["provider has no safe episode coordinate"]
+```
+
+A held source is emitted in the plan with terminal status `held`. It has no destination, no provider episodes, and no extra or duplicate decision. Preflight treats the video as explicitly non-moving instead of unresolved. Any companion associated with that held video is ignored/non-moving with it. The apply contract excludes held videos from mutation operation groups.
+
+Source holds use the same normalized relative-path safety rules as other exact-source overrides. Each hold must reference a video present in the current inventory, include at least one non-empty reason, and cannot overlap an episode decision or duplicate preference for the same normalized source. A stale or unknown held path is a planning configuration error rather than a silent skip.
+
+A hold is not a successful media match and does not create a destination. It is an auditable instruction to preserve that exact source unchanged while allowing independently safe records to proceed.
+
 ## Show-level example
 
 All examples in the public repository are fabricated.
@@ -114,9 +132,9 @@ Supported `title_preference` values are `provider`, `source`, and `override`. `t
 
 ## Fail-closed validation
 
-Validation rejects unsupported schema versions, unknown fields, malformed types, invalid enum values, untrimmed identities, duplicate aliases after Unicode/case normalization, identities that make different show entries ambiguous, duplicate provider identities, incomplete override-title preferences, malformed episode decisions, mixed numbering evidence, duplicate episode-decision sources, and unsafe episode-decision paths.
+Validation rejects unsupported schema versions, unknown fields, malformed types, invalid enum values, untrimmed identities, duplicate aliases after Unicode/case normalization, identities that make different show entries ambiguous, duplicate provider identities, incomplete override-title preferences, malformed episode decisions, mixed numbering evidence, duplicate episode-decision sources, unsafe exact-source paths, duplicate source holds, and overlaps between a hold and another exact-source decision.
 
-Planning also fails closed when an episode decision targets a source that is not an episode candidate, names a provider identity different from the resolved show, or selects a numbering mode different from the canonical show policy. Provider catalog misses remain unresolved.
+Planning also fails closed when an episode decision targets a source that is not an episode candidate, names a provider identity different from the resolved show, selects a numbering mode different from the canonical show policy, or when a source hold references a video absent from the current inventory. Provider catalog misses remain unresolved unless a reviewer deliberately chooses to hold that exact source in a later schema-version-4 catalog.
 
 An alias may normalize to the same identity as its own entry key because both names select the same show. Equivalent identities that point at different show entries remain invalid.
 
@@ -124,7 +142,7 @@ The loader uses Unicode NFKC normalization plus case-insensitive identity matchi
 
 ## Determinism
 
-A validated override catalog has a canonical byte representation and stable SHA-256 snapshot identity. Show-table order, alias order, episode-decision table order, and decision-reason order do not affect that identity. Local filesystem paths are not included in the snapshot; only normalized relative source references are recorded.
+A validated override catalog has a canonical byte representation and stable SHA-256 snapshot identity. Show-table order, alias order, episode-decision table order, source-hold table order, and decision-reason order do not affect that identity. Local filesystem roots are not included in the snapshot; only normalized relative source references are recorded.
 
 Using the same inventory, cache snapshots, planning config, and override snapshot produces the same immutable plan hash. Changing an override changes the recorded override snapshot and therefore the plan identity.
 

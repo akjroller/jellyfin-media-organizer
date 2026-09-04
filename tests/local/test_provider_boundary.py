@@ -288,7 +288,7 @@ def test_non_tvmaze_provider_flows_through_planning_consumers() -> None:
         title="Pilot",
     )
     plan = OrganizerPlan(
-        schema_version=1,
+        schema_version=2,
         overrides_version=1,
         records=(
             PlanRecord(

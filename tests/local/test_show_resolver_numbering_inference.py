@@ -256,7 +256,7 @@ def test_mixed_single_mode_files_select_aired_primary_and_defer_absolute() -> No
 
 def test_show_override_numbering_mode_remains_higher_authority() -> None:
     overrides = OverrideCatalog(
-        schema_version=1,
+        schema_version=2,
         shows=(
             ShowOverride(
                 key="Example Series",

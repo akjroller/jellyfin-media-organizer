@@ -10,8 +10,8 @@ from typing import Any, cast
 
 from .models import CompanionPlanRecord, OrganizerPlan, PlanRecord
 
-PLAN_SCHEMA_VERSION = 1
-PLAN_SCHEMA_RESOURCE = "data/plan-schema-v1.json"
+PLAN_SCHEMA_VERSION = 2
+PLAN_SCHEMA_RESOURCE = "data/plan-schema-v2.json"
 
 
 class ManifestValidationError(ValueError):
@@ -268,7 +268,14 @@ def _validate_record(value: object, index: int) -> None:
     _validate_source(record["source"], f"{field}.source")
     _require_string(record["status"], f"{field}.status")
     status = cast(str, record["status"])
-    allowed_statuses = {"matched", "extra", "duplicate", "suspicious", "unresolved"}
+    allowed_statuses = {
+        "matched",
+        "extra",
+        "duplicate",
+        "held",
+        "suspicious",
+        "unresolved",
+    }
     if status not in allowed_statuses:
         raise ManifestValidationError(f"{field}.status is not supported")
     _require_string(record["destination"], f"{field}.destination", allow_none=True)
@@ -314,6 +321,21 @@ def _validate_record(value: object, index: int) -> None:
         raise ManifestValidationError(f"{field} extra records require extra")
     if status == "duplicate" and record["duplicate"] is None:
         raise ManifestValidationError(f"{field} duplicate records require duplicate")
+    if status == "held":
+        if record["destination"] is not None:
+            raise ManifestValidationError(f"{field} held records must not move")
+        if record["extra"] is not None or record["duplicate"] is not None:
+            raise ManifestValidationError(
+                f"{field} held records cannot be extras or duplicates"
+            )
+        if provider_episodes:
+            raise ManifestValidationError(
+                f"{field} held records cannot carry provider episodes"
+            )
+        if record["evidence"] is None or record["reason"] is None:
+            raise ManifestValidationError(
+                f"{field} held records require audit evidence"
+            )
 
     if record["evidence"] is not None:
         evidence = _require_mapping(record["evidence"], f"{field}.evidence")

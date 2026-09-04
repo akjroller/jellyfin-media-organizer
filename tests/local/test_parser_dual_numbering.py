@@ -83,7 +83,7 @@ def test_dual_evidence_serializes_in_plan_schema_v1_deterministically() -> None:
         fingerprint=SourceFingerprint(size=123, mtime_ns=456),
     )
     plan = OrganizerPlan(
-        schema_version=1,
+        schema_version=2,
         overrides_version=1,
         records=(
             PlanRecord(
