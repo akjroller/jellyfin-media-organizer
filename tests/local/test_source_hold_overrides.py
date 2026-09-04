@@ -6,6 +6,7 @@ import pytest
 
 from jellyfin_show_organizer.apply_contract import _video_member
 from jellyfin_show_organizer.models import (
+    CompanionStatus,
     MatchEvidence,
     OrganizerPlan,
     ParseResult,
@@ -15,9 +16,22 @@ from jellyfin_show_organizer.models import (
     TerminalStatus,
 )
 from jellyfin_show_organizer.overrides import load_overrides
-from jellyfin_show_organizer.planner import _video_preflight_status
+from jellyfin_show_organizer.planner import (
+    PlanningConfigurationError,
+    _plan_companions,
+    _preflight_records,
+    _validate_source_hold_sources,
+    _video_preflight_status,
+)
 from jellyfin_show_organizer.preflight import PreflightStatus
 from jellyfin_show_organizer.schema import PLAN_SCHEMA_VERSION, plan_to_manifest
+from jellyfin_show_organizer.sidecars import (
+    AdjacentDisposition,
+    AdjacentFile,
+    CompanionGroup,
+    CompanionKind,
+    SidecarDiscovery,
+)
 
 pytestmark = pytest.mark.local
 
@@ -65,6 +79,18 @@ reasons = ["provider has no safe episode coordinate"]
     assert hold.reasons == ("provider has no safe episode coordinate",)
     assert len(catalog.snapshot_id) == 64
 
+    original_snapshot = catalog.snapshot_id
+    path.write_text(
+        """schema_version = 4
+
+[[source_holds]]
+source = "Example/Unsupported.mkv"
+reasons = ["reviewed and intentionally left in place"]
+""",
+        encoding="utf-8",
+    )
+    assert load_overrides(path).snapshot_id != original_snapshot
+
 
 def test_source_hold_cannot_overlap_episode_or_duplicate_decision(
     tmp_path: Path,
@@ -86,6 +112,23 @@ reasons = ["leave this source in place"]
 
     with pytest.raises(ValueError, match="cannot overlap"):
         load_overrides(path)
+
+
+def test_source_hold_rejects_unknown_included_video(tmp_path: Path) -> None:
+    path = tmp_path / "overrides.toml"
+    path.write_text(
+        """schema_version = 4
+
+[[source_holds]]
+source = "Example/Missing.mkv"
+reasons = ["leave this source in place"]
+""",
+        encoding="utf-8",
+    )
+
+    catalog = load_overrides(path)
+    with pytest.raises(PlanningConfigurationError, match="unknown source"):
+        _validate_source_hold_sources((_source(),), catalog)
 
 
 def test_held_record_is_first_class_plan_status_and_non_moving() -> None:
@@ -117,3 +160,46 @@ def test_held_record_rejects_destinations_and_provider_episodes() -> None:
             destination="Example/Season 01/Example - S01E01.mkv",
             reason=record.reason,
         )
+
+
+def test_held_video_companion_is_ignored_and_non_moving() -> None:
+    record = _held_record()
+    subtitle = AdjacentFile(
+        relative_path="Example/Unsupported.en.srt",
+        extension=".srt",
+        fingerprint=SourceFingerprint(size=42, mtime_ns=99, sha256=None),
+        disposition=AdjacentDisposition.ASSOCIATED,
+        reason="subtitle stem matches video",
+    )
+    discovery = SidecarDiscovery(
+        companions=(
+            CompanionGroup(
+                source_video=record.source.relative_path,
+                kind=CompanionKind.SUBTITLE,
+                suffix=".en",
+                files=(subtitle,),
+            ),
+        ),
+        unresolved=(),
+        ignored=(),
+    )
+
+    companions = _plan_companions(discovery, (record,))
+
+    assert len(companions) == 1
+    companion = companions[0]
+    assert companion.status is CompanionStatus.IGNORED
+    assert companion.destination is None
+    assert companion.source_video == record.source.relative_path
+
+    plan = OrganizerPlan(
+        schema_version=PLAN_SCHEMA_VERSION,
+        overrides_version=4,
+        records=(record,),
+        companions=companions,
+    )
+    preflight = _preflight_records(plan)
+    companion_preflight = next(
+        item for item in preflight if item.record_id.startswith("companion:")
+    )
+    assert companion_preflight.status is PreflightStatus.NON_MOVING
