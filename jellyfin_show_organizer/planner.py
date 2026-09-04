@@ -814,11 +814,12 @@ def _plan_companions(
                 )
             continue
 
-        status = (
-            CompanionStatus.DUPLICATE
-            if video.status is TerminalStatus.DUPLICATE
-            else CompanionStatus.UNRESOLVED
-        )
+        if video.status is TerminalStatus.DUPLICATE:
+            status = CompanionStatus.DUPLICATE
+        elif video.status is TerminalStatus.HELD:
+            status = CompanionStatus.IGNORED
+        else:
+            status = CompanionStatus.UNRESOLVED
         for file in group.files:
             planned.append(
                 CompanionPlanRecord(
@@ -863,6 +864,20 @@ def _cache_snapshots(
 
 def _configured_episode_decision_keys(overrides: OverrideCatalog) -> set[str]:
     return {_path_key(decision.source)[0] for decision in overrides.episode_decisions}
+
+
+def _configured_source_hold_keys(overrides: OverrideCatalog) -> set[str]:
+    return {_path_key(hold.source)[0] for hold in overrides.source_holds}
+
+
+def _validate_source_hold_sources(
+    sources: tuple[SourceFile, ...],
+    overrides: OverrideCatalog,
+) -> None:
+    configured = _configured_source_hold_keys(overrides)
+    available = {_path_key(source.relative_path)[0] for source in sources}
+    if configured - available:
+        raise PlanningConfigurationError("source hold references an unknown source")
 
 
 def _validate_episode_decision_sources(
@@ -921,12 +936,32 @@ def _build_plan(
     if not sources:
         raise PlanningConfigurationError("no included video files were found")
     _validate_episode_decision_sources(sources, overrides)
+    _validate_source_hold_sources(sources, overrides)
     sidecars = discover_sidecars(source_root, sources)
     classifications = {
         source.relative_path: classify_extra(source.relative_path) for source in sources
     }
     groups: dict[str, list[SourceFile]] = defaultdict(list)
+    held_records: list[PlanRecord] = []
     for source in sources:
+        hold = overrides.source_hold_for(source.relative_path)
+        if hold is not None:
+            evidence = MatchEvidence(
+                method="source-hold-override",
+                confidence=1.0,
+                reasons=hold.reasons,
+            )
+            held_records.append(
+                PlanRecord(
+                    source=source,
+                    status=TerminalStatus.HELD,
+                    parse=classifications[source.relative_path].parse,
+                    evidence=evidence,
+                    operation_group_id=_operation_group_id(source.relative_path),
+                    reason=_reason(evidence),
+                )
+            )
+            continue
         groups[_show_group_key(source, classifications[source.relative_path])].append(
             source
         )
@@ -935,7 +970,7 @@ def _build_plan(
         max_path_length=config.max_path_length,
         max_component_length=config.max_component_length,
     )
-    records: list[PlanRecord] = []
+    records: list[PlanRecord] = list(held_records)
     for source_key in sorted(groups, key=_path_key):
         group = tuple(
             sorted(groups[source_key], key=lambda item: _path_key(item.relative_path))
@@ -999,7 +1034,7 @@ def _video_preflight_status(record: PlanRecord) -> PreflightStatus:
         return PreflightStatus.SUSPICIOUS
     if record.status is TerminalStatus.UNRESOLVED:
         return PreflightStatus.UNRESOLVED
-    if record.status is TerminalStatus.DUPLICATE:
+    if record.status in {TerminalStatus.DUPLICATE, TerminalStatus.HELD}:
         return PreflightStatus.NON_MOVING
     if (
         record.destination is not None

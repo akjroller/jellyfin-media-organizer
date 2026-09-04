@@ -26,6 +26,7 @@ class TerminalStatus(StrEnum):
     MATCHED = "matched"
     EXTRA = "extra"
     DUPLICATE = "duplicate"
+    HELD = "held"
     SUSPICIOUS = "suspicious"
     UNRESOLVED = "unresolved"
 
@@ -517,6 +518,21 @@ class PlanRecord:
             raise ValueError("extra plan records require an extra decision")
         if self.status is TerminalStatus.DUPLICATE and self.duplicate is None:
             raise ValueError("duplicate plan records require a duplicate decision")
+        if self.status is TerminalStatus.HELD:
+            if (
+                self.destination is not None
+                or self.extra is not None
+                or self.duplicate is not None
+            ):
+                raise ValueError(
+                    "held plan records must be non-moving and non-duplicate"
+                )
+            if self.provider_episodes:
+                raise ValueError("held plan records cannot carry provider episodes")
+            if self.evidence is None or self.reason is None:
+                raise ValueError(
+                    "held plan records require audit evidence and a reason"
+                )
 
 
 @dataclass(frozen=True, slots=True)

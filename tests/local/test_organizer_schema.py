@@ -26,7 +26,7 @@ pytestmark = pytest.mark.local
 
 def _plan(*, size: int = 1024) -> OrganizerPlan:
     return OrganizerPlan(
-        schema_version=1,
+        schema_version=2,
         overrides_version=1,
         records=(
             PlanRecord(
@@ -62,7 +62,7 @@ def _plan(*, size: int = 1024) -> OrganizerPlan:
 def test_checked_in_schema_is_versioned():
     schema = load_plan_schema()
 
-    assert schema["properties"]["schema_version"]["const"] == 1
+    assert schema["properties"]["schema_version"]["const"] == 2
     assert schema["additionalProperties"] is False
     assert "planRecord" in schema["$defs"]
 
@@ -83,7 +83,7 @@ def test_serialized_plan_validates():
     manifest = plan_to_manifest(_plan())
 
     validate_manifest(manifest)
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert manifest["records"][0]["status"] == "matched"
 
 

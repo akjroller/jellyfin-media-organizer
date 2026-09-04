@@ -316,7 +316,7 @@ def _video_member(record: Mapping[str, object], index: int) -> ApplyMember | Non
     status = _string(record.get("status"), f"records[{index}].status")
     if status in {"suspicious", "unresolved"}:
         raise ApplyContractError("plan contains unresolved or suspicious video records")
-    if status == "duplicate":
+    if status in {"duplicate", "held"}:
         return None
     if status not in {"matched", "extra"}:
         raise ApplyContractError("plan contains unsupported video status")

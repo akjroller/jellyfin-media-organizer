@@ -79,7 +79,7 @@ def _selected_plan(*, reverse: bool = False) -> OrganizerPlan:
         reason="non-destructive duplicate loser",
     )
     records = (winner, loser) if reverse else (loser, winner)
-    return OrganizerPlan(schema_version=1, overrides_version=1, records=records)
+    return OrganizerPlan(schema_version=2, overrides_version=1, records=records)
 
 
 def _rows(data: bytes) -> list[dict[str, str]]:
@@ -135,7 +135,7 @@ def test_no_winner_duplicate_group_is_explicitly_review_required() -> None:
 
     rows = _rows(
         render_duplicates_csv(
-            OrganizerPlan(schema_version=1, overrides_version=1, records=records)
+            OrganizerPlan(schema_version=2, overrides_version=1, records=records)
         )
     )
 
@@ -185,14 +185,14 @@ def test_conflicting_repeated_duplicate_decisions_fail_closed() -> None:
         replace(_base_record(FIRST, "op-a"), duplicate=first_decision),
         replace(_base_record(SECOND, "op-b"), duplicate=conflicting),
     )
-    plan = OrganizerPlan(schema_version=1, overrides_version=1, records=records)
+    plan = OrganizerPlan(schema_version=2, overrides_version=1, records=records)
 
     with pytest.raises(ValueError, match="conflicting duplicate decisions"):
         render_duplicates_csv(plan)
 
 
 def test_audit_bundle_publishes_duplicate_report_with_header_when_empty() -> None:
-    plan = OrganizerPlan(schema_version=1, overrides_version=1, records=())
+    plan = OrganizerPlan(schema_version=2, overrides_version=1, records=())
     bundle = render_audit_bundle(plan)
     files = dict(bundle.files())
 

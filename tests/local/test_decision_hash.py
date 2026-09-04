@@ -47,7 +47,7 @@ def _plan(
         operation_group_id="op-synthetic",
     )
     return OrganizerPlan(
-        schema_version=1,
+        schema_version=2,
         overrides_version=1,
         records=(record,),
         provenance=PlanProvenance(

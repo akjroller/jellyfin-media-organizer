@@ -13,7 +13,7 @@ from typing import Any, TypeGuard
 from .models import NumberingMode, ParseResult, ProviderIdentity, TitlePreference
 
 OVERRIDES_RESOURCE = "data/overrides-v1.toml"
-SUPPORTED_OVERRIDE_SCHEMA_VERSIONS = frozenset({1, 2, 3})
+SUPPORTED_OVERRIDE_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
 
 
 def _normalize_identity(value: str) -> str:
@@ -176,6 +176,32 @@ class DuplicatePreferenceOverride:
             raise ValueError("duplicate preference reasons must be unique")
 
 
+@dataclass(frozen=True, slots=True)
+class SourceHoldOverride:
+    """One exact-source local decision to leave a video untouched."""
+
+    source: str
+    reasons: tuple[str, ...] = ("explicit local leave-in-place decision",)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "source",
+            _normalize_source_reference(self.source, label="source hold source"),
+        )
+        if not self.reasons or any(
+            not reason or reason != reason.strip() for reason in self.reasons
+        ):
+            raise ValueError(
+                "source hold reasons must contain non-empty trimmed strings"
+            )
+        normalized_reasons = [
+            unicodedata.normalize("NFKC", reason).casefold() for reason in self.reasons
+        ]
+        if len(normalized_reasons) != len(set(normalized_reasons)):
+            raise ValueError("source hold reasons must be unique")
+
+
 def _decision_family(parse: ParseResult) -> str:
     families = [
         family
@@ -319,6 +345,7 @@ class OverrideCatalog:
     shows: tuple[ShowOverride, ...]
     duplicate_preferences: tuple[DuplicatePreferenceOverride, ...] = ()
     episode_decisions: tuple[EpisodeDecisionOverride, ...] = ()
+    source_holds: tuple[SourceHoldOverride, ...] = ()
 
     def __post_init__(self) -> None:
         if self.schema_version not in SUPPORTED_OVERRIDE_SCHEMA_VERSIONS:
@@ -333,6 +360,8 @@ class OverrideCatalog:
             raise ValueError("duplicate preferences require override schema_version 2")
         if self.schema_version < 3 and self.episode_decisions:
             raise ValueError("episode decisions require override schema_version 3")
+        if self.schema_version < 4 and self.source_holds:
+            raise ValueError("source holds require override schema_version 4")
 
         identities: dict[str, str] = {}
         provider_ids: dict[ProviderIdentity, str] = {}
@@ -381,6 +410,21 @@ class OverrideCatalog:
                 )
             decision_sources[normalized] = decision.source
 
+        hold_sources: dict[str, str] = {}
+        for hold in self.source_holds:
+            normalized = _source_reference_key(hold.source)
+            owner = hold_sources.get(normalized)
+            if owner is not None:
+                raise ValueError(
+                    "source hold is configured more than once: "
+                    f"{hold.source!r} conflicts with {owner!r}"
+                )
+            if normalized in duplicate_sources or normalized in decision_sources:
+                raise ValueError(
+                    "source hold cannot overlap an episode decision or duplicate preference"
+                )
+            hold_sources[normalized] = hold.source
+
     def get(self, key: str) -> ShowOverride | None:
         normalized = _normalize_identity(key)
         return next(
@@ -414,6 +458,17 @@ class OverrideCatalog:
                 decision
                 for decision in self.episode_decisions
                 if _source_reference_key(decision.source) == normalized
+            ),
+            None,
+        )
+
+    def source_hold_for(self, source_relative_path: str) -> SourceHoldOverride | None:
+        normalized = _source_reference_key(source_relative_path)
+        return next(
+            (
+                hold
+                for hold in self.source_holds
+                if _source_reference_key(hold.source) == normalized
             ),
             None,
         )
@@ -489,6 +544,23 @@ class OverrideCatalog:
                 }
                 for decision in sorted(
                     self.episode_decisions,
+                    key=lambda item: (_source_reference_key(item.source), item.source),
+                )
+            ]
+        if self.schema_version >= 4:
+            payload["source_holds"] = [
+                {
+                    "reasons": sorted(
+                        hold.reasons,
+                        key=lambda reason: (
+                            unicodedata.normalize("NFKC", reason).casefold(),
+                            reason,
+                        ),
+                    ),
+                    "source": hold.source,
+                }
+                for hold in sorted(
+                    self.source_holds,
                     key=lambda item: (_source_reference_key(item.source), item.source),
                 )
             ]
@@ -707,6 +779,22 @@ def _parse_episode_decision(raw: dict[str, Any]) -> EpisodeDecisionOverride:
     )
 
 
+def _parse_source_hold(raw: dict[str, Any]) -> SourceHoldOverride:
+    allowed = {"source", "reasons"}
+    unknown = set(raw) - allowed
+    if unknown:
+        raise ValueError(f"unknown source hold fields: {sorted(unknown)}")
+    source = raw.get("source")
+    reasons = raw.get("reasons", ["explicit local leave-in-place decision"])
+    if not isinstance(source, str):
+        raise ValueError("source hold source must be a string")
+    if not isinstance(reasons, list) or not all(
+        isinstance(reason, str) for reason in reasons
+    ):
+        raise ValueError("source hold reasons must be a list of strings")
+    return SourceHoldOverride(source=source, reasons=tuple(reasons))
+
+
 def load_overrides(path: Path | None = None) -> OverrideCatalog:
     payload = path.read_bytes() if path is not None else _read_default_overrides()
     try:
@@ -721,6 +809,7 @@ def load_overrides(path: Path | None = None) -> OverrideCatalog:
         "shows",
         "duplicate_preferences",
         "episode_decisions",
+        "source_holds",
     }
     unknown_top_level = set(raw) - allowed_top_level
     if unknown_top_level:
@@ -732,6 +821,7 @@ def load_overrides(path: Path | None = None) -> OverrideCatalog:
     shows = raw.get("shows", [])
     duplicate_preferences = raw.get("duplicate_preferences", [])
     episode_decisions = raw.get("episode_decisions", [])
+    source_holds = raw.get("source_holds", [])
     if not _is_plain_int(schema_version):
         raise ValueError("override schema_version must be an integer")
     if not isinstance(shows, list) or not all(isinstance(show, dict) for show in shows):
@@ -746,6 +836,12 @@ def load_overrides(path: Path | None = None) -> OverrideCatalog:
         raise ValueError("episode_decisions must be an array of tables")
     if schema_version < 3 and "episode_decisions" in raw:
         raise ValueError("episode decisions require override schema_version 3")
+    if not isinstance(source_holds, list) or not all(
+        isinstance(hold, dict) for hold in source_holds
+    ):
+        raise ValueError("source_holds must be an array of tables")
+    if schema_version < 4 and "source_holds" in raw:
+        raise ValueError("source holds require override schema_version 4")
 
     return OverrideCatalog(
         schema_version=schema_version,
@@ -757,4 +853,5 @@ def load_overrides(path: Path | None = None) -> OverrideCatalog:
         episode_decisions=tuple(
             _parse_episode_decision(decision) for decision in episode_decisions
         ),
+        source_holds=tuple(_parse_source_hold(hold) for hold in source_holds),
     )

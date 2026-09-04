@@ -39,7 +39,7 @@ def _plan() -> OrganizerPlan:
         fingerprint=SourceFingerprint(size=100, mtime_ns=200),
     )
     return OrganizerPlan(
-        schema_version=1,
+        schema_version=2,
         overrides_version=1,
         records=(PlanRecord(source=source, status=TerminalStatus.UNRESOLVED),),
         provenance=PlanProvenance(

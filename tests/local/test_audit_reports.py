@@ -57,7 +57,7 @@ def _matched_record(relative_path: str, *, episode: int, size: int) -> PlanRecor
 
 
 def _plan(*records: PlanRecord) -> OrganizerPlan:
-    return OrganizerPlan(schema_version=1, overrides_version=1, records=records)
+    return OrganizerPlan(schema_version=2, overrides_version=1, records=records)
 
 
 def test_canonical_plan_and_reports_ignore_record_insertion_order():

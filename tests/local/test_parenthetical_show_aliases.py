@@ -246,7 +246,7 @@ def test_parenthetical_alias_resolution_is_input_order_deterministic() -> None:
 
 def _plan(parse: ParseResult) -> OrganizerPlan:
     return OrganizerPlan(
-        schema_version=1,
+        schema_version=2,
         overrides_version=1,
         records=(
             PlanRecord(
