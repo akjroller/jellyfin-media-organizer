@@ -71,6 +71,13 @@ def clean_episode_title_hint(value: str) -> str:
     return normalize_episode_title(cleaned)
 
 
+def _optional_leading_the_key(normalized_title: str) -> str:
+    tokens = normalized_title.split()
+    if len(tokens) > 1 and tokens[0] == "the":
+        return " ".join(tokens[1:])
+    return normalized_title
+
+
 def is_segment_counted_title_candidate(parse: ParseResult) -> bool:
     return (
         parse.season is not None
@@ -195,6 +202,7 @@ def recover_unique_near_segment_titles(
         if parse.season is None:
             continue
 
+        source_article_key = _optional_leading_the_key(observation.normalized_title)
         scored: list[tuple[float, ProviderEpisode]] = []
         for episode in catalog.episodes:
             if episode.season != parse.season or episode.number is None:
@@ -202,9 +210,15 @@ def recover_unique_near_segment_titles(
             candidate_title = normalize_episode_title(episode.title)
             if len(candidate_title) < _MIN_NEAR_TITLE_LENGTH:
                 continue
-            score = SequenceMatcher(
-                None, observation.normalized_title, candidate_title, autojunk=False
-            ).ratio()
+            if (
+                candidate_title != observation.normalized_title
+                and _optional_leading_the_key(candidate_title) == source_article_key
+            ):
+                score = 1.0
+            else:
+                score = SequenceMatcher(
+                    None, observation.normalized_title, candidate_title, autojunk=False
+                ).ratio()
             scored.append((score, episode))
         scored.sort(key=lambda item: (-item[0], item[1].identity.key))
         if not scored or scored[0][0] < _NEAR_TITLE_THRESHOLD:
