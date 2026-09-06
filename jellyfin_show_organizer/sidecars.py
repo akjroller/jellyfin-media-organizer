@@ -25,6 +25,10 @@ IGNORED_ADJACENT_EXTENSIONS = frozenset(
 )
 _RELEASE_PACKAGE_EXTENSIONS = frozenset({".rar", ".sfv", ".srr"})
 _RAR_VOLUME_EXTENSION = re.compile(r"^\.r\d{2}$", re.IGNORECASE)
+_RELEASE_MARKER_ARTIFACT = re.compile(
+    r"(?:^|[ ._-])s\d{1,3}e\d{1,4}=proper$",
+    re.IGNORECASE,
+)
 _EPISODE_GUIDE_DOCUMENT = re.compile(
     r"(?:^|[ ._-])(?:episode|season)[ ._-]+guides?(?=$|[ ._-])",
     re.IGNORECASE,
@@ -185,6 +189,8 @@ def _ignored_adjacent_reason(path: Path, extension: str) -> str | None:
         or _RAR_VOLUME_EXTENSION.fullmatch(extension) is not None
     ):
         return "known-release-package-artifact"
+    if _RELEASE_MARKER_ARTIFACT.search(path.name) is not None:
+        return "known-release-marker-artifact"
     if extension == ".txt" and _EPISODE_GUIDE_DOCUMENT.search(path.stem) is not None:
         return "known-episode-guide-document"
     return None
