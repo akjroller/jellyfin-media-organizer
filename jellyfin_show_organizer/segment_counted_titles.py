@@ -222,7 +222,9 @@ def recover_unique_near_segment_titles(
             candidate_title = normalize_episode_title(episode.title)
             if len(candidate_title) < _MIN_NEAR_TITLE_LENGTH:
                 continue
-            if observation.normalized_title in provider_declared_aka_aliases(episode.title):
+            if observation.normalized_title in provider_declared_aka_aliases(
+                episode.title
+            ):
                 score = 1.0
             elif (
                 candidate_title != observation.normalized_title
