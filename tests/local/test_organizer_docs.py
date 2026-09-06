@@ -1,6 +1,9 @@
+import re
 from pathlib import Path
 
 import pytest
+
+from jellyfin_show_organizer.schema import PLAN_SCHEMA_VERSION
 
 pytestmark = pytest.mark.local
 ROOT = Path(__file__).parents[2]
@@ -10,6 +13,8 @@ RUNBOOK = ROOT / "docs" / "jellyfin-show-organizer-runbook.md"
 CONTRIBUTING = ROOT / "docs" / "contributing.md"
 TROUBLESHOOTING = ROOT / "docs" / "troubleshooting.md"
 RELEASING = ROOT / "docs" / "releasing.md"
+RELEASE_CANDIDATE = ROOT / "docs" / "release-candidate-validation.md"
+RELEASE_CANDIDATE_TEST = ROOT / "tests" / "local" / "test_release_candidate_ready.py"
 
 
 def test_windows_runbook_uses_venv_python_without_policy_changes():
@@ -156,3 +161,30 @@ def test_release_docs_do_not_claim_a_jmo_release_already_exists():
     assert "Current releases are **plan-only**" not in readme
     assert "Current releases are **plan-only**" not in releasing
     assert "workflow artifact is not itself a decision to publish" in releasing
+
+
+def test_release_candidate_document_matches_executable_synthetic_contract():
+    document = RELEASE_CANDIDATE.read_text(encoding="utf-8")
+    test_source = RELEASE_CANDIDATE_TEST.read_text(encoding="utf-8")
+    match = re.search(r'"([0-9a-f]{64})"', test_source)
+
+    assert match is not None
+    assert f"plan schema: `{PLAN_SCHEMA_VERSION}`" in document
+    assert f"immutable plan hash: `{match.group(1)}`" in document
+    assert "They are not a private-library approval hash" in document
+
+
+def test_current_audit_outputs_are_documented():
+    for text in (
+        README.read_text(encoding="utf-8"),
+        RUNBOOK.read_text(encoding="utf-8"),
+    ):
+        for name in (
+            "plan.json",
+            "plan.sha256",
+            "decision.sha256",
+            "run-provenance.json",
+            "preflight.json",
+            "preflight.txt",
+        ):
+            assert name in text

@@ -22,7 +22,7 @@ Offline mode is a hard no-network contract. Provider getters are never called wh
 - a corrupt entry remains an explicit corrupt result and is not repaired through the network;
 - offline and refresh modes are mutually exclusive.
 
-The public `organizer plan` CLI will expose this cache contract when the end-to-end CLI work in #35 is wired.
+The public `jmo plan` command exposes this contract through `--offline`, `--refresh`, and ordinary online mode. The compatibility `organizer plan` entry point exposes the same behavior.
 
 ## Provenance and snapshot identity
 

@@ -26,7 +26,7 @@ JMO is intentionally conservative: planning, parsing, inventory, reconciliation,
 ## Requirements
 
 - Python 3.12+
-- CI tests Linux on Python 3.12 and 3.14, plus Windows on Python 3.12.
+- CI tests Linux on Python 3.12, 3.13, and 3.14, plus Windows on Python 3.12.
 - Project metadata advertises Python 3.12, 3.13, and 3.14 support.
 
 The runtime package currently has no third-party dependencies.
@@ -70,7 +70,7 @@ jmo plan ExampleMedia/Shows \
   --cache-dir LocalState/cache
 ```
 
-Review `plan.json`, `plan.sha256`, `preflight.txt`, and the CSV reports in the output directory. A ready plan exits `0`; configuration, provider, unresolved, and preflight failures use distinct nonzero exit codes.
+Review `plan.json`, `plan.sha256`, `decision.sha256`, `run-provenance.json`, `preflight.json`, `preflight.txt`, and the CSV reports in the output directory. A ready plan exits `0`; configuration, provider, unresolved, and preflight failures use distinct nonzero exit codes.
 
 Use `--offline` for a hard zero-provider-call replay from a warmed cache and `--refresh` for a deliberate refresh. Local override files are passed explicitly with `--overrides`. `--json` emits the versioned machine-readable summary; `--verbose` opts into additional local diagnostic detail.
 
@@ -108,6 +108,8 @@ Repository examples and tests use synthetic paths and fixtures. Real library inv
 - [Numbering policies](docs/numbering-policies.md)
 - [Metadata-provider boundary](docs/metadata-provider-boundary.md)
 - [Release and versioning policy](docs/releasing.md)
+- [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 - [Upstream acknowledgments](ACKNOWLEDGMENTS.md)
 
 ## Development
