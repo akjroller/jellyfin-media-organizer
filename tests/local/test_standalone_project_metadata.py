@@ -22,7 +22,9 @@ def test_installable_metadata_uses_standalone_project_identity() -> None:
 def test_only_standalone_application_package_is_shipped() -> None:
     text = _project_text()
 
-    assert 'packages = ["jellyfin_show_organizer"]' in text
+    assert (
+        'packages = ["jellyfin_show_organizer", "jellyfin_show_organizer.data"]' in text
+    )
     assert 'jmo = "jellyfin_show_organizer.cli:main"' in text
     assert 'organizer = "jellyfin_show_organizer.cli:main"' in text
 

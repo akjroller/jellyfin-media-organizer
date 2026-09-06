@@ -24,6 +24,7 @@ The release-artifact workflow rejects a pushed version tag that does not match t
 The package requires Python 3.12 or newer. CI currently exercises:
 
 - Linux with Python 3.12;
+- Linux with Python 3.13;
 - Linux with Python 3.14;
 - Windows with Python 3.12.
 

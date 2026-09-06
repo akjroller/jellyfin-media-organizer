@@ -79,7 +79,7 @@ Run it with one explicit source root, an existing destination root, and generate
 jmo plan ExampleMedia/Shows --destination-root ExampleMedia/OrganizedShows --output-dir LocalState/audit-001 --cache-dir LocalState/cache
 ```
 
-The command inventories videos, resolves metadata show-by-show through a persistent cache, plans video and subtitle destinations, classifies duplicates, runs whole-plan preflight, and writes `plan.json`, `plan.sha256`, `preflight.json`, `preflight.txt`, a summary, and CSV review reports. It never moves, copies, renames, overwrites, or deletes media.
+The command inventories videos, resolves metadata show-by-show through a persistent cache, plans video and subtitle destinations, classifies duplicates, runs whole-plan preflight, and writes `plan.json`, `plan.sha256`, `decision.sha256`, `run-provenance.json`, `preflight.json`, `preflight.txt`, `summary.txt`, `mapping.csv`, `unresolved.csv`, `extras.csv`, `duplicates.csv`, and `sidecars.csv`. It never moves, copies, renames, overwrites, or deletes media.
 
 Exit code `0` means the exact plan hash is preflight-ready. Configuration errors use `2`, provider failures use `4`, unresolved-only blocks use `10`, and other preflight blocks use `20`. A successful planning run is not approval to mutate media; no mutation command exists.
 
@@ -146,7 +146,7 @@ Current status: the public `plan` command executes this complete sequence withou
 
 Ambiguous or suspicious results must remain unresolved until deterministic evidence or a user-local override resolves them. Overrides are validated fail-closed and have path-independent snapshot identities for later plan provenance.
 
-Current status: show-level override validation and planner precedence exist. Unresolved and suspicious results are written to the audit bundle and block readiness.
+Current status: show-level overrides, duplicate preferences, exact-source episode decisions, and exact-source holds are validated with explicit planner precedence. Unresolved and suspicious results are written to the audit bundle and block readiness unless an exact reviewed source hold deliberately keeps otherwise valid media in place.
 
 ### 4. Audit and preflight
 

@@ -24,20 +24,19 @@ There is currently no `apply` command.
 
 - `cli.py` — operational plan-only command surface and configuration precedence.
 - `planner.py` — end-to-end inventory, resolution, assignment, duplicate, companion, provenance, preflight, and audit orchestration.
-- `inventory.py` — authorized-root checks and deterministic read-only video inventory.
-- `filename_parser.py` — pure filename/path hint parsing without filesystem or provider access.
-- `extra_classifier.py` — deterministic pre-assignment extra classification with fail-closed ambiguity handling.
-- `show_resolver.py` — conservative show-level canonical TVMaze resolution with explicit ambiguity states.
-- `episode_assignment.py` — deterministic show-level episode mapping from one normalized cached provider catalog using explicit numbering policies.
+- `inventory.py` and `sidecars.py` — authorized-root scanning, deterministic read-only video inventory, and adjacent companion discovery.
+- `filename_parser.py`, `extra_classifier.py`, and `extra_naming.py` — pure filename/path evidence, fail-closed extra classification, and extra display identity.
+- `show_resolver.py` and `_show_resolver_core.py` — conservative show-level resolution, provider search, ranking, aliases, and catalog-backed rescue orchestration.
+- `show_alias_evidence.py`, `show_structural_evidence.py`, `structural_root_title_fallback.py`, `parenthetical_aliases.py`, `release_prefix_fallback.py`, and `segment_counted_titles.py` — focused structural evidence strategies used by the resolver.
+- `providers.py`, `provider_aliases.py`, `tvmaze_cache.py`, and `tvmaze_alias_cache.py` — provider-neutral domain records plus TVMaze adapter and persistent cache boundaries.
+- `episode_assignment.py`, `episode_assignment_strict.py`, `mixed_episode_assignment.py`, and `numbering_inference.py` — cached-catalog episode mapping, explicit numbering policy, mixed-evidence handling, and provider-episode identity protection.
 - `destination.py` — deterministic Jellyfin-relative destination construction and cross-platform sanitization/collision keys.
-- `models.py` — typed cross-stage contracts.
-- `overrides.py` — data-driven aliases, numbering modes, years, provider IDs, and title preferences.
-- `reconciliation.py` — one explained terminal inventory status per expected path.
-- `schema.py` — versioned manifest validation, serialization, and stable plan hashing.
-- `reports.py` — atomic immutable audit-bundle serialization from the canonical plan.
+- `duplicate_classifier.py` and `release_quality.py` — duplicate grouping and conservative winner evidence without deletion authority.
+- `models.py` and `overrides.py` — typed cross-stage contracts and versioned local decisions.
+- `reconciliation.py`, `review.py`, and `reports.py` — complete terminal accounting, review references/stubs, and atomic audit-bundle serialization.
+- `decision_hash.py`, `schema.py`, and `run_provenance.py` — versioned manifest validation, stable plan/decision identity, and path-free run context.
 - `preflight.py` — whole-plan safety validation before any future mutation stage.
-- `sidecars.py` — read-only adjacent companion discovery and destination derivation.
-- `tvmaze_cache.py` — persistent provider-cache primitives with explicit cache/network/error state.
+- `apply_contract.py` and `apply_validation.py` — non-mutating approval, operation-group, journal-replay, and live-state validation foundations for the still-gated apply milestone.
 - `data/` — versioned JSON/TOML contracts and synthetic default override examples.
 
 ## Determinism
@@ -139,6 +138,7 @@ The normal development gate is:
 python -m pytest
 python -m ruff check jellyfin_show_organizer tests
 python -m ruff format --check jellyfin_show_organizer tests
+jmo --version
 jmo plan --help
 ```
 

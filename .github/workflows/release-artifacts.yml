@@ -19,12 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
           cache: pip
@@ -66,10 +66,16 @@ jobs:
           from importlib.metadata import version
           from importlib.resources import files
           from jellyfin_show_organizer import __version__
+          from jellyfin_show_organizer.schema import (
+              PLAN_SCHEMA_RESOURCE,
+              PLAN_SCHEMA_VERSION,
+              load_plan_schema,
+          )
 
           assert version("jellyfin-media-organizer") == __version__
           data = files("jellyfin_show_organizer").joinpath("data")
-          assert data.joinpath("plan-schema-v1.json").is_file()
+          assert data.joinpath(PLAN_SCHEMA_RESOURCE.removeprefix("data/")).is_file()
+          assert load_plan_schema()["properties"]["schema_version"]["const"] == PLAN_SCHEMA_VERSION
           assert data.joinpath("overrides-v1.toml").is_file()
           print("release wheel verified")
           PY
@@ -87,16 +93,22 @@ jobs:
           from importlib.metadata import version
           from importlib.resources import files
           from jellyfin_show_organizer import __version__
+          from jellyfin_show_organizer.schema import (
+              PLAN_SCHEMA_RESOURCE,
+              PLAN_SCHEMA_VERSION,
+              load_plan_schema,
+          )
 
           assert version("jellyfin-media-organizer") == __version__
           data = files("jellyfin_show_organizer").joinpath("data")
-          assert data.joinpath("plan-schema-v1.json").is_file()
+          assert data.joinpath(PLAN_SCHEMA_RESOURCE.removeprefix("data/")).is_file()
+          assert load_plan_schema()["properties"]["schema_version"]["const"] == PLAN_SCHEMA_VERSION
           assert data.joinpath("overrides-v1.toml").is_file()
           print("release sdist verified")
           PY
 
       - name: Upload verified artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: jellyfin-media-organizer-${{ github.ref_name }}
           path: dist/*

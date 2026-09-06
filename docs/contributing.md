@@ -28,7 +28,7 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe tools\check_repository_safety.py
 ```
 
-CI also checks Linux on Python 3.12 and 3.14, Windows on Python 3.12, repository safety, and clean wheel/source-distribution installs.
+CI also checks Linux on Python 3.12, 3.13, and 3.14, Windows on Python 3.12, repository safety, branch coverage, and clean wheel/source-distribution installs.
 
 ## Synthetic fixtures
 
