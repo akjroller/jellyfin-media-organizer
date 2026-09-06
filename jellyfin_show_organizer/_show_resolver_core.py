@@ -22,10 +22,13 @@ from .overrides import OverrideCatalog, ShowOverride
 from .provider_aliases import TvmazeAliasProviderAdapter
 from .providers import MetadataProvider, ProviderEpisodeCatalog, ProviderShow
 from .show_alias_evidence import (
+    AliasEnrichment,
+    CatalogGroupRescue,
     catalog_group_rescue,
     enrich_provider_alias_evidence,
 )
 from .show_structural_evidence import (
+    StructuralCatalogDecision,
     aired_catalog_rescue,
     catalog_coordinate_title_rescue,
     catalog_title_tiebreak,
@@ -67,6 +70,24 @@ class _CatalogTieBreak:
     winner: ProviderIdentity | None
     candidates: tuple[CandidateEvidence, ...]
     reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _StructuralResolutionTrace:
+    resolution: ShowResolution | None = None
+    tie_break: _CatalogTieBreak | None = None
+    title_tie_break: StructuralCatalogDecision | None = None
+    coordinate_title_rescue: StructuralCatalogDecision | None = None
+    aired_rescue: StructuralCatalogDecision | None = None
+    group_rescue: CatalogGroupRescue | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _CandidateDiscovery:
+    candidates: tuple[ProviderShow, ...]
+    method: str
+    reasons: tuple[str, ...] = ()
+    failure: ShowResolution | None = None
 
 
 def normalize_show_identity(value: str) -> str:
@@ -606,6 +627,439 @@ def _add_discovered_candidate(
     return True
 
 
+def _discover_provider_candidates(
+    provider: MetadataProvider,
+    search_title: str,
+    initial_candidates: tuple[ProviderShow, ...],
+    provider_method: str,
+) -> _CandidateDiscovery:
+    """Run deterministic fallback queries only after an empty exact search."""
+
+    if initial_candidates:
+        return _CandidateDiscovery(initial_candidates, provider_method)
+
+    candidates_by_identity: dict[ProviderIdentity, ProviderShow] = {}
+    search_reasons: list[str] = []
+    backoff_titles = _search_backoff_titles(search_title)
+    if backoff_titles:
+        provider_method = f"{provider_method}+search-backoff"
+        search_reasons.append("provider-search-backoff:attempted")
+    for backoff_title in backoff_titles:
+        backoff = provider.search_shows(backoff_title)
+        search_reasons.extend(
+            (
+                f"provider-search-backoff-query:{normalize_show_identity(backoff_title)}",
+                f"provider-search-backoff-request:{backoff.request_key}",
+            )
+        )
+        if not backoff.resolved:
+            return _CandidateDiscovery(
+                (),
+                provider_method,
+                tuple(search_reasons),
+                _unresolved(
+                    provider_method,
+                    *search_reasons,
+                    "provider-search-backoff:indeterminate",
+                    backoff.unresolved_reason or "provider-search-unresolved",
+                ),
+            )
+        for candidate in backoff.shows:
+            if not _add_discovered_candidate(candidates_by_identity, candidate):
+                return _CandidateDiscovery(
+                    (),
+                    provider_method,
+                    tuple(search_reasons),
+                    _unresolved(
+                        provider_method,
+                        *search_reasons,
+                        "provider-search-backoff:conflicting-candidate-metadata",
+                        f"provider-identity:{candidate.identity.key}",
+                    ),
+                )
+    if backoff_titles:
+        search_reasons.append("provider-search-backoff:complete")
+
+    merge_titles = token_merge_queries(search_title)
+    if merge_titles:
+        provider_method = f"{provider_method}+token-merge"
+        search_reasons.append("provider-search-token-merge:attempted")
+    for merge_title in merge_titles:
+        merged = provider.search_shows(merge_title)
+        search_reasons.extend(
+            (
+                f"provider-search-token-merge-query:{normalize_show_identity(merge_title)}",
+                f"provider-search-token-merge-request:{merged.request_key}",
+            )
+        )
+        if not merged.resolved:
+            return _CandidateDiscovery(
+                (),
+                provider_method,
+                tuple(search_reasons),
+                _unresolved(
+                    provider_method,
+                    *search_reasons,
+                    "provider-search-token-merge:indeterminate",
+                    merged.unresolved_reason or "provider-search-unresolved",
+                ),
+            )
+        for candidate in merged.shows:
+            if not _add_discovered_candidate(candidates_by_identity, candidate):
+                return _CandidateDiscovery(
+                    (),
+                    provider_method,
+                    tuple(search_reasons),
+                    _unresolved(
+                        provider_method,
+                        *search_reasons,
+                        "provider-search-token-merge:conflicting-candidate-metadata",
+                        f"provider-identity:{candidate.identity.key}",
+                    ),
+                )
+    if merge_titles:
+        search_reasons.append("provider-search-token-merge:complete")
+
+    candidates = tuple(
+        sorted(
+            candidates_by_identity.values(),
+            key=lambda candidate: (
+                normalize_show_identity(candidate.title),
+                candidate.title,
+                candidate.identity.key,
+            ),
+        )
+    )
+    if not candidates:
+        return _CandidateDiscovery(
+            (),
+            provider_method,
+            tuple(search_reasons),
+            _unresolved(
+                provider_method,
+                *search_reasons,
+                "no-valid-provider-candidates",
+            ),
+        )
+    return _CandidateDiscovery(candidates, provider_method, tuple(search_reasons))
+
+
+def _attempt_structural_resolution(
+    *,
+    source_key: str,
+    parse_group: tuple[ParseResult, ...],
+    override: ShowOverride | None,
+    provider: MetadataProvider,
+    provider_candidates: tuple[ProviderShow, ...],
+    active_ranked: tuple[CandidateEvidence, ...],
+    method: str,
+    top_score: float,
+    gap: float,
+    search_reasons: tuple[str, ...],
+    alias_result: AliasEnrichment | None,
+    source_title: str | None,
+    year_hint: int | None,
+) -> _StructuralResolutionTrace:
+    """Run catalog-backed rescue stages and retain their audit trail."""
+
+    alias_reasons = alias_result.reasons if alias_result is not None else ()
+    tie_break: _CatalogTieBreak | None = None
+    title_tie_break: StructuralCatalogDecision | None = None
+    coordinate_title_rescue: StructuralCatalogDecision | None = None
+    aired_rescue: StructuralCatalogDecision | None = None
+    group_rescue: CatalogGroupRescue | None = None
+    mode = _numbering_mode(override)
+
+    if mode is NumberingMode.AIRED:
+        segment_title_rescue = segment_counted_title_rescue(
+            provider,
+            parse_group,
+            active_ranked,
+            minimum_gap=_MINIMUM_MATCH_GAP,
+            suspicious_threshold=_SUSPICIOUS_THRESHOLD,
+        )
+        if segment_title_rescue is not None:
+            if segment_title_rescue.winner is None:
+                return _StructuralResolutionTrace(
+                    resolution=ShowResolution(
+                        status=ResolutionStatus.SUSPICIOUS,
+                        show=None,
+                        evidence=MatchEvidence(
+                            method=f"{method}+segment-counted-title-rescue",
+                            confidence=top_score,
+                            reasons=(
+                                *search_reasons,
+                                *alias_reasons,
+                                *segment_title_rescue.reasons,
+                                f"candidate-gap:{gap:.3f}",
+                            ),
+                            candidates=segment_title_rescue.candidates,
+                        ),
+                    )
+                )
+            provider_show = next(
+                candidate
+                for candidate in provider_candidates
+                if candidate.identity == segment_title_rescue.winner
+            )
+            title = _preferred_title(override, source_title, provider_show.title)
+            assert title is not None
+            return _StructuralResolutionTrace(
+                resolution=_resolved_show_result(
+                    source_key=source_key,
+                    parse_group=parse_group,
+                    override=override,
+                    provider=provider,
+                    provider_identity=provider_show.identity,
+                    title=title,
+                    year=(
+                        provider_show.year
+                        if provider_show.year is not None
+                        else year_hint
+                    ),
+                    method=f"{method}+segment-counted-title-rescue",
+                    confidence=top_score,
+                    reasons=(
+                        *search_reasons,
+                        *alias_reasons,
+                        *segment_title_rescue.reasons,
+                        f"candidate-gap:{gap:.3f}",
+                    ),
+                    candidates=segment_title_rescue.candidates,
+                )
+            )
+
+    tie_break = _catalog_tie_break(parse_group, mode, provider, active_ranked)
+    if tie_break is not None and tie_break.winner is not None:
+        provider_show = next(
+            candidate
+            for candidate in provider_candidates
+            if candidate.identity == tie_break.winner
+        )
+        title = _preferred_title(override, source_title, provider_show.title)
+        assert title is not None
+        return _StructuralResolutionTrace(
+            resolution=ShowResolution(
+                status=ResolutionStatus.MATCHED,
+                show=CanonicalShow(
+                    source_key=source_key,
+                    provider_identity=provider_show.identity,
+                    title=title,
+                    year=(
+                        provider_show.year
+                        if provider_show.year is not None
+                        else year_hint
+                    ),
+                    numbering_mode=mode,
+                ),
+                evidence=MatchEvidence(
+                    method=f"{method}+catalog-tiebreak",
+                    confidence=top_score,
+                    reasons=(
+                        *search_reasons,
+                        *alias_reasons,
+                        *tie_break.reasons,
+                        f"candidate-gap:{gap:.3f}",
+                    ),
+                    candidates=tie_break.candidates,
+                ),
+            ),
+            tie_break=tie_break,
+        )
+
+    if (
+        tie_break is not None
+        and tie_break.winner is None
+        and mode is NumberingMode.AIRED
+    ):
+        title_tie_break = catalog_title_tiebreak(
+            provider,
+            parse_group,
+            tie_break.candidates,
+            minimum_gap=_MINIMUM_MATCH_GAP,
+            suspicious_threshold=_SUSPICIOUS_THRESHOLD,
+        )
+        if title_tie_break is not None and title_tie_break.winner is not None:
+            provider_show = next(
+                candidate
+                for candidate in provider_candidates
+                if candidate.identity == title_tie_break.winner
+            )
+            title = _preferred_title(override, source_title, provider_show.title)
+            assert title is not None
+            return _StructuralResolutionTrace(
+                resolution=_resolved_show_result(
+                    source_key=source_key,
+                    parse_group=parse_group,
+                    override=override,
+                    provider=provider,
+                    provider_identity=provider_show.identity,
+                    title=title,
+                    year=(
+                        provider_show.year
+                        if provider_show.year is not None
+                        else year_hint
+                    ),
+                    method=f"{method}+catalog-title-tiebreak",
+                    confidence=top_score,
+                    reasons=(
+                        *search_reasons,
+                        *alias_reasons,
+                        *tie_break.reasons,
+                        *title_tie_break.reasons,
+                        f"candidate-gap:{gap:.3f}",
+                    ),
+                    candidates=title_tie_break.candidates,
+                ),
+                tie_break=tie_break,
+                title_tie_break=title_tie_break,
+            )
+
+    if mode is NumberingMode.AIRED:
+        coordinate_title_rescue = catalog_coordinate_title_rescue(
+            provider, parse_group, active_ranked
+        )
+        if (
+            coordinate_title_rescue is not None
+            and coordinate_title_rescue.winner is not None
+        ):
+            provider_show = next(
+                candidate
+                for candidate in provider_candidates
+                if candidate.identity == coordinate_title_rescue.winner
+            )
+            title = _preferred_title(override, source_title, provider_show.title)
+            assert title is not None
+            return _StructuralResolutionTrace(
+                resolution=_resolved_show_result(
+                    source_key=source_key,
+                    parse_group=parse_group,
+                    override=override,
+                    provider=provider,
+                    provider_identity=provider_show.identity,
+                    title=title,
+                    year=(
+                        provider_show.year
+                        if provider_show.year is not None
+                        else year_hint
+                    ),
+                    method=f"{method}+catalog-coordinate-title-rescue",
+                    confidence=top_score,
+                    reasons=(
+                        *search_reasons,
+                        *alias_reasons,
+                        *(tie_break.reasons if tie_break is not None else ()),
+                        *(
+                            title_tie_break.reasons
+                            if title_tie_break is not None
+                            else ()
+                        ),
+                        *coordinate_title_rescue.reasons,
+                        f"candidate-gap:{gap:.3f}",
+                    ),
+                    candidates=coordinate_title_rescue.candidates,
+                ),
+                tie_break=tie_break,
+                title_tie_break=title_tie_break,
+                coordinate_title_rescue=coordinate_title_rescue,
+            )
+
+        aired_rescue = aired_catalog_rescue(provider, parse_group, active_ranked)
+        if aired_rescue is not None and aired_rescue.winner is not None:
+            provider_show = next(
+                candidate
+                for candidate in provider_candidates
+                if candidate.identity == aired_rescue.winner
+            )
+            title = _preferred_title(override, source_title, provider_show.title)
+            assert title is not None
+            return _StructuralResolutionTrace(
+                resolution=_resolved_show_result(
+                    source_key=source_key,
+                    parse_group=parse_group,
+                    override=override,
+                    provider=provider,
+                    provider_identity=provider_show.identity,
+                    title=title,
+                    year=(
+                        provider_show.year
+                        if provider_show.year is not None
+                        else year_hint
+                    ),
+                    method=f"{method}+aired-catalog-rescue",
+                    confidence=top_score,
+                    reasons=(
+                        *search_reasons,
+                        *alias_reasons,
+                        *(tie_break.reasons if tie_break is not None else ()),
+                        *(
+                            title_tie_break.reasons
+                            if title_tie_break is not None
+                            else ()
+                        ),
+                        *aired_rescue.reasons,
+                        f"candidate-gap:{gap:.3f}",
+                    ),
+                    candidates=aired_rescue.candidates,
+                ),
+                tie_break=tie_break,
+                title_tie_break=title_tie_break,
+                coordinate_title_rescue=coordinate_title_rescue,
+                aired_rescue=aired_rescue,
+            )
+
+    if tie_break is None and aired_rescue is None:
+        group_rescue = catalog_group_rescue(provider, parse_group, active_ranked)
+        if (
+            group_rescue is not None
+            and group_rescue.winner is not None
+            and group_rescue.numbering_mode is not None
+        ):
+            provider_show = next(
+                candidate
+                for candidate in provider_candidates
+                if candidate.identity == group_rescue.winner
+            )
+            title = _preferred_title(override, source_title, provider_show.title)
+            assert title is not None
+            return _StructuralResolutionTrace(
+                resolution=ShowResolution(
+                    status=ResolutionStatus.MATCHED,
+                    show=CanonicalShow(
+                        source_key=source_key,
+                        provider_identity=provider_show.identity,
+                        title=title,
+                        year=(
+                            provider_show.year
+                            if provider_show.year is not None
+                            else year_hint
+                        ),
+                        numbering_mode=group_rescue.numbering_mode,
+                    ),
+                    evidence=MatchEvidence(
+                        method=f"{method}+catalog-rescue",
+                        confidence=top_score,
+                        reasons=(
+                            *search_reasons,
+                            *alias_reasons,
+                            *group_rescue.reasons,
+                            f"candidate-gap:{gap:.3f}",
+                        ),
+                        candidates=group_rescue.candidates,
+                    ),
+                ),
+                group_rescue=group_rescue,
+            )
+
+    return _StructuralResolutionTrace(
+        tie_break=tie_break,
+        title_tie_break=title_tie_break,
+        coordinate_title_rescue=coordinate_title_rescue,
+        aired_rescue=aired_rescue,
+        group_rescue=group_rescue,
+    )
+
+
 def resolve_show_group_with_provider(
     source_key: str,
     parses: Iterable[ParseResult],
@@ -685,87 +1139,17 @@ def resolve_show_group_with_provider(
             snapshot.unresolved_reason or "provider-search-unresolved",
         )
 
-    search_reasons: list[str] = []
-    provider_candidates = snapshot.shows
-    if not provider_candidates:
-        candidates_by_identity: dict[ProviderIdentity, ProviderShow] = {}
-        backoff_titles = _search_backoff_titles(search_title)
-        if backoff_titles:
-            provider_method = f"{provider_method}+search-backoff"
-            search_reasons.append("provider-search-backoff:attempted")
-        for backoff_title in backoff_titles:
-            backoff = provider.search_shows(backoff_title)
-            search_reasons.extend(
-                (
-                    f"provider-search-backoff-query:{normalize_show_identity(backoff_title)}",
-                    f"provider-search-backoff-request:{backoff.request_key}",
-                )
-            )
-            if not backoff.resolved:
-                return _unresolved(
-                    provider_method,
-                    *search_reasons,
-                    "provider-search-backoff:indeterminate",
-                    backoff.unresolved_reason or "provider-search-unresolved",
-                )
-            for candidate in backoff.shows:
-                if not _add_discovered_candidate(candidates_by_identity, candidate):
-                    return _unresolved(
-                        provider_method,
-                        *search_reasons,
-                        "provider-search-backoff:conflicting-candidate-metadata",
-                        f"provider-identity:{candidate.identity.key}",
-                    )
-        if backoff_titles:
-            search_reasons.append("provider-search-backoff:complete")
-
-        merge_titles = token_merge_queries(search_title)
-        if merge_titles:
-            provider_method = f"{provider_method}+token-merge"
-            search_reasons.append("provider-search-token-merge:attempted")
-        for merge_title in merge_titles:
-            merged = provider.search_shows(merge_title)
-            search_reasons.extend(
-                (
-                    f"provider-search-token-merge-query:{normalize_show_identity(merge_title)}",
-                    f"provider-search-token-merge-request:{merged.request_key}",
-                )
-            )
-            if not merged.resolved:
-                return _unresolved(
-                    provider_method,
-                    *search_reasons,
-                    "provider-search-token-merge:indeterminate",
-                    merged.unresolved_reason or "provider-search-unresolved",
-                )
-            for candidate in merged.shows:
-                if not _add_discovered_candidate(candidates_by_identity, candidate):
-                    return _unresolved(
-                        provider_method,
-                        *search_reasons,
-                        "provider-search-token-merge:conflicting-candidate-metadata",
-                        f"provider-identity:{candidate.identity.key}",
-                    )
-        if merge_titles:
-            search_reasons.append("provider-search-token-merge:complete")
-
-        provider_candidates = tuple(
-            sorted(
-                candidates_by_identity.values(),
-                key=lambda candidate: (
-                    normalize_show_identity(candidate.title),
-                    candidate.title,
-                    candidate.identity.key,
-                ),
-            )
-        )
-
-    if not provider_candidates:
-        return _unresolved(
-            provider_method,
-            *search_reasons,
-            "no-valid-provider-candidates",
-        )
+    discovery = _discover_provider_candidates(
+        provider,
+        search_title,
+        snapshot.shows,
+        provider_method,
+    )
+    if discovery.failure is not None:
+        return discovery.failure
+    provider_candidates = discovery.candidates
+    provider_method = discovery.method
+    search_reasons = discovery.reasons
 
     identities = {normalize_show_identity(title) for title in titles}
     identities.add(normalize_show_identity(source_key))
@@ -865,273 +1249,25 @@ def resolve_show_group_with_provider(
                 candidates=active_ranked,
             )
 
-    alias_indeterminate = alias_result is not None and alias_result.indeterminate
-    tie_break = None
-    title_tie_break = None
-    aired_rescue = None
-    coordinate_title_rescue = None
-    rescue = None
-    if not alias_indeterminate:
-        mode = _numbering_mode(override)
-        if mode is NumberingMode.AIRED:
-            segment_title_rescue = segment_counted_title_rescue(
-                provider,
-                parse_group,
-                active_ranked,
-                minimum_gap=_MINIMUM_MATCH_GAP,
-                suspicious_threshold=_SUSPICIOUS_THRESHOLD,
-            )
-            if segment_title_rescue is not None:
-                if segment_title_rescue.winner is None:
-                    return ShowResolution(
-                        status=ResolutionStatus.SUSPICIOUS,
-                        show=None,
-                        evidence=MatchEvidence(
-                            method=f"{method}+segment-counted-title-rescue",
-                            confidence=top.score,
-                            reasons=(
-                                *search_reasons,
-                                *(
-                                    alias_result.reasons
-                                    if alias_result is not None
-                                    else ()
-                                ),
-                                *segment_title_rescue.reasons,
-                                f"candidate-gap:{gap:.3f}",
-                            ),
-                            candidates=segment_title_rescue.candidates,
-                        ),
-                    )
-                provider_show = next(
-                    candidate
-                    for candidate in provider_candidates
-                    if candidate.identity == segment_title_rescue.winner
-                )
-                title = _preferred_title(override, source_title, provider_show.title)
-                assert title is not None
-                return _resolved_show_result(
-                    source_key=source_key,
-                    parse_group=parse_group,
-                    override=override,
-                    provider=provider,
-                    provider_identity=provider_show.identity,
-                    title=title,
-                    year=(
-                        provider_show.year
-                        if provider_show.year is not None
-                        else year_hint
-                    ),
-                    method=f"{method}+segment-counted-title-rescue",
-                    confidence=top.score,
-                    reasons=(
-                        *search_reasons,
-                        *(alias_result.reasons if alias_result is not None else ()),
-                        *segment_title_rescue.reasons,
-                        f"candidate-gap:{gap:.3f}",
-                    ),
-                    candidates=segment_title_rescue.candidates,
-                )
-
-        tie_break = _catalog_tie_break(parse_group, mode, provider, active_ranked)
-        if tie_break is not None and tie_break.winner is not None:
-            provider_show = next(
-                candidate
-                for candidate in provider_candidates
-                if candidate.identity == tie_break.winner
-            )
-            title = _preferred_title(override, source_title, provider_show.title)
-            assert title is not None
-            return ShowResolution(
-                status=ResolutionStatus.MATCHED,
-                show=CanonicalShow(
-                    source_key=source_key,
-                    provider_identity=provider_show.identity,
-                    title=title,
-                    year=(
-                        provider_show.year
-                        if provider_show.year is not None
-                        else year_hint
-                    ),
-                    numbering_mode=mode,
-                ),
-                evidence=MatchEvidence(
-                    method=f"{method}+catalog-tiebreak",
-                    confidence=top.score,
-                    reasons=(
-                        *search_reasons,
-                        *(alias_result.reasons if alias_result is not None else ()),
-                        *tie_break.reasons,
-                        f"candidate-gap:{gap:.3f}",
-                    ),
-                    candidates=tie_break.candidates,
-                ),
-            )
-
-        if (
-            tie_break is not None
-            and tie_break.winner is None
-            and mode is NumberingMode.AIRED
-        ):
-            title_tie_break = catalog_title_tiebreak(
-                provider,
-                parse_group,
-                tie_break.candidates,
-                minimum_gap=_MINIMUM_MATCH_GAP,
-                suspicious_threshold=_SUSPICIOUS_THRESHOLD,
-            )
-            if title_tie_break is not None and title_tie_break.winner is not None:
-                provider_show = next(
-                    candidate
-                    for candidate in provider_candidates
-                    if candidate.identity == title_tie_break.winner
-                )
-                title = _preferred_title(override, source_title, provider_show.title)
-                assert title is not None
-                return _resolved_show_result(
-                    source_key=source_key,
-                    parse_group=parse_group,
-                    override=override,
-                    provider=provider,
-                    provider_identity=provider_show.identity,
-                    title=title,
-                    year=(
-                        provider_show.year
-                        if provider_show.year is not None
-                        else year_hint
-                    ),
-                    method=f"{method}+catalog-title-tiebreak",
-                    confidence=top.score,
-                    reasons=(
-                        *search_reasons,
-                        *(alias_result.reasons if alias_result is not None else ()),
-                        *tie_break.reasons,
-                        *title_tie_break.reasons,
-                        f"candidate-gap:{gap:.3f}",
-                    ),
-                    candidates=title_tie_break.candidates,
-                )
-
-        if mode is NumberingMode.AIRED:
-            coordinate_title_rescue = catalog_coordinate_title_rescue(
-                provider, parse_group, active_ranked
-            )
-            if (
-                coordinate_title_rescue is not None
-                and coordinate_title_rescue.winner is not None
-            ):
-                provider_show = next(
-                    candidate
-                    for candidate in provider_candidates
-                    if candidate.identity == coordinate_title_rescue.winner
-                )
-                title = _preferred_title(override, source_title, provider_show.title)
-                assert title is not None
-                return _resolved_show_result(
-                    source_key=source_key,
-                    parse_group=parse_group,
-                    override=override,
-                    provider=provider,
-                    provider_identity=provider_show.identity,
-                    title=title,
-                    year=(
-                        provider_show.year
-                        if provider_show.year is not None
-                        else year_hint
-                    ),
-                    method=f"{method}+catalog-coordinate-title-rescue",
-                    confidence=top.score,
-                    reasons=(
-                        *search_reasons,
-                        *(alias_result.reasons if alias_result is not None else ()),
-                        *(tie_break.reasons if tie_break is not None else ()),
-                        *(
-                            title_tie_break.reasons
-                            if title_tie_break is not None
-                            else ()
-                        ),
-                        *coordinate_title_rescue.reasons,
-                        f"candidate-gap:{gap:.3f}",
-                    ),
-                    candidates=coordinate_title_rescue.candidates,
-                )
-
-            aired_rescue = aired_catalog_rescue(provider, parse_group, active_ranked)
-            if aired_rescue is not None and aired_rescue.winner is not None:
-                provider_show = next(
-                    candidate
-                    for candidate in provider_candidates
-                    if candidate.identity == aired_rescue.winner
-                )
-                title = _preferred_title(override, source_title, provider_show.title)
-                assert title is not None
-                return _resolved_show_result(
-                    source_key=source_key,
-                    parse_group=parse_group,
-                    override=override,
-                    provider=provider,
-                    provider_identity=provider_show.identity,
-                    title=title,
-                    year=(
-                        provider_show.year
-                        if provider_show.year is not None
-                        else year_hint
-                    ),
-                    method=f"{method}+aired-catalog-rescue",
-                    confidence=top.score,
-                    reasons=(
-                        *search_reasons,
-                        *(alias_result.reasons if alias_result is not None else ()),
-                        *(tie_break.reasons if tie_break is not None else ()),
-                        *(
-                            title_tie_break.reasons
-                            if title_tie_break is not None
-                            else ()
-                        ),
-                        *aired_rescue.reasons,
-                        f"candidate-gap:{gap:.3f}",
-                    ),
-                    candidates=aired_rescue.candidates,
-                )
-
-        if tie_break is None and aired_rescue is None:
-            rescue = catalog_group_rescue(provider, parse_group, active_ranked)
-            if (
-                rescue is not None
-                and rescue.winner is not None
-                and rescue.numbering_mode is not None
-            ):
-                provider_show = next(
-                    candidate
-                    for candidate in provider_candidates
-                    if candidate.identity == rescue.winner
-                )
-                title = _preferred_title(override, source_title, provider_show.title)
-                assert title is not None
-                return ShowResolution(
-                    status=ResolutionStatus.MATCHED,
-                    show=CanonicalShow(
-                        source_key=source_key,
-                        provider_identity=provider_show.identity,
-                        title=title,
-                        year=(
-                            provider_show.year
-                            if provider_show.year is not None
-                            else year_hint
-                        ),
-                        numbering_mode=rescue.numbering_mode,
-                    ),
-                    evidence=MatchEvidence(
-                        method=f"{method}+catalog-rescue",
-                        confidence=top.score,
-                        reasons=(
-                            *search_reasons,
-                            *(alias_result.reasons if alias_result is not None else ()),
-                            *rescue.reasons,
-                            f"candidate-gap:{gap:.3f}",
-                        ),
-                        candidates=rescue.candidates,
-                    ),
-                )
+    trace = _StructuralResolutionTrace()
+    if alias_result is None or not alias_result.indeterminate:
+        trace = _attempt_structural_resolution(
+            source_key=source_key,
+            parse_group=parse_group,
+            override=override,
+            provider=provider,
+            provider_candidates=provider_candidates,
+            active_ranked=active_ranked,
+            method=method,
+            top_score=top.score,
+            gap=gap,
+            search_reasons=tuple(search_reasons),
+            alias_result=alias_result,
+            source_title=source_title,
+            year_hint=year_hint,
+        )
+        if trace.resolution is not None:
+            return trace.resolution
 
     status = (
         ResolutionStatus.SUSPICIOUS
@@ -1144,16 +1280,16 @@ def resolve_show_group_with_provider(
         else "provider-evidence-below-threshold"
     )
     candidates = active_ranked
-    if title_tie_break is not None:
-        candidates = title_tie_break.candidates
-    elif coordinate_title_rescue is not None:
-        candidates = coordinate_title_rescue.candidates
-    elif aired_rescue is not None:
-        candidates = aired_rescue.candidates
-    elif tie_break is not None:
-        candidates = tie_break.candidates
-    elif rescue is not None:
-        candidates = rescue.candidates
+    if trace.title_tie_break is not None:
+        candidates = trace.title_tie_break.candidates
+    elif trace.coordinate_title_rescue is not None:
+        candidates = trace.coordinate_title_rescue.candidates
+    elif trace.aired_rescue is not None:
+        candidates = trace.aired_rescue.candidates
+    elif trace.tie_break is not None:
+        candidates = trace.tie_break.candidates
+    elif trace.group_rescue is not None:
+        candidates = trace.group_rescue.candidates
     return ShowResolution(
         status=status,
         show=None,
@@ -1164,15 +1300,19 @@ def resolve_show_group_with_provider(
                 reason,
                 *search_reasons,
                 *(alias_result.reasons if alias_result is not None else ()),
-                *(tie_break.reasons if tie_break is not None else ()),
-                *(title_tie_break.reasons if title_tie_break is not None else ()),
+                *(trace.tie_break.reasons if trace.tie_break is not None else ()),
                 *(
-                    coordinate_title_rescue.reasons
-                    if coordinate_title_rescue is not None
+                    trace.title_tie_break.reasons
+                    if trace.title_tie_break is not None
                     else ()
                 ),
-                *(aired_rescue.reasons if aired_rescue is not None else ()),
-                *(rescue.reasons if rescue is not None else ()),
+                *(
+                    trace.coordinate_title_rescue.reasons
+                    if trace.coordinate_title_rescue is not None
+                    else ()
+                ),
+                *(trace.aired_rescue.reasons if trace.aired_rescue is not None else ()),
+                *(trace.group_rescue.reasons if trace.group_rescue is not None else ()),
                 f"candidate-gap:{gap:.3f}",
             ),
             candidates=candidates,
