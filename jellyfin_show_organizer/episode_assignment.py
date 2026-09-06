@@ -15,7 +15,11 @@ from .episode_assignment_strict import (
 )
 from .models import CanonicalShow, NumberingMode
 from .providers import MetadataProvider, TvmazeProviderAdapter
-from .segment_counted_titles import normalize_episode_title
+from .segment_counted_titles import (
+    clean_episode_title_hint,
+    normalize_episode_title,
+    provider_declared_aka_aliases,
+)
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
 
@@ -138,12 +142,62 @@ def _recover_optional_leading_the(
     )
 
 
+def _rewrite_provider_aka_recovery_evidence(
+    sources: tuple[SourceEpisodeInput, ...],
+    result: EpisodeGroupAssignment,
+) -> EpisodeGroupAssignment:
+    by_source = {source.source_key: source for source in sources}
+    rewritten: list[SourceEpisodeAssignment] = []
+    changed = False
+    for assignment in result.assignments:
+        source = by_source.get(assignment.source_key)
+        if (
+            source is None
+            or source.parse.title_hint is None
+            or assignment.status is not AssignmentStatus.MATCHED
+            or len(assignment.episodes) != 1
+            or assignment.evidence.method != "segment-counted-title-remap"
+            or "segment-counted-title-remap:unique-near-title-proof"
+            not in assignment.evidence.reasons
+        ):
+            rewritten.append(assignment)
+            continue
+
+        normalized_source = clean_episode_title_hint(source.parse.title_hint)
+        episode = assignment.episodes[0]
+        if normalized_source not in provider_declared_aka_aliases(episode.title):
+            rewritten.append(assignment)
+            continue
+
+        reasons = tuple(
+            reason
+            for reason in assignment.evidence.reasons
+            if reason != "segment-counted-title-remap:unique-near-title-proof"
+            and not reason.startswith("segment-counted-title-near-score:")
+        )
+        marker = f"segment-counted-title-remap:provider-declared-aka-proof:{normalized_source}"
+        rewritten.append(
+            replace(
+                assignment,
+                evidence=replace(
+                    assignment.evidence,
+                    reasons=(*reasons, marker),
+                ),
+            )
+        )
+        changed = True
+
+    if not changed:
+        return result
+    return replace(result, assignments=tuple(rewritten))
+
+
 def assign_episode_group_with_provider(
     show: CanonicalShow,
     sources: Iterable[SourceEpisodeInput],
     provider: MetadataProvider,
 ) -> EpisodeGroupAssignment:
-    """Assign episodes and recover one narrow explicit segment-title article gap."""
+    """Assign episodes and run narrowly-scoped title evidence recoveries."""
 
     source_group = tuple(
         sorted(
@@ -152,7 +206,8 @@ def assign_episode_group_with_provider(
         )
     )
     result = _mixed.assign_episode_group_with_provider(show, source_group, provider)
-    return _recover_optional_leading_the(show, source_group, result, provider)
+    result = _recover_optional_leading_the(show, source_group, result, provider)
+    return _rewrite_provider_aka_recovery_evidence(source_group, result)
 
 
 def assign_episode_group(
