@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import replace
 
-from . import episode_assignment_strict as _strict
-from . import mixed_episode_assignment as _mixed
+from . import (
+    episode_assignment_strict as _strict,
+    mixed_episode_assignment as _mixed,
+)
 from .episode_assignment_strict import (
     AssignmentStatus,
     EpisodeGroupAssignment,
