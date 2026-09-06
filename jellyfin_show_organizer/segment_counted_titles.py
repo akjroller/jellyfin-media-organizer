@@ -19,6 +19,7 @@ _TECHNICAL_SUFFIX = re.compile(
     r"(?:aac|ddp|eac3|ac3|flac|opus)(?:[ ._-]?\d(?:[ ._-]\d)?)?"
     r"))+$"
 )
+_PROVIDER_AKA_ALIAS = re.compile(r"(?i)\(\s*aka\s+([^()]+?)\s*\)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +70,17 @@ def clean_episode_title_hint(value: str) -> str:
             break
         cleaned = trimmed
     return normalize_episode_title(cleaned)
+
+
+def provider_declared_aka_aliases(value: str) -> tuple[str, ...]:
+    """Return normalized aliases explicitly declared in parenthetical AKA markers."""
+
+    aliases: list[str] = []
+    for match in _PROVIDER_AKA_ALIAS.finditer(unicodedata.normalize("NFKC", value)):
+        alias = normalize_episode_title(match.group(1))
+        if alias and alias not in aliases:
+            aliases.append(alias)
+    return tuple(aliases)
 
 
 def _optional_leading_the_key(normalized_title: str) -> str:
@@ -182,7 +194,7 @@ def recover_unique_near_segment_titles(
     catalog: ProviderEpisodeCatalog,
     analysis: SegmentCountedTitleAnalysis,
 ) -> tuple[SegmentCountedTitleRecovery, ...]:
-    """Recover one near-title member only after exact evidence proves the group."""
+    """Recover one strongly evidenced title member only after the group is proven."""
 
     if not analysis.proven:
         return ()
@@ -210,7 +222,11 @@ def recover_unique_near_segment_titles(
             candidate_title = normalize_episode_title(episode.title)
             if len(candidate_title) < _MIN_NEAR_TITLE_LENGTH:
                 continue
-            if (
+            if observation.normalized_title in provider_declared_aka_aliases(
+                episode.title
+            ):
+                score = 1.0
+            elif (
                 candidate_title != observation.normalized_title
                 and _optional_leading_the_key(candidate_title) == source_article_key
             ):
