@@ -195,17 +195,20 @@ def _record_show_key(record: Mapping[str, object]) -> str:
     return _record_source(record).replace("\\", "/").split("/", 1)[0]
 
 
-def _record_collision_class(
-    record: Mapping[str, object],
+def _duplicate_collision_class(
+    duplicate: Mapping[str, object],
 ) -> ReviewCollisionClass:
-    status = record.get("status")
-    if status == "duplicate":
-        return ReviewCollisionClass.SAME_LOGICAL_IDENTITY
-    if status == "suspicious":
-        return ReviewCollisionClass.DESTINATION_CONFLICT
-    raise ReviewConfigurationError(
-        "duplicate review data must belong to a duplicate or suspicious record"
-    )
+    value = duplicate.get("collision_class")
+    if not isinstance(value, str):
+        raise ReviewConfigurationError(
+            "duplicate decision is missing structured collision_class"
+        )
+    try:
+        return ReviewCollisionClass(value)
+    except ValueError as exc:
+        raise ReviewConfigurationError(
+            "duplicate decision collision_class is invalid"
+        ) from exc
 
 
 def _collect_duplicate_groups(manifest: object) -> tuple[DuplicateReviewGroup, ...]:
@@ -247,7 +250,7 @@ def _collect_duplicate_groups(manifest: object) -> tuple[DuplicateReviewGroup, .
             recommended_winner=cast(str | None, winner),
             losers=tuple(cast(Sequence[str], losers_raw)),
             evidence=tuple(cast(Sequence[str], evidence_raw)),
-            collision_class=_record_collision_class(record),
+            collision_class=_duplicate_collision_class(duplicate),
         )
         ref = stable_duplicate_ref(destination_key, group.candidates)
         existing = groups.get(ref)
@@ -366,9 +369,9 @@ def _capture_held_delta(raw: dict[str, Any], source: str) -> dict[str, object]:
         provider = disposition.get("show_provider")
         provider_id = disposition.get("show_provider_id")
         for entry in cast(list[dict[str, Any]], raw.get("shows", [])):
-            if entry.get("provider") == provider and str(
-                entry.get("provider_id")
-            ) == str(provider_id):
+            if entry.get("provider") == provider and str(entry.get("provider_id")) == str(
+                provider_id
+            ):
                 data["show"] = copy.deepcopy(entry)
                 break
     return data
@@ -508,7 +511,9 @@ def _answer_duplicate(
     ref = stable_duplicate_ref(group.destination_key, group.candidates)
     session_item = session.item(ref)
     if session_item.collision_class is not group.collision_class:
-        raise ReviewConfigurationError("duplicate collision class changed within the plan")
+        raise ReviewConfigurationError(
+            "duplicate collision class changed within the plan"
+        )
     _display_duplicate(group, records, companions, output)
 
     if answer is None:
