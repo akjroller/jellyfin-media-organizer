@@ -20,7 +20,7 @@ from .models import (
     TerminalStatus,
 )
 from .preflight import preflight_plan
-from .providers import ProviderEpisode, TvmazeProviderAdapter
+from .providers import MetadataProvider, ProviderEpisode, TvmazeProviderAdapter
 from .reports import write_audit_bundle
 from .review_overrides import ReviewOverrideCatalog, load_planning_overrides
 from .run_provenance import (
@@ -82,6 +82,95 @@ def _clear_duplicate_decisions(records: tuple[PlanRecord, ...]) -> list[PlanReco
     return restored
 
 
+def _confirmed_provider_episode(
+    provider: MetadataProvider,
+    decision,
+) -> ProviderEpisode:
+    catalog = provider.episode_catalog(decision.show_provider_identity)
+    if not catalog.resolved or catalog.errors:
+        raise PlanningConfigurationError(
+            "reviewed episode provider catalog is unavailable or unsafe"
+        )
+    matches = [
+        episode
+        for episode in catalog.episodes
+        if episode.identity == decision.episode_provider_identity
+    ]
+    if len(matches) != 1:
+        raise PlanningConfigurationError(
+            "reviewed provider episode identity is missing or ambiguous"
+        )
+    episode = matches[0]
+    if (
+        episode.number is None
+        or episode.season != decision.season
+        or episode.number != decision.number
+        or episode.title != decision.title
+        or episode.airdate != decision.airdate
+    ):
+        raise PlanningConfigurationError(
+            "reviewed provider episode metadata changed since manual confirmation"
+        )
+    return episode
+
+
+def _reviewed_episode_record(
+    record: PlanRecord,
+    catalog: ReviewOverrideCatalog,
+    provider: MetadataProvider,
+    destination_policy: DestinationPolicy,
+) -> PlanRecord:
+    decision = catalog.reviewed_episode_for(record.source.relative_path)
+    if decision is None:
+        return record
+    if record.show is None:
+        raise PlanningConfigurationError(
+            "reviewed episode could not resolve a verified show identity"
+        )
+    if record.show.provider_identity != decision.show_provider_identity:
+        raise PlanningConfigurationError(
+            "reviewed episode conflicts with resolved show identity"
+        )
+    episode = _confirmed_provider_episode(provider, decision)
+    evidence = MatchEvidence(
+        method="reviewed-provider-episode",
+        confidence=1.0,
+        reasons=(
+            f"manual-review-lookup-mode:{decision.lookup_mode}",
+            f"reviewed-provider-episode:{episode.identity.key}",
+            *decision.reasons,
+        ),
+    )
+    assignment = SourceEpisodeAssignment(
+        source_key=record.source.relative_path,
+        status=AssignmentStatus.MATCHED,
+        episodes=(episode,),
+        evidence=evidence,
+    )
+    provider_ids = catalog.jellyfin_identifiers_for(record.show.source_key)
+    destination = build_episode_destination(
+        record.show,
+        assignment,
+        record.source.extension,
+        provider_ids=provider_ids,
+        policy=destination_policy,
+    )
+    if destination.status is not DestinationStatus.READY:
+        raise PlanningConfigurationError(
+            "reviewed episode cannot produce a safe Jellyfin destination"
+        )
+    return replace(
+        record,
+        status=TerminalStatus.MATCHED,
+        evidence=evidence,
+        destination=destination.relative_path,
+        extra=None,
+        duplicate=None,
+        provider_episodes=(_planner._plan_episode(episode),),
+        reason=None,
+    )
+
+
 def _explicit_extra_record(
     record: PlanRecord,
     catalog: ReviewOverrideCatalog,
@@ -101,7 +190,7 @@ def _explicit_extra_record(
 
     extra = ExtraDecision(kind=decision.kind, rule="explicit-review-extra")
     display_title = decision.display_title
-    if display_title is None and record.parse is not None:
+    if display_title is None:
         display_title = record.parse.title_hint
     naming = derive_extra_display_identity(
         record.source.relative_path,
@@ -161,7 +250,7 @@ def _with_jellyfin_ids(
     if record.status is TerminalStatus.EXTRA:
         if record.extra is None:
             raise PlanningConfigurationError("extra record is missing an extra decision")
-        display_title = record.parse.title_hint if record.parse is not None else None
+        display_title = record.parse.title_hint
         reviewed = catalog.extra_decision_for(record.source.relative_path)
         if reviewed is not None and reviewed.display_title is not None:
             display_title = reviewed.display_title
@@ -210,6 +299,7 @@ def _apply_review_extensions(
     source_root,
     overrides,
     config: PlanningConfig,
+    provider: MetadataProvider,
 ) -> OrganizerPlan:
     catalog = _review_catalog(overrides)
     if catalog is None:
@@ -220,23 +310,44 @@ def _apply_review_extensions(
         max_component_length=config.max_component_length,
     )
     records = _clear_duplicate_decisions(plan.records)
-    sources_by_key = {
-        _planner._path_key(record.source.relative_path)[0]: record for record in records
+    source_keys = {
+        _planner._path_key(record.source.relative_path)[0] for record in records
+    }
+    configured_episodes = {
+        _planner._path_key(decision.source)[0]
+        for decision in catalog.reviewed_episode_decisions
     }
     configured_extras = {
         _planner._path_key(decision.source)[0] for decision in catalog.extra_decisions
     }
-    if configured_extras - set(sources_by_key):
+    if configured_episodes - source_keys:
+        raise PlanningConfigurationError(
+            "reviewed episode decision references an unknown source"
+        )
+    if configured_extras - source_keys:
         raise PlanningConfigurationError("extra decision references an unknown source")
 
     reviewed_records: list[PlanRecord] = []
+    consumed_episodes: set[str] = set()
     consumed_extras: set[str] = set()
     for record in records:
-        updated = _explicit_extra_record(record, catalog, destination_policy)
+        updated = _reviewed_episode_record(
+            record,
+            catalog,
+            provider,
+            destination_policy,
+        )
         if updated is not record:
+            consumed_episodes.add(_planner._path_key(record.source.relative_path)[0])
+        extra_updated = _explicit_extra_record(updated, catalog, destination_policy)
+        if extra_updated is not updated:
             consumed_extras.add(_planner._path_key(record.source.relative_path)[0])
-        updated = _with_jellyfin_ids(updated, catalog, destination_policy)
+        updated = _with_jellyfin_ids(extra_updated, catalog, destination_policy)
         reviewed_records.append(updated)
+    if configured_episodes - consumed_episodes:
+        raise PlanningConfigurationError(
+            "reviewed episode decision could not be consumed safely"
+        )
     if configured_extras - consumed_extras:
         raise PlanningConfigurationError("extra decision could not be consumed safely")
 
@@ -291,7 +402,13 @@ def execute_plan(
     )
     provider = TvmazeProviderAdapter(cache, getter)
     plan = _planner._build_plan(source_root, config, overrides, cache, provider)
-    plan = _apply_review_extensions(plan, source_root, overrides, config)
+    plan = _apply_review_extensions(
+        plan,
+        source_root,
+        overrides,
+        config,
+        provider,
+    )
     plan_hash = stable_plan_hash(plan)
     preflight = preflight_plan(
         plan_hash,
