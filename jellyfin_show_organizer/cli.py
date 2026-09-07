@@ -12,8 +12,16 @@ from typing import cast
 from . import __version__
 from .models import TerminalStatus
 from .overrides import load_overrides
-from .planner import PlanningConfig, PlanningConfigurationError, execute_plan
+from .planner import (
+    PlanningConfig,
+    PlanningConfigurationError,
+    execute_plan,
+    http_json_getter,
+)
+from .providers import TvmazeProviderAdapter
 from .review import render_override_stub
+from .review_wizard import ReviewConfigurationError, run_review_wizard
+from .tvmaze_cache import TvmazeCatalogCache
 
 CommandHandler = Callable[[argparse.Namespace], int]
 PLAN_SUCCESS_EXIT = 0
@@ -28,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="organizer",
         description=(
-            "Plan-only Jellyfin show organization tooling. "
+            "Plan-first Jellyfin show organization tooling. "
             "Media mutation is intentionally unavailable."
         ),
     )
@@ -77,6 +85,25 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser.add_argument("--json", action="store_true", dest="json_output")
     plan_parser.add_argument("--verbose", action="store_true")
     plan_parser.set_defaults(handler=_run_plan)
+
+    review_parser = subparsers.add_parser(
+        "review",
+        help="Review duplicate and held plan decisions without touching media.",
+        description=(
+            "Process duplicate groups and held video records one decision at a time. "
+            "The command reads an explicit plan and override file, may consult the "
+            "provider cache/API, and writes a new override file only. Media mutation "
+            "and deletion are unavailable."
+        ),
+    )
+    review_parser.add_argument("plan", type=Path)
+    review_parser.add_argument("--overrides", type=Path, required=True)
+    review_parser.add_argument("--output", type=Path, required=True)
+    review_parser.add_argument("--cache-dir", type=Path, required=True)
+    review_mode = review_parser.add_mutually_exclusive_group()
+    review_mode.add_argument("--offline", action="store_true")
+    review_mode.add_argument("--online", action="store_true")
+    review_parser.set_defaults(handler=_run_review)
 
     overrides_parser = subparsers.add_parser(
         "overrides",
@@ -237,6 +264,71 @@ def _run_plan(args: argparse.Namespace) -> int:
         if bool(args.verbose):
             print(f"Audit bundle: {config.output_dir.resolve(strict=False)}")
     return exit_code
+
+
+def _run_review(args: argparse.Namespace) -> int:
+    plan_path = cast(Path, args.plan)
+    overrides_path = cast(Path, args.overrides)
+    output_path = cast(Path, args.output)
+    cache_dir = cast(Path, args.cache_dir)
+    try:
+        plan_file = plan_path.expanduser().resolve(strict=True)
+        override_file = overrides_path.expanduser().resolve(strict=True)
+        output_file = output_path.expanduser().resolve(strict=False)
+        if output_file == override_file:
+            raise ReviewConfigurationError(
+                "review output must be a new file; in-place override edits are not allowed"
+            )
+        if output_file.exists():
+            raise ReviewConfigurationError("review output already exists")
+        if not output_file.parent.is_dir():
+            raise ReviewConfigurationError("review output parent directory does not exist")
+        manifest = json.loads(plan_file.read_text(encoding="utf-8"))
+        override_payload = override_file.read_bytes()
+        cache = TvmazeCatalogCache(
+            cache_dir.expanduser().resolve(strict=False),
+            offline=bool(args.offline),
+            refresh=False,
+        )
+        provider = TvmazeProviderAdapter(cache, http_json_getter)
+        rendered, summary = run_review_wizard(
+            manifest,
+            override_payload,
+            provider,
+            input_fn=input,
+            output=sys.stdout,
+        )
+        output_file.write_bytes(rendered)
+        load_overrides(output_file)
+    except KeyboardInterrupt:
+        print("Review cancelled; no override output was written.", file=sys.stderr)
+        return 130
+    except (
+        OSError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ReviewConfigurationError,
+        RuntimeError,
+        ValueError,
+    ) as exc:
+        try:
+            if "output_file" in locals() and output_file.exists():
+                output_file.unlink()
+        except OSError:
+            pass
+        print(f"Review failed safely: {exc}", file=sys.stderr)
+        return 2
+
+    print(
+        "Review complete: "
+        f"duplicate_groups={summary.duplicate_groups_seen} "
+        f"duplicate_changes={summary.duplicate_groups_changed} "
+        f"held_records={summary.held_records_seen} "
+        f"held_changes={summary.held_records_changed} "
+        f"deferred={summary.deferred} "
+        f"output={output_file}"
+    )
+    return 0
 
 
 def _run_overrides_validate(args: argparse.Namespace) -> int:
