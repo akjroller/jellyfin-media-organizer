@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any, TextIO, cast
 
+from . import review_wizard as _wizard
 from .providers import MetadataProvider
 from .review_contract import DuplicateGroupAction
 from .review_identity import stable_duplicate_ref
@@ -21,19 +22,11 @@ from .review_session import (
     manifest_sha256,
     render_review_session,
 )
-from .review_wizard import (
-    _record_source,
-    _review_extra,
-    _review_special,
-    _review_specific_episode,
-    collect_duplicate_groups,
-    collect_held_records,
-    DuplicateReviewGroup,
-    InputFn,
-    parse_overrides,
-    ReviewConfigurationError,
-)
 from .schema import validate_manifest
+
+DuplicateReviewGroup = _wizard.DuplicateReviewGroup
+InputFn = _wizard.InputFn
+ReviewConfigurationError = _wizard.ReviewConfigurationError
 
 
 _TABLE_ORDER = (
@@ -131,7 +124,7 @@ def _parse_active(payload: bytes) -> dict[str, Any]:
         raise ReviewConfigurationError("review requires schema-4 or schema-5 overrides")
     groups = raw.pop("duplicate_group_decisions", [])
     session_hash = raw.pop("review_session_sha256", None)
-    legacy = parse_overrides(
+    legacy = _wizard.parse_overrides(
         ("\n".join(_render_legacy_lines(raw)) + "\n").encode("utf-8")
     )
     legacy["duplicate_group_decisions"] = groups
@@ -261,8 +254,7 @@ def _compile_active(base_payload: bytes, session: ReviewSession) -> bytes:
             continue
 
         assert item.source is not None
-        action = item.action
-        if action == "keep_held":
+        if item.action == "keep_held":
             continue
         for table in (
             "source_holds",
@@ -298,10 +290,13 @@ def _record_maps(
     dict[str, DuplicateReviewGroup],
 ]:
     validate_manifest(manifest)
-    held = {_record_source(record): record for record in collect_held_records(manifest)}
+    held = {
+        _wizard._record_source(record): record
+        for record in _wizard.collect_held_records(manifest)
+    }
     duplicate = {
         stable_duplicate_ref(group.destination_key, group.candidates): group
-        for group in collect_duplicate_groups(manifest)
+        for group in _wizard.collect_duplicate_groups(manifest)
     }
     return held, duplicate
 
@@ -458,7 +453,7 @@ def _answer_held(
     input_fn: InputFn,
     output: TextIO,
 ) -> ReviewSession:
-    source = _record_source(record)
+    source = _wizard._record_source(record)
     ref = next(
         item.review_ref
         for item in session.items
@@ -482,17 +477,17 @@ def _answer_held(
 
     working = copy.deepcopy(raw)
     if action == "2":
-        changed = _review_specific_episode(
+        changed = _wizard._review_specific_episode(
             working, record, provider, input_fn=input_fn, output=output
         )
         reviewed_action = "episode"
     elif action == "3":
-        changed = _review_special(
+        changed = _wizard._review_special(
             working, record, provider, input_fn=input_fn, output=output
         )
         reviewed_action = "special"
     elif action == "4":
-        changed = _review_extra(
+        changed = _wizard._review_extra(
             working, record, provider, input_fn=input_fn, output=output
         )
         reviewed_action = "extra"
