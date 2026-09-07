@@ -4,8 +4,7 @@ import json
 from collections import defaultdict
 from dataclasses import replace
 
-from . import planner as _planner
-from . import review_planner as _review
+from . import planner as _planner, review_planner as _review
 from .inventory import InventoryStatus, scan_videos
 from .models import DuplicateDecision, OrganizerPlan, PlanRecord, TerminalStatus
 from .preflight import preflight_plan
@@ -93,7 +92,9 @@ def _bindings_for_group(
     return tuple(bindings)
 
 
-def _duplicate_groups(plan: OrganizerPlan) -> dict[str, tuple[DuplicateDecision, tuple[PlanRecord, ...]]]:
+def _duplicate_groups(
+    plan: OrganizerPlan,
+) -> dict[str, tuple[DuplicateDecision, tuple[PlanRecord, ...]]]:
     grouped: dict[str, list[PlanRecord]] = defaultdict(list)
     decision_by_ref: dict[str, DuplicateDecision] = {}
     for record in plan.records:
@@ -164,8 +165,6 @@ def _apply_duplicate_group_contract(
                 )
             continue
 
-        # Keep-all is a first-class group decision. Preserve the duplicate evidence
-        # and destination identity while making every candidate explicitly non-moving.
         keep_all = DuplicateDecision(
             destination_key=decision.destination_key,
             candidates=decision.candidates,
@@ -193,7 +192,10 @@ def _apply_duplicate_group_contract(
     if not changed:
         return plan
     ordered = tuple(
-        sorted(by_source.values(), key=lambda record: _planner._path_key(record.source.relative_path))
+        sorted(
+            by_source.values(),
+            key=lambda record: _planner._path_key(record.source.relative_path),
+        )
     )
     return replace(plan, records=ordered)
 
