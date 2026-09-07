@@ -31,7 +31,9 @@ def _sha256(value: object, label: str) -> str:
 def _validate_reasons(reasons: tuple[str, ...], label: str) -> None:
     if not reasons or any(not reason or reason != reason.strip() for reason in reasons):
         raise ValueError(f"{label} reasons must contain non-empty trimmed strings")
-    normalized = [unicodedata.normalize("NFKC", reason).casefold() for reason in reasons]
+    normalized = [
+        unicodedata.normalize("NFKC", reason).casefold() for reason in reasons
+    ]
     if len(normalized) != len(set(normalized)):
         raise ValueError(f"{label} reasons must be unique")
 
@@ -63,9 +65,14 @@ class ReviewedEpisodeOverride:
         object.__setattr__(
             self,
             "source_binding_sha256",
-            _sha256(self.source_binding_sha256, "reviewed episode source_binding_sha256"),
+            _sha256(
+                self.source_binding_sha256, "reviewed episode source_binding_sha256"
+            ),
         )
-        if self.show_provider_identity.provider != self.episode_provider_identity.provider:
+        if (
+            self.show_provider_identity.provider
+            != self.episode_provider_identity.provider
+        ):
             raise ValueError("reviewed episode and show must use the same provider")
         if self.season < 0 or self.number < 0:
             raise ValueError("reviewed episode coordinate cannot be negative")
@@ -108,7 +115,9 @@ class ExplicitExtraOverride:
         object.__setattr__(
             self,
             "source_binding_sha256",
-            _sha256(self.source_binding_sha256, "extra decision source_binding_sha256"),
+            _sha256(
+                self.source_binding_sha256, "extra decision source_binding_sha256"
+            ),
         )
         kind = self.kind.strip().casefold()
         if not kind:
@@ -166,28 +175,28 @@ class ReviewOverrideCatalog(OverrideCatalog):
             for decision in self.episode_decisions
         }
         reviewed_sources: dict[str, str] = {}
-        for decision in self.reviewed_episode_decisions:
-            normalized = _base._source_reference_key(decision.source)
+        for reviewed_decision in self.reviewed_episode_decisions:
+            normalized = _base._source_reference_key(reviewed_decision.source)
             owner = reviewed_sources.get(normalized)
             if owner is not None:
                 raise ValueError(
                     "reviewed episode source is configured more than once: "
-                    f"{decision.source!r} conflicts with {owner!r}"
+                    f"{reviewed_decision.source!r} conflicts with {owner!r}"
                 )
             if normalized in hold_keys or normalized in legacy_decision_keys:
                 raise ValueError(
                     "reviewed episode cannot overlap a source hold or legacy episode decision"
                 )
-            reviewed_sources[normalized] = decision.source
+            reviewed_sources[normalized] = reviewed_decision.source
 
         extra_sources: dict[str, str] = {}
-        for decision in self.extra_decisions:
-            normalized = _base._source_reference_key(decision.source)
+        for extra_decision in self.extra_decisions:
+            normalized = _base._source_reference_key(extra_decision.source)
             owner = extra_sources.get(normalized)
             if owner is not None:
                 raise ValueError(
                     "extra decision source is configured more than once: "
-                    f"{decision.source!r} conflicts with {owner!r}"
+                    f"{extra_decision.source!r} conflicts with {owner!r}"
                 )
             if (
                 normalized in hold_keys
@@ -197,7 +206,7 @@ class ReviewOverrideCatalog(OverrideCatalog):
                 raise ValueError(
                     "extra decision cannot overlap another exact-source disposition"
                 )
-            extra_sources[normalized] = decision.source
+            extra_sources[normalized] = extra_decision.source
 
         show_keys = {
             _base._normalize_identity(show.key): show.key for show in self.shows
