@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from jellyfin_show_organizer.destination import JellyfinProvider
 from jellyfin_show_organizer.models import (
     CanonicalShow,
     DuplicateDecision,
@@ -326,17 +325,17 @@ def test_held_episode_requires_provider_confirmation_and_previews_jellyfin_ids()
         FakeProvider(),
         input_fn=_inputs(
             [
-                "2",  # held action: episode
-                "",  # default show search
-                "1",  # provider show
-                "1",  # coordinate lookup
-                "",  # default season 1
-                "",  # default episode 1
-                "y",  # edit Jellyfin IDs
-                "79168",  # TVDB
-                "12345",  # TMDB
-                "tt1234567",  # IMDb
-                "y",  # write decision
+                "2",
+                "",
+                "1",
+                "1",
+                "",
+                "",
+                "y",
+                "79168",
+                "12345",
+                "tt1234567",
+                "y",
             ]
         ),
         output=output,
@@ -367,12 +366,12 @@ def test_held_special_is_provider_catalog_confirmed() -> None:
         FakeProvider(),
         input_fn=_inputs(
             [
-                "3",  # held action: special
-                "",  # search
-                "1",  # show
-                "1",  # first listed special
-                "n",  # do not edit external IDs
-                "y",  # confirm
+                "3",
+                "",
+                "1",
+                "1",
+                "n",
+                "y",
             ]
         ),
         output=io.StringIO(),
@@ -419,13 +418,13 @@ def test_held_extra_is_first_class_and_has_destination_preview() -> None:
         FakeProvider(),
         input_fn=_inputs(
             [
-                "4",  # held action: extra
-                "",  # show search
-                "1",  # provider show
-                "1",  # trailer
+                "4",
+                "",
+                "1",
+                "1",
                 "Fabricated Trailer",
-                "n",  # no external IDs
-                "y",  # write
+                "n",
+                "y",
             ]
         ),
         output=output,
