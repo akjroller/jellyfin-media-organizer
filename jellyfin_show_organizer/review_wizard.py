@@ -95,9 +95,7 @@ def _record_parse_episodes(record: Mapping[str, object]) -> tuple[int, ...]:
     if not isinstance(raw, list | tuple):
         return ()
     values = tuple(
-        value
-        for value in raw
-        if isinstance(value, int) and not isinstance(value, bool)
+        value for value in raw if isinstance(value, int) and not isinstance(value, bool)
     )
     return values if len(values) == len(raw) else ()
 
@@ -271,7 +269,9 @@ def _prompt_jellyfin_ids(
 ) -> tuple[JellyfinProviderIdentifier, ...]:
     existing = _existing_jellyfin_ids(raw, show_key)
     by_provider = {identifier.provider: identifier.value for identifier in existing}
-    if input_fn("Edit Jellyfin show IDs (TVDB/TMDB/IMDb)? [y/N]: ").strip().casefold() not in {
+    if input_fn(
+        "Edit Jellyfin show IDs (TVDB/TMDB/IMDb)? [y/N]: "
+    ).strip().casefold() not in {
         "y",
         "yes",
     }:
@@ -562,7 +562,9 @@ def _review_specific_episode(
         if number is None:
             return False
         episode = _find_episode_by_coordinate(catalog.episodes, season, number)
-        reason = f"manual review confirmed provider coordinate S{season:02d}E{number:02d}"
+        reason = (
+            f"manual review confirmed provider coordinate S{season:02d}E{number:02d}"
+        )
     elif mode == "2":
         absolute = _prompt_int(
             "Absolute episode number", input_fn=input_fn, output=output
@@ -680,9 +682,9 @@ def _review_extra(
         output=output,
     )
     kind = choices[selected]
-    default_title = _record_title_hint(record) or PurePosixPath(
-        _record_source(record)
-    ).stem
+    default_title = (
+        _record_title_hint(record) or PurePosixPath(_record_source(record)).stem
+    )
     display_title = (
         input_fn(f"Extra display title [{default_title}]: ").strip() or default_title
     )
