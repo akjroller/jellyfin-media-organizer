@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import json
-import tomllib
-import unicodedata
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, TextIO, cast
 
@@ -18,31 +14,12 @@ from .destination import (
 from .episode_assignment_strict import AssignmentStatus, SourceEpisodeAssignment
 from .models import CanonicalShow, ExtraDecision, MatchEvidence, NumberingMode
 from .providers import MetadataProvider, ProviderEpisode, ProviderShow
-from .review_overrides import REVIEW_OVERRIDE_SCHEMA_VERSION
-from .schema import validate_manifest
 
 InputFn = Callable[[str], str]
 
 
 class ReviewConfigurationError(ValueError):
-    """Raised when a review session cannot be completed safely."""
-
-
-@dataclass(frozen=True, slots=True)
-class DuplicateReviewGroup:
-    destination_key: str
-    candidates: tuple[str, ...]
-    recommended_winner: str | None
-    losers: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ReviewSummary:
-    duplicate_groups_seen: int
-    duplicate_groups_changed: int
-    held_records_seen: int
-    held_records_changed: int
-    deferred: int
+    """Raised when a review action cannot be completed safely."""
 
 
 def _mapping(value: object) -> Mapping[str, object] | None:
@@ -57,10 +34,6 @@ def _integer(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value
-
-
-def _normalize(value: str) -> str:
-    return unicodedata.normalize("NFKC", value).casefold()
 
 
 def _record_source(record: Mapping[str, object]) -> str:
@@ -134,74 +107,6 @@ def _record_title_hint(record: Mapping[str, object]) -> str | None:
     return _string(parse.get("title_hint")) if parse is not None else None
 
 
-def collect_duplicate_groups(manifest: object) -> tuple[DuplicateReviewGroup, ...]:
-    """Return one deterministic entry for each duplicate decision in a plan."""
-
-    validate_manifest(manifest)
-    root = cast(Mapping[str, object], manifest)
-    raw_records = root["records"]
-    assert isinstance(raw_records, list | tuple)
-    grouped: dict[str, DuplicateReviewGroup] = {}
-    for raw_record in raw_records:
-        record = cast(Mapping[str, object], raw_record)
-        duplicate = _mapping(record.get("duplicate"))
-        if duplicate is None:
-            continue
-        destination_key = _string(duplicate.get("destination_key"))
-        candidates_raw = duplicate.get("candidates")
-        winner = duplicate.get("winner")
-        losers_raw = duplicate.get("losers")
-        if destination_key is None or not isinstance(candidates_raw, list | tuple):
-            raise ReviewConfigurationError("duplicate decision is incomplete")
-        if not all(isinstance(value, str) and value for value in candidates_raw):
-            raise ReviewConfigurationError("duplicate candidates are invalid")
-        if winner is not None and not isinstance(winner, str):
-            raise ReviewConfigurationError("duplicate winner is invalid")
-        if not isinstance(losers_raw, list | tuple) or not all(
-            isinstance(value, str) and value for value in losers_raw
-        ):
-            raise ReviewConfigurationError("duplicate losers are invalid")
-        group = DuplicateReviewGroup(
-            destination_key=destination_key,
-            candidates=tuple(cast(Sequence[str], candidates_raw)),
-            recommended_winner=cast(str | None, winner),
-            losers=tuple(cast(Sequence[str], losers_raw)),
-        )
-        existing = grouped.get(destination_key)
-        if existing is not None and existing != group:
-            raise ReviewConfigurationError(
-                "plan contains inconsistent duplicate decisions for one destination"
-            )
-        grouped[destination_key] = group
-    return tuple(
-        grouped[key]
-        for key in sorted(grouped, key=lambda value: (_normalize(value), value))
-    )
-
-
-def collect_held_records(manifest: object) -> tuple[Mapping[str, object], ...]:
-    """Return held video records in deterministic source-path order."""
-
-    validate_manifest(manifest)
-    root = cast(Mapping[str, object], manifest)
-    raw_records = root["records"]
-    assert isinstance(raw_records, list | tuple)
-    held = [
-        cast(Mapping[str, object], record)
-        for record in raw_records
-        if _string(cast(Mapping[str, object], record).get("status")) == "held"
-    ]
-    return tuple(
-        sorted(
-            held,
-            key=lambda record: (
-                _normalize(_record_source(record)),
-                _record_source(record),
-            ),
-        )
-    )
-
-
 def _prompt_choice(
     prompt: str,
     choices: Mapping[str, str],
@@ -245,7 +150,7 @@ def _prompt_int(
 
 
 def _source_key(value: str) -> str:
-    return _normalize(value.replace("\\", "/"))
+    return value.replace("\\", "/").casefold()
 
 
 def _table(raw: dict[str, Any], name: str) -> list[dict[str, Any]]:
@@ -278,36 +183,14 @@ def _remove_exact_dispositions(raw: dict[str, Any], sources: Sequence[str]) -> N
         _remove_source_entries(raw, table_name, sources)
 
 
-def _add_hold(raw: dict[str, Any], source: str, reasons: Sequence[str]) -> None:
-    _remove_exact_dispositions(raw, (source,))
-    _remove_source_entries(raw, "duplicate_preferences", (source,))
-    _table(raw, "source_holds").append(
-        {"source": source, "reasons": list(dict.fromkeys(reasons))}
-    )
-
-
-def _add_duplicate_preference(raw: dict[str, Any], source: str) -> None:
-    _remove_source_entries(raw, "duplicate_preferences", (source,))
-    _table(raw, "duplicate_preferences").append(
-        {
-            "source": source,
-            "rank": 100,
-            "reasons": [
-                "manual review selected this duplicate winner",
-                "non-selected copies remain non-destructive duplicate losers",
-            ],
-        }
-    )
-
-
 def _find_show_entry(raw: dict[str, Any], key: str) -> dict[str, Any] | None:
-    normalized_key = _normalize(key)
+    normalized = key.casefold()
     return next(
         (
             item
             for item in _table(raw, "shows")
             if isinstance(item.get("key"), str)
-            and _normalize(cast(str, item["key"])) == normalized_key
+            and cast(str, item["key"]).casefold() == normalized
         ),
         None,
     )
@@ -481,133 +364,6 @@ def _add_extra_decision(
     )
 
 
-def _toml_value(value: object) -> str:
-    if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, list | tuple):
-        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
-    raise ReviewConfigurationError(f"cannot serialize override value {value!r}")
-
-
-_FIELD_ORDER: dict[str, tuple[str, ...]] = {
-    "shows": (
-        "key",
-        "tvmaze_id",
-        "provider",
-        "provider_id",
-        "aliases",
-        "year",
-        "numbering_mode",
-        "title_preference",
-        "preferred_title",
-        "tmdb_id",
-        "tvdb_id",
-        "imdb_id",
-    ),
-    "duplicate_preferences": ("source", "rank", "reasons"),
-    "episode_decisions": (
-        "source",
-        "show_provider",
-        "show_provider_id",
-        "numbering_mode",
-        "season",
-        "episodes",
-        "absolute_episode",
-        "special_kind",
-        "special_episode",
-        "episode_date",
-        "segment_hint",
-        "title_hint",
-        "reasons",
-    ),
-    "source_holds": ("source", "reasons"),
-    "reviewed_episode_decisions": (
-        "source",
-        "show_provider",
-        "show_provider_id",
-        "episode_provider",
-        "episode_provider_id",
-        "season",
-        "number",
-        "title",
-        "airdate",
-        "lookup_mode",
-        "reasons",
-    ),
-    "extra_decisions": (
-        "source",
-        "show_provider",
-        "show_provider_id",
-        "kind",
-        "display_title",
-        "reasons",
-    ),
-}
-
-
-def render_overrides(raw: Mapping[str, object]) -> bytes:
-    """Render the supported local review override contract deterministically."""
-
-    allowed = {"schema_version", *_FIELD_ORDER}
-    unknown = set(raw) - allowed
-    if unknown:
-        raise ReviewConfigurationError(
-            f"override contains unsupported fields: {sorted(unknown)}"
-        )
-    lines = [f"schema_version = {REVIEW_OVERRIDE_SCHEMA_VERSION}"]
-    for table_name in (
-        "shows",
-        "duplicate_preferences",
-        "episode_decisions",
-        "source_holds",
-        "reviewed_episode_decisions",
-        "extra_decisions",
-    ):
-        values = raw.get(table_name, [])
-        if not isinstance(values, list) or not all(
-            isinstance(item, dict) for item in values
-        ):
-            raise ReviewConfigurationError(
-                f"override {table_name} must be an array of tables"
-            )
-        order = _FIELD_ORDER[table_name]
-        for item in cast(list[dict[str, object]], values):
-            unknown_fields = set(item) - set(order)
-            if unknown_fields:
-                raise ReviewConfigurationError(
-                    f"override {table_name} contains unsupported fields: "
-                    f"{sorted(unknown_fields)}"
-                )
-            lines.extend(("", f"[[{table_name}]]"))
-            for field in order:
-                if field in item and item[field] is not None:
-                    lines.append(f"{field} = {_toml_value(item[field])}")
-    return ("\n".join(lines) + "\n").encode("utf-8")
-
-
-def parse_overrides(payload: bytes) -> dict[str, Any]:
-    try:
-        raw = tomllib.loads(payload.decode("utf-8"))
-    except UnicodeDecodeError as exc:
-        raise ReviewConfigurationError("override file must be UTF-8") from exc
-    except tomllib.TOMLDecodeError as exc:
-        raise ReviewConfigurationError(f"invalid override TOML: {exc}") from exc
-    schema_version = raw.get("schema_version")
-    if schema_version not in {4, REVIEW_OVERRIDE_SCHEMA_VERSION}:
-        raise ReviewConfigurationError(
-            "interactive review requires schema-4 or schema-5 local overrides"
-        )
-    raw["schema_version"] = REVIEW_OVERRIDE_SCHEMA_VERSION
-    for table_name in _FIELD_ORDER:
-        raw.setdefault(table_name, [])
-    render_overrides(raw)
-    return cast(dict[str, Any], raw)
-
-
 def _select_show(
     record: Mapping[str, object],
     provider: MetadataProvider,
@@ -677,11 +433,9 @@ def _preview_episode(
         _record_extension(record),
         provider_ids=provider_ids,
     )
-    return (
-        destination.relative_path
-        if destination.status is DestinationStatus.READY
-        else None
-    )
+    if destination.status is not DestinationStatus.READY:
+        return None
+    return destination.relative_path
 
 
 def _find_episode_by_coordinate(
@@ -967,154 +721,3 @@ def _review_extra(
         display_title=display_title,
     )
     return True
-
-
-def _review_duplicate_group(
-    raw: dict[str, Any],
-    group: DuplicateReviewGroup,
-    *,
-    input_fn: InputFn,
-    output: TextIO,
-) -> tuple[bool, bool]:
-    output.write("\nDuplicate review\n")
-    output.write(f"Destination identity: {group.destination_key}\n")
-    for index, candidate in enumerate(group.candidates, start=1):
-        marker = " [recommended]" if candidate == group.recommended_winner else ""
-        output.write(f"  {index}) {candidate}{marker}\n")
-    action = _prompt_choice(
-        "Choose duplicate action:",
-        {
-            "1": "Accept the recommended winner",
-            "2": "Select a different winner",
-            "3": "Keep every copy in place",
-            "4": "Mark current loser(s) for future quarantine review",
-            "5": "Defer",
-        },
-        input_fn=input_fn,
-        output=output,
-    )
-    candidates = group.candidates
-    if action == "1":
-        if group.recommended_winner is None:
-            output.write("There is no recommended winner; decision deferred.\n")
-            return False, True
-        _remove_source_entries(raw, "duplicate_preferences", candidates)
-        _add_duplicate_preference(raw, group.recommended_winner)
-        return True, False
-    if action == "2":
-        selected = _prompt_int(
-            "Choose candidate number", input_fn=input_fn, output=output
-        )
-        if selected is None or selected <= 0 or selected > len(candidates):
-            output.write("Decision deferred.\n")
-            return False, True
-        _remove_source_entries(raw, "duplicate_preferences", candidates)
-        _add_duplicate_preference(raw, candidates[selected - 1])
-        return True, False
-    if action == "3":
-        _remove_source_entries(raw, "duplicate_preferences", candidates)
-        for candidate in candidates:
-            _add_hold(
-                raw,
-                candidate,
-                (
-                    "manual review chose to keep every duplicate copy in place",
-                    "no delete or quarantine operation is authorized",
-                ),
-            )
-        return True, False
-    if action == "4":
-        losers = group.losers
-        if not losers:
-            output.write("There are no current loser candidates; decision deferred.\n")
-            return False, True
-        _remove_source_entries(raw, "duplicate_preferences", candidates)
-        for loser in losers:
-            _add_hold(
-                raw,
-                loser,
-                (
-                    "review-quarantine-candidate",
-                    "duplicate loser retained in place for a future explicit quarantine workflow",
-                    "no delete or quarantine operation is authorized by this review",
-                ),
-            )
-        return True, False
-    return False, True
-
-
-def run_review_wizard(
-    manifest: object,
-    override_payload: bytes,
-    provider: MetadataProvider,
-    *,
-    input_fn: InputFn,
-    output: TextIO,
-) -> tuple[bytes, ReviewSummary]:
-    """Run one non-mutating review session and return a new override payload."""
-
-    validate_manifest(manifest)
-    raw = parse_overrides(override_payload)
-    duplicate_groups = collect_duplicate_groups(manifest)
-    held_records = collect_held_records(manifest)
-    changed_duplicates = 0
-    changed_holds = 0
-    deferred = 0
-
-    output.write(
-        f"Review queue: {len(duplicate_groups)} duplicate groups, "
-        f"{len(held_records)} held videos.\n"
-    )
-    output.write("No delete operation exists in this workflow.\n")
-
-    for group in duplicate_groups:
-        changed, was_deferred = _review_duplicate_group(
-            raw, group, input_fn=input_fn, output=output
-        )
-        changed_duplicates += int(changed)
-        deferred += int(was_deferred)
-
-    for record in held_records:
-        source = _record_source(record)
-        output.write(f"\nHeld-file review\nSource: {source}\n")
-        action = _prompt_choice(
-            "Choose held-file action:",
-            {
-                "1": "Continue leaving it untouched",
-                "2": "Identify it as a specific episode",
-                "3": "Identify it as a provider-confirmed special",
-                "4": "Classify it as an extra",
-                "5": "Defer",
-            },
-            input_fn=input_fn,
-            output=output,
-        )
-        changed = False
-        if action == "1":
-            changed = False
-        elif action == "2":
-            changed = _review_specific_episode(
-                raw, record, provider, input_fn=input_fn, output=output
-            )
-        elif action == "3":
-            changed = _review_special(
-                raw, record, provider, input_fn=input_fn, output=output
-            )
-        elif action == "4":
-            changed = _review_extra(
-                raw, record, provider, input_fn=input_fn, output=output
-            )
-        else:
-            deferred += 1
-        if action in {"2", "3", "4"} and not changed:
-            deferred += 1
-        changed_holds += int(changed)
-
-    payload = render_overrides(raw)
-    return payload, ReviewSummary(
-        duplicate_groups_seen=len(duplicate_groups),
-        duplicate_groups_changed=changed_duplicates,
-        held_records_seen=len(held_records),
-        held_records_changed=changed_holds,
-        deferred=deferred,
-    )
