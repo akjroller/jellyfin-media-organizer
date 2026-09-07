@@ -4,8 +4,7 @@ import hashlib
 import json
 import os
 import tempfile
-import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
