@@ -11,15 +11,15 @@ from typing import cast
 
 from . import __version__
 from .models import TerminalStatus
-from .overrides import load_overrides
-from .planner import (
+from .providers import TvmazeProviderAdapter
+from .review import render_override_stub
+from .review_overrides import load_planning_overrides
+from .review_planner import (
     PlanningConfig,
     PlanningConfigurationError,
     execute_plan,
     http_json_getter,
 )
-from .providers import TvmazeProviderAdapter
-from .review import render_override_stub
 from .review_wizard import ReviewConfigurationError, run_review_wizard
 from .tvmaze_cache import TvmazeCatalogCache
 
@@ -271,6 +271,7 @@ def _run_review(args: argparse.Namespace) -> int:
     overrides_path = cast(Path, args.overrides)
     output_path = cast(Path, args.output)
     cache_dir = cast(Path, args.cache_dir)
+    output_file: Path | None = None
     try:
         plan_file = plan_path.expanduser().resolve(strict=True)
         override_file = overrides_path.expanduser().resolve(strict=True)
@@ -299,8 +300,10 @@ def _run_review(args: argparse.Namespace) -> int:
             output=sys.stdout,
         )
         output_file.write_bytes(rendered)
-        load_overrides(output_file)
+        load_planning_overrides(output_file)
     except KeyboardInterrupt:
+        if output_file is not None and output_file.exists():
+            output_file.unlink(missing_ok=True)
         print("Review cancelled; no override output was written.", file=sys.stderr)
         return 130
     except (
@@ -312,7 +315,7 @@ def _run_review(args: argparse.Namespace) -> int:
         ValueError,
     ) as exc:
         try:
-            if "output_file" in locals() and output_file.exists():
+            if output_file is not None and output_file.exists():
                 output_file.unlink()
         except OSError:
             pass
@@ -334,7 +337,7 @@ def _run_review(args: argparse.Namespace) -> int:
 def _run_overrides_validate(args: argparse.Namespace) -> int:
     path = cast(Path, args.path)
     try:
-        catalog = load_overrides(path)
+        catalog = load_planning_overrides(path)
     except OSError as exc:
         detail = exc.strerror or exc.__class__.__name__
         print(
