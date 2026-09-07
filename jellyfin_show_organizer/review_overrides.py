@@ -115,9 +115,7 @@ class ExplicitExtraOverride:
         object.__setattr__(
             self,
             "source_binding_sha256",
-            _sha256(
-                self.source_binding_sha256, "extra decision source_binding_sha256"
-            ),
+            _sha256(self.source_binding_sha256, "extra decision source_binding_sha256"),
         )
         kind = self.kind.strip().casefold()
         if not kind:
