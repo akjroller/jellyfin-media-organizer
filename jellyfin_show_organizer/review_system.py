@@ -607,6 +607,10 @@ def _answer_duplicate(
     raise ReviewConfigurationError(f"unsupported duplicate review action: {action}")
 
 
+def _no_op() -> None:
+    return None
+
+
 def _answer_held(
     session: ReviewSession,
     record: Mapping[str, object],
@@ -647,7 +651,7 @@ def _answer_held(
             "d": "defer",
         }.get(selected, "defer")
         provider_input = input_fn
-        finish = lambda: None
+        finish = _no_op
     else:
         _validate_answer_identity(session, answer)
         action = answer.action
