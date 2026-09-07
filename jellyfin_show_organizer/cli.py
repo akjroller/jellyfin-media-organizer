@@ -20,8 +20,12 @@ from .review_execution import (
     execute_plan,
     http_json_getter,
 )
-from .review_session import ReviewItemState, manifest_sha256
-from .review_system import ReviewConfigurationError, run_review_system
+from .review_session import ReviewItemState, manifest_override_snapshot
+from .review_system import (
+    ReviewConfigurationError,
+    load_review_answers,
+    run_review_system,
+)
 from .tvmaze_cache import TvmazeCatalogCache
 
 CommandHandler = Callable[[argparse.Namespace], int]
@@ -30,6 +34,7 @@ PLAN_CONFIGURATION_EXIT = 2
 PLAN_PROVIDER_EXIT = 4
 PLAN_UNRESOLVED_EXIT = 10
 PLAN_PREFLIGHT_BLOCKED_EXIT = 20
+REVIEW_INCOMPLETE_EXIT = 12
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -62,6 +67,14 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser.add_argument("--output-dir", type=Path)
     plan_parser.add_argument("--cache-dir", type=Path)
     plan_parser.add_argument("--overrides", type=Path)
+    plan_parser.add_argument(
+        "--review-session",
+        type=Path,
+        help=(
+            "Required with schema-5 reviewed overrides. The ledger is verified "
+            "against the active contract before planning."
+        ),
+    )
     provider_mode = plan_parser.add_mutually_exclusive_group()
     provider_mode.add_argument(
         "--offline",
@@ -102,7 +115,14 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--session", type=Path, required=True)
     review_parser.add_argument("--cache-dir", type=Path, required=True)
     review_parser.add_argument("--resume", action="store_true")
-    review_parser.add_argument("--answers", type=Path)
+    review_parser.add_argument(
+        "--answers",
+        type=Path,
+        help=(
+            "Use a schema-2 stable-review-ref answers file. Answers are bound to "
+            "the starting session and each item's fingerprint identity."
+        ),
+    )
     review_parser.add_argument("--show", dest="show_filter")
     review_parser.add_argument(
         "--kind",
@@ -111,6 +131,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review_parser.add_argument("--ref", dest="ref_filter")
     review_parser.add_argument("--pending-only", action="store_true")
+    review_parser.add_argument(
+        "--approve-partial",
+        action="store_true",
+        help=(
+            "Explicitly approve a narrowed --show/--kind/--ref scope after every "
+            "selected item is answered. Unselected items remain review-state only."
+        ),
+    )
     review_parser.add_argument(
         "--batch-accept-recommended",
         action="store_true",
@@ -238,7 +266,11 @@ def _planning_config(args: argparse.Namespace) -> PlanningConfig:
 def _run_plan(args: argparse.Namespace) -> int:
     try:
         config = _planning_config(args)
-        outcome = execute_plan(config)
+        review_session = cast(Path | None, args.review_session)
+        outcome = execute_plan(
+            config,
+            review_session_path=review_session,
+        )
     except (PlanningConfigurationError, OSError, RuntimeError, ValueError) as exc:
         detail = f": {exc}" if bool(args.verbose) else ""
         print(f"Planning failed safely{detail}", file=sys.stderr)
@@ -286,30 +318,10 @@ def _run_plan(args: argparse.Namespace) -> int:
     return exit_code
 
 
-def _answers_input(path: Path, expected_plan_sha256: str) -> Callable[[str], str]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict) or set(raw) != {
-        "schema_version",
-        "plan_sha256",
-        "responses",
-    }:
-        raise ReviewConfigurationError("answers file has an unsupported contract")
-    if raw["schema_version"] != 1 or raw["plan_sha256"] != expected_plan_sha256:
-        raise ReviewConfigurationError("answers file is not bound to this exact plan")
-    responses = raw["responses"]
-    if not isinstance(responses, list) or not all(
-        isinstance(response, str) for response in responses
-    ):
-        raise ReviewConfigurationError("answers responses must be a list of strings")
-    iterator = iter(cast(list[str], responses))
-
-    def read(_prompt: str) -> str:
-        try:
-            return next(iterator)
-        except StopIteration as exc:
-            raise ReviewConfigurationError("answers file ran out of responses") from exc
-
-    return read
+def _no_interactive_input(_prompt: str) -> str:
+    raise ReviewConfigurationError(
+        "non-interactive review attempted an unstructured prompt"
+    )
 
 
 def _run_review(args: argparse.Namespace) -> int:
@@ -337,21 +349,37 @@ def _run_review(args: argparse.Namespace) -> int:
             raise ReviewConfigurationError("review output parent directory does not exist")
 
         manifest = json.loads(plan_file.read_text(encoding="utf-8"))
-        plan_hash = manifest_sha256(manifest)
         override_payload = override_file.read_bytes()
         base_catalog = load_review_contract(override_file)
-        input_fn: Callable[[str], str]
-        if answers_path is not None:
-            input_fn = _answers_input(
-                answers_path.expanduser().resolve(strict=True),
-                plan_hash,
+        recorded_override_snapshot = manifest_override_snapshot(manifest)
+        if recorded_override_snapshot != base_catalog.snapshot_id:
+            raise ReviewConfigurationError(
+                "plan provenance does not match the supplied base override snapshot"
             )
+
+        answers = None
+        if answers_path is not None:
+            answers = load_review_answers(
+                answers_path.expanduser().resolve(strict=True).read_bytes()
+            )
+            input_fn = _no_interactive_input
         else:
             if not sys.stdin.isatty():
                 raise ReviewConfigurationError(
                     "interactive review requires a TTY unless --answers is supplied"
                 )
             input_fn = input
+
+        if bool(args.approve_partial) and not any(
+            (
+                args.show_filter is not None,
+                args.kind_filter is not None,
+                args.ref_filter is not None,
+            )
+        ):
+            raise ReviewConfigurationError(
+                "--approve-partial requires an explicit --show, --kind, or --ref scope"
+            )
 
         cache = TvmazeCatalogCache(
             cache_dir.expanduser().resolve(strict=False),
@@ -374,6 +402,8 @@ def _run_review(args: argparse.Namespace) -> int:
             ref_filter=cast(str | None, args.ref_filter),
             pending_only=bool(args.pending_only),
             batch_accept_recommended=bool(args.batch_accept_recommended),
+            approve_partial=bool(args.approve_partial),
+            answers=answers,
         )
         active_catalog = load_review_contract(output_file)
         if not isinstance(active_catalog, ReviewContractCatalog):
@@ -400,15 +430,24 @@ def _run_review(args: argparse.Namespace) -> int:
         return 2
 
     states = Counter(item.state for item in session.items)
-    print(
-        "Review complete: "
+    state_text = (
         f"session_sha256={session.sha256} "
         f"answered={states[ReviewItemState.ANSWERED]} "
         f"deferred={states[ReviewItemState.DEFERRED]} "
         f"pending={states[ReviewItemState.PENDING]} "
         f"override_snapshot={active_catalog.snapshot_id}"
     )
-    return 0
+    if session.complete:
+        print(f"Review complete: {state_text}")
+        return 0
+    if session.approved_partial:
+        print(
+            "Review saved: approved partial "
+            f"scope_items={len(session.approved_scope_refs)} {state_text}"
+        )
+        return 0
+    print(f"Review saved: partial {state_text}")
+    return REVIEW_INCOMPLETE_EXIT
 
 
 def _run_overrides_validate(args: argparse.Namespace) -> int:
