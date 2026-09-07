@@ -115,6 +115,10 @@ class ReviewContractCatalog(ReviewOverrideCatalog):
         legacy_sources = {
             normalize_review_path(preference.source)
             for preference in self.duplicate_preferences
+            if not any(
+                reason.startswith("reviewed-duplicate-ref:")
+                for reason in preference.reasons
+            )
         }
         if legacy_sources & candidate_sources:
             raise ValueError(
