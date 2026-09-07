@@ -135,8 +135,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--approve-partial",
         action="store_true",
         help=(
-            "Explicitly approve a narrowed --show/--kind/--ref scope after every "
-            "selected item is answered. Unselected items remain review-state only."
+            "Acknowledge a fully answered narrowed --show/--kind/--ref review scope "
+            "for further non-mutating planning. This is review state only and never "
+            "authorizes media movement; apply still requires separate exact full-plan "
+            "approval."
         ),
     )
     review_parser.add_argument(
@@ -342,11 +344,15 @@ def _run_review(args: argparse.Namespace) -> int:
             raise ReviewConfigurationError("active override output already exists")
         if bool(args.resume):
             if not session_file.is_file():
-                raise ReviewConfigurationError("--resume requires an existing session file")
+                raise ReviewConfigurationError(
+                    "--resume requires an existing session file"
+                )
         elif session_file.exists():
             raise ReviewConfigurationError("new review session output already exists")
         if not output_file.parent.is_dir() or not session_file.parent.is_dir():
-            raise ReviewConfigurationError("review output parent directory does not exist")
+            raise ReviewConfigurationError(
+                "review output parent directory does not exist"
+            )
 
         manifest = json.loads(plan_file.read_text(encoding="utf-8"))
         override_payload = override_file.read_bytes()
@@ -358,6 +364,7 @@ def _run_review(args: argparse.Namespace) -> int:
             )
 
         answers = None
+        input_fn: Callable[[str], str]
         if answers_path is not None:
             answers = load_review_answers(
                 answers_path.expanduser().resolve(strict=True).read_bytes()
@@ -442,7 +449,7 @@ def _run_review(args: argparse.Namespace) -> int:
         return 0
     if session.approved_partial:
         print(
-            "Review saved: approved partial "
+            "Review saved: approved partial review-state only; no movement authorized. "
             f"scope_items={len(session.approved_scope_refs)} {state_text}"
         )
         return 0
