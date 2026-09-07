@@ -439,9 +439,7 @@ def load_review_contract_payload(payload: bytes) -> OverrideCatalog:
     shows_raw = cast(list[dict[str, Any]], raw.get("shows", []))
     groups = tuple(
         _parse_group_decision(item)
-        for item in cast(
-            list[dict[str, Any]], raw.get("duplicate_group_decisions", [])
-        )
+        for item in cast(list[dict[str, Any]], raw.get("duplicate_group_decisions", []))
     )
     legacy_preferences = tuple(
         _base._parse_duplicate_preference(item)
@@ -581,9 +579,7 @@ def _upsert_show(raw: dict[str, Any], show: Mapping[str, object]) -> None:
 def _compile_duplicate_item(raw: dict[str, Any], item: Any) -> None:
     if item.action not in {"select_winner", "keep_all", "quarantine_candidate"}:
         raise ValueError("answered duplicate item has an invalid stored action")
-    groups = cast(
-        list[dict[str, Any]], raw.setdefault("duplicate_group_decisions", [])
-    )
+    groups = cast(list[dict[str, Any]], raw.setdefault("duplicate_group_decisions", []))
     groups[:] = [
         group for group in groups if group.get("duplicate_ref") != item.duplicate_ref
     ]
@@ -709,7 +705,9 @@ def verify_review_contract_session(
             "review session still has unresolved work and has no approved partial scope"
         )
 
-    base_catalog = load_review_contract_payload(session.base_override_toml.encode("utf-8"))
+    base_catalog = load_review_contract_payload(
+        session.base_override_toml.encode("utf-8")
+    )
     if base_catalog.snapshot_id != session.base_override_snapshot:
         raise ValueError(
             "review session base override payload no longer matches its snapshot"
