@@ -10,6 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
+from .models import DuplicateCollisionClass
 from .review_identity import (
     ReviewCandidateBinding,
     ReviewFingerprint,
@@ -35,11 +36,7 @@ class ReviewItemState(StrEnum):
     DEFERRED = "deferred"
 
 
-class ReviewCollisionClass(StrEnum):
-    """Structured duplicate authority; never infer safety from diagnostic prose."""
-
-    SAME_LOGICAL_IDENTITY = "same-logical-identity"
-    DESTINATION_CONFLICT = "destination-conflict"
+ReviewCollisionClass = DuplicateCollisionClass
 
 
 _HELD_ACTIONS = frozenset({"keep_held", "episode", "special", "extra"})
@@ -543,15 +540,14 @@ def _candidate_binding(
     )
 
 
-def _collision_class(record: Mapping[str, object]) -> ReviewCollisionClass:
-    status = record.get("status")
-    if status == "duplicate":
-        return ReviewCollisionClass.SAME_LOGICAL_IDENTITY
-    if status == "suspicious":
-        return ReviewCollisionClass.DESTINATION_CONFLICT
-    raise ValueError(
-        "duplicate review data must belong to a duplicate or suspicious plan record"
-    )
+def _collision_class(duplicate: Mapping[str, object]) -> ReviewCollisionClass:
+    value = duplicate.get("collision_class")
+    if not isinstance(value, str):
+        raise ValueError("duplicate decision is missing structured collision_class")
+    try:
+        return ReviewCollisionClass(value)
+    except ValueError as exc:
+        raise ValueError("duplicate decision collision_class is invalid") from exc
 
 
 def build_review_session(
@@ -628,7 +624,7 @@ def build_review_session(
                         key=lambda value: (normalize_review_path(value), value),
                     )
                 ),
-                collision_class=_collision_class(record),
+                collision_class=_collision_class(duplicate),
             )
         )
 
