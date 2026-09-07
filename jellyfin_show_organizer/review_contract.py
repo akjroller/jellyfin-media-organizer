@@ -131,7 +131,10 @@ class DuplicateGroupDecision:
     reasons: tuple[str, ...] = ("explicit reviewed duplicate group decision",)
 
     def __post_init__(self) -> None:
-        if not self.duplicate_ref.startswith("duplicate-") or len(self.duplicate_ref) != 26:
+        if (
+            not self.duplicate_ref.startswith("duplicate-")
+            or len(self.duplicate_ref) != 26
+        ):
             raise ValueError("duplicate group decision has an invalid duplicate_ref")
         object.__setattr__(
             self,
@@ -139,13 +142,19 @@ class DuplicateGroupDecision:
             _sha256(self.candidate_set_sha256, "candidate_set_sha256"),
         )
         if len(self.candidates) < 2:
-            raise ValueError("duplicate group decision requires at least two candidates")
+            raise ValueError(
+                "duplicate group decision requires at least two candidates"
+            )
         keys = [normalize_review_path(candidate) for candidate in self.candidates]
         if len(keys) != len(set(keys)):
             raise ValueError("duplicate group decision candidates must be unique")
         if self.action is DuplicateGroupAction.SELECT_WINNER:
-            if self.winner is None or normalize_review_path(self.winner) not in set(keys):
-                raise ValueError("selected duplicate winner must be one reviewed candidate")
+            if self.winner is None or normalize_review_path(self.winner) not in set(
+                keys
+            ):
+                raise ValueError(
+                    "selected duplicate winner must be one reviewed candidate"
+                )
         elif self.winner is not None:
             raise ValueError("keep-all duplicate decisions cannot carry a winner")
         if not self.reasons or any(
@@ -171,8 +180,6 @@ class ReviewContractCatalog(ReviewOverrideCatalog):
     review_base_override_snapshot: str = ""
 
     def __post_init__(self) -> None:
-        # Explicit base call avoids zero-argument super() with slotted dataclass
-        # inheritance, which is not reliable across our supported Python matrix.
         ReviewOverrideCatalog.__post_init__(self)
         object.__setattr__(
             self,
@@ -197,7 +204,9 @@ class ReviewContractCatalog(ReviewOverrideCatalog):
         candidate_sources: set[str] = set()
         for decision in self.duplicate_group_decisions:
             if decision.duplicate_ref in refs:
-                raise ValueError("duplicate group decision reference is configured twice")
+                raise ValueError(
+                    "duplicate group decision reference is configured twice"
+                )
             refs.add(decision.duplicate_ref)
             for source in decision.candidates:
                 key = normalize_review_path(source)
@@ -220,7 +229,9 @@ class ReviewContractCatalog(ReviewOverrideCatalog):
                 "reviewed duplicate groups cannot overlap legacy duplicate preferences"
             )
 
-    def duplicate_group_for_ref(self, duplicate_ref: str) -> DuplicateGroupDecision | None:
+    def duplicate_group_for_ref(
+        self, duplicate_ref: str
+    ) -> DuplicateGroupDecision | None:
         return next(
             (
                 decision
@@ -364,54 +375,39 @@ def _raw_override(payload: bytes) -> dict[str, Any]:
     return cast(dict[str, Any], raw)
 
 
+@dataclass(frozen=True, slots=True)
+class _PayloadPathAdapter:
+    """Give the canonical legacy Path loader an in-memory payload."""
+
+    payload: bytes
+
+    def read_bytes(self) -> bytes:
+        return self.payload
+
+
+def _load_legacy_payload(payload: bytes) -> OverrideCatalog:
+    # The existing loader remains the single authority for schemas 1-4.
+    # It currently requires a Path-like object and only calls read_bytes().
+    adapter = cast(Path, _PayloadPathAdapter(payload))
+    return _base.load_overrides(adapter)
+
+
 def _array_tables(raw: Mapping[str, object], names: tuple[str, ...]) -> None:
     for label in names:
         value = raw.get(label, [])
-        if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        if not isinstance(value, list) or not all(
+            isinstance(item, dict) for item in value
+        ):
             raise ValueError(f"override {label} must be an array of tables")
 
 
-def _schema4_catalog(raw: dict[str, Any]) -> OverrideCatalog:
-    allowed = {
-        "schema_version",
-        "shows",
-        "duplicate_preferences",
-        "episode_decisions",
-        "source_holds",
-    }
-    unknown = set(raw) - allowed
-    if unknown:
-        raise ValueError(f"unknown top-level override fields: {sorted(unknown)}")
-    _array_tables(
-        raw,
-        ("shows", "duplicate_preferences", "episode_decisions", "source_holds"),
-    )
-    return OverrideCatalog(
-        schema_version=4,
-        shows=tuple(_base._parse_override(item) for item in raw.get("shows", [])),
-        duplicate_preferences=tuple(
-            _base._parse_duplicate_preference(item)
-            for item in raw.get("duplicate_preferences", [])
-        ),
-        episode_decisions=tuple(
-            _base._parse_episode_decision(item)
-            for item in raw.get("episode_decisions", [])
-        ),
-        source_holds=tuple(
-            _base._parse_source_hold(item) for item in raw.get("source_holds", [])
-        ),
-    )
-
-
 def load_review_contract_payload(payload: bytes) -> OverrideCatalog:
-    """Load schema-4 base state or a fully session-bound schema-5 contract."""
+    """Delegate schemas 1-4 to the legacy loader; parse only schema 5 here."""
 
     raw = _raw_override(payload)
     schema_version = raw.get("schema_version")
     if schema_version != REVIEW_OVERRIDE_SCHEMA_VERSION:
-        if schema_version != 4:
-            raise ValueError("unsupported override schema version")
-        return _schema4_catalog(raw)
+        return _load_legacy_payload(payload)
 
     allowed_top_level = {
         "schema_version",
@@ -443,7 +439,9 @@ def load_review_contract_payload(payload: bytes) -> OverrideCatalog:
     shows_raw = cast(list[dict[str, Any]], raw.get("shows", []))
     groups = tuple(
         _parse_group_decision(item)
-        for item in cast(list[dict[str, Any]], raw.get("duplicate_group_decisions", []))
+        for item in cast(
+            list[dict[str, Any]], raw.get("duplicate_group_decisions", [])
+        )
     )
     legacy_preferences = tuple(
         _base._parse_duplicate_preference(item)
@@ -479,8 +477,7 @@ def load_review_contract_payload(payload: bytes) -> OverrideCatalog:
         reviewed_episode_decisions=tuple(
             _parse_reviewed_episode(item)
             for item in cast(
-                list[dict[str, Any]],
-                raw.get("reviewed_episode_decisions", []),
+                list[dict[str, Any]], raw.get("reviewed_episode_decisions", [])
             )
         ),
         extra_decisions=tuple(
@@ -501,7 +498,11 @@ def load_review_contract_payload(payload: bytes) -> OverrideCatalog:
 def load_review_contract(path: Path | None = None) -> OverrideCatalog:
     if path is None:
         return _base.load_overrides(None)
-    return load_review_contract_payload(path.read_bytes())
+    payload = path.read_bytes()
+    raw = _raw_override(payload)
+    if raw.get("schema_version") != REVIEW_OVERRIDE_SCHEMA_VERSION:
+        return _base.load_overrides(path)
+    return load_review_contract_payload(payload)
 
 
 def _toml_value(value: object) -> str:
@@ -577,88 +578,114 @@ def _upsert_show(raw: dict[str, Any], show: Mapping[str, object]) -> None:
     values.append(copy.deepcopy(dict(show)))
 
 
+def _compile_duplicate_item(raw: dict[str, Any], item: Any) -> None:
+    if item.action not in {"select_winner", "keep_all", "quarantine_candidate"}:
+        raise ValueError("answered duplicate item has an invalid stored action")
+    groups = cast(
+        list[dict[str, Any]], raw.setdefault("duplicate_group_decisions", [])
+    )
+    groups[:] = [
+        group for group in groups if group.get("duplicate_ref") != item.duplicate_ref
+    ]
+    for candidate in item.candidates:
+        _remove_source(raw, "duplicate_preferences", candidate)
+
+    data = item.data
+    active_action = data.get("active_action")
+    if active_action not in {
+        DuplicateGroupAction.SELECT_WINNER.value,
+        DuplicateGroupAction.KEEP_ALL.value,
+    }:
+        raise ValueError("answered duplicate item has no valid active action")
+    assert item.duplicate_ref is not None
+    assert item.candidate_set_sha256 is not None
+    group: dict[str, object] = {
+        "duplicate_ref": item.duplicate_ref,
+        "candidate_set_sha256": item.candidate_set_sha256,
+        "candidates": list(item.candidates),
+        "action": active_action,
+        "reasons": ["human-reviewed duplicate group decision"],
+    }
+    winner = data.get("winner")
+    if active_action == DuplicateGroupAction.SELECT_WINNER.value:
+        if not isinstance(winner, str):
+            raise ValueError("reviewed duplicate winner is invalid")
+        group["winner"] = winner
+    elif winner is not None:
+        raise ValueError("keep-all duplicate item cannot carry a winner")
+    groups.append(group)
+
+
+def _compile_held_item(raw: dict[str, Any], item: Any) -> None:
+    assert item.source is not None
+    assert item.source_binding_sha256 is not None
+    if item.action == "keep_held":
+        return
+    if item.action not in {"episode", "special", "extra"}:
+        raise ValueError("answered held item has an invalid stored action")
+
+    data = item.data
+    if item.action in {"episode", "special"}:
+        reviewed_episode = data.get("reviewed_episode")
+        if not isinstance(reviewed_episode, Mapping):
+            raise ValueError("reviewed held episode has no episode decision")
+        decision = copy.deepcopy(dict(reviewed_episode))
+        decision["source_binding_sha256"] = item.source_binding_sha256
+        target_table = "reviewed_episode_decisions"
+    else:
+        extra = data.get("extra")
+        if not isinstance(extra, Mapping):
+            raise ValueError("reviewed held extra has no extra decision")
+        decision = copy.deepcopy(dict(extra))
+        decision["source_binding_sha256"] = item.source_binding_sha256
+        target_table = "extra_decisions"
+
+    for table in (
+        "source_holds",
+        "episode_decisions",
+        "reviewed_episode_decisions",
+        "extra_decisions",
+        "duplicate_preferences",
+    ):
+        _remove_source(raw, table, item.source)
+    show = data.get("show")
+    if not isinstance(show, Mapping):
+        raise ValueError("reviewed held decision is missing show metadata")
+    _upsert_show(raw, cast(Mapping[str, object], show))
+    cast(list[dict[str, Any]], raw[target_table]).append(decision)
+
+
 def compile_active_overrides(session: ReviewSession) -> bytes:
-    """Compile exactly the answered ledger items over the ledger's stored base state."""
+    """Compile answered ledger items over the exact stored base override state."""
 
     raw = _raw_override(session.base_override_toml.encode("utf-8"))
     raw.pop("review_session_sha256", None)
     raw.pop("review_base_plan_sha256", None)
     raw.pop("review_base_override_snapshot", None)
+    raw.pop("duplicate_group_decisions", None)
+    raw.pop("reviewed_episode_decisions", None)
+    raw.pop("extra_decisions", None)
     for table in _TABLE_ORDER:
         raw.setdefault(table, [])
 
     for item in session.items:
         if item.state is not ReviewItemState.ANSWERED:
             continue
-        data = item.data
         if item.kind is ReviewItemKind.DUPLICATE:
-            groups = cast(
-                list[dict[str, Any]],
-                raw.setdefault("duplicate_group_decisions", []),
-            )
-            groups[:] = [
-                group
-                for group in groups
-                if group.get("duplicate_ref") != item.duplicate_ref
-            ]
-            for candidate in item.candidates:
-                _remove_source(raw, "duplicate_preferences", candidate)
-            action = data.get("active_action")
-            winner = data.get("winner")
-            if action not in {
-                DuplicateGroupAction.SELECT_WINNER.value,
-                DuplicateGroupAction.KEEP_ALL.value,
-            }:
-                raise ValueError("answered duplicate item has no active action")
-            assert item.duplicate_ref is not None
-            assert item.candidate_set_sha256 is not None
-            group: dict[str, object] = {
-                "duplicate_ref": item.duplicate_ref,
-                "candidate_set_sha256": item.candidate_set_sha256,
-                "candidates": list(item.candidates),
-                "action": action,
-                "reasons": ["human-reviewed duplicate group decision"],
-            }
-            if winner is not None:
-                if not isinstance(winner, str):
-                    raise ValueError("reviewed duplicate winner is invalid")
-                group["winner"] = winner
-            groups.append(group)
-            continue
-
-        assert item.source is not None
-        assert item.source_binding_sha256 is not None
-        if item.action == "keep_held":
-            continue
-        for table in (
-            "source_holds",
-            "episode_decisions",
-            "reviewed_episode_decisions",
-            "extra_decisions",
-            "duplicate_preferences",
-        ):
-            _remove_source(raw, table, item.source)
-        show = data.get("show")
-        if isinstance(show, Mapping):
-            _upsert_show(raw, cast(Mapping[str, object], show))
-        reviewed_episode = data.get("reviewed_episode")
-        if isinstance(reviewed_episode, Mapping):
-            decision = copy.deepcopy(dict(reviewed_episode))
-            decision["source_binding_sha256"] = item.source_binding_sha256
-            cast(list[dict[str, Any]], raw["reviewed_episode_decisions"]).append(
-                decision
-            )
-        extra = data.get("extra")
-        if isinstance(extra, Mapping):
-            decision = copy.deepcopy(dict(extra))
-            decision["source_binding_sha256"] = item.source_binding_sha256
-            cast(list[dict[str, Any]], raw["extra_decisions"]).append(decision)
+            _compile_duplicate_item(raw, item)
+        else:
+            _compile_held_item(raw, item)
 
     raw["schema_version"] = REVIEW_OVERRIDE_SCHEMA_VERSION
     raw["review_session_sha256"] = session.sha256
     raw["review_base_plan_sha256"] = session.plan_sha256
     raw["review_base_override_snapshot"] = session.base_override_snapshot
-    return render_active_overrides(raw)
+    payload = render_active_overrides(raw)
+    # Compiler output must itself satisfy the active schema before publication.
+    loaded = load_review_contract_payload(payload)
+    if not isinstance(loaded, ReviewContractCatalog):
+        raise ValueError("compiled review session did not produce schema 5")
+    return payload
 
 
 def verify_review_contract_session(
@@ -668,7 +695,9 @@ def verify_review_contract_session(
     """Fail closed unless the active contract is exactly derived from this ledger."""
 
     if catalog.review_session_sha256 != session.sha256:
-        raise ValueError("active review contract does not match the supplied session hash")
+        raise ValueError(
+            "active review contract does not match the supplied session hash"
+        )
     if catalog.review_base_plan_sha256 != session.plan_sha256:
         raise ValueError("active review contract does not match the session base plan")
     if catalog.review_base_override_snapshot != session.base_override_snapshot:
@@ -682,7 +711,9 @@ def verify_review_contract_session(
 
     base_catalog = load_review_contract_payload(session.base_override_toml.encode("utf-8"))
     if base_catalog.snapshot_id != session.base_override_snapshot:
-        raise ValueError("review session base override payload no longer matches its snapshot")
+        raise ValueError(
+            "review session base override payload no longer matches its snapshot"
+        )
 
     expected_payload = compile_active_overrides(session)
     expected = load_review_contract_payload(expected_payload)
