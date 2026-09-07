@@ -16,11 +16,12 @@ from .review_identity import (
     ReviewMemberBinding,
     duplicate_candidate_set_hash,
     normalize_review_path,
+    source_binding_hash,
     stable_duplicate_ref,
 )
 from .schema import validate_manifest
 
-REVIEW_SESSION_SCHEMA_VERSION = 1
+REVIEW_SESSION_SCHEMA_VERSION = 2
 
 
 class ReviewItemKind(StrEnum):
@@ -38,6 +39,17 @@ def _sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _require_sha256(value: str, label: str) -> str:
+    digest = value.casefold()
+    if len(digest) != 64:
+        raise ValueError(f"{label} must contain 64 hex characters")
+    try:
+        int(digest, 16)
+    except ValueError as exc:
+        raise ValueError(f"{label} must contain 64 hex characters") from exc
+    return digest
+
+
 def manifest_sha256(manifest: object) -> str:
     validate_manifest(manifest)
     return _sha256_bytes(
@@ -48,6 +60,20 @@ def manifest_sha256(manifest: object) -> str:
             separators=(",", ":"),
         ).encode("utf-8")
     )
+
+
+def manifest_override_snapshot(manifest: object) -> str:
+    """Return the exact override snapshot recorded by a reviewable plan."""
+
+    validate_manifest(manifest)
+    root = cast(Mapping[str, object], manifest)
+    provenance = root.get("provenance")
+    if not isinstance(provenance, Mapping):
+        raise ValueError("review requires plan provenance")
+    snapshot = provenance.get("overrides_snapshot_id")
+    if not isinstance(snapshot, str):
+        raise ValueError("plan provenance is missing overrides_snapshot_id")
+    return _require_sha256(snapshot, "plan provenance overrides_snapshot_id")
 
 
 def stable_held_ref(source: str) -> str:
@@ -62,6 +88,7 @@ class ReviewSessionItem:
     state: ReviewItemState
     show_key: str
     source: str | None = None
+    source_binding_sha256: str | None = None
     duplicate_ref: str | None = None
     candidate_set_sha256: str | None = None
     candidates: tuple[str, ...] = ()
@@ -72,15 +99,39 @@ class ReviewSessionItem:
         if not self.review_ref or not self.show_key:
             raise ValueError("review session items require review_ref and show_key")
         if self.kind is ReviewItemKind.HELD:
-            if self.source is None or self.duplicate_ref is not None or self.candidates:
+            if (
+                self.source is None
+                or self.source_binding_sha256 is None
+                or self.duplicate_ref is not None
+                or self.candidate_set_sha256 is not None
+                or self.candidates
+            ):
                 raise ValueError("held review item has invalid identity fields")
+            object.__setattr__(
+                self,
+                "source_binding_sha256",
+                _require_sha256(
+                    self.source_binding_sha256,
+                    "held source_binding_sha256",
+                ),
+            )
         elif (
             self.source is not None
+            or self.source_binding_sha256 is not None
             or self.duplicate_ref is None
             or self.candidate_set_sha256 is None
             or len(self.candidates) < 2
         ):
             raise ValueError("duplicate review item has invalid identity fields")
+        else:
+            object.__setattr__(
+                self,
+                "candidate_set_sha256",
+                _require_sha256(
+                    self.candidate_set_sha256,
+                    "duplicate candidate_set_sha256",
+                ),
+            )
 
         try:
             data = json.loads(self.data_json)
@@ -102,10 +153,20 @@ class ReviewSessionItem:
             raise ValueError("pending review items cannot carry an action")
         if self.state is ReviewItemState.DEFERRED and self.action != "defer":
             raise ValueError("deferred review items must carry action='defer'")
+        if self.state is ReviewItemState.ANSWERED and self.action is None:
+            raise ValueError("answered review items require an action")
 
     @property
     def data(self) -> dict[str, object]:
         return cast(dict[str, object], json.loads(self.data_json))
+
+    @property
+    def identity_sha256(self) -> str:
+        if self.kind is ReviewItemKind.DUPLICATE:
+            assert self.candidate_set_sha256 is not None
+            return self.candidate_set_sha256
+        assert self.source_binding_sha256 is not None
+        return self.source_binding_sha256
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,24 +174,40 @@ class ReviewSession:
     schema_version: int
     plan_sha256: str
     base_override_snapshot: str
+    base_override_toml: str
     items: tuple[ReviewSessionItem, ...]
+    approved_scope_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.schema_version != REVIEW_SESSION_SCHEMA_VERSION:
             raise ValueError("unsupported review session schema version")
-        for label, value in (
-            ("plan_sha256", self.plan_sha256),
-            ("base_override_snapshot", self.base_override_snapshot),
-        ):
-            if len(value) != 64:
-                raise ValueError(f"{label} must contain 64 hex characters")
-            try:
-                int(value, 16)
-            except ValueError as exc:
-                raise ValueError(f"{label} must contain 64 hex characters") from exc
+        object.__setattr__(
+            self,
+            "plan_sha256",
+            _require_sha256(self.plan_sha256, "plan_sha256"),
+        )
+        object.__setattr__(
+            self,
+            "base_override_snapshot",
+            _require_sha256(
+                self.base_override_snapshot,
+                "base_override_snapshot",
+            ),
+        )
+        if not isinstance(self.base_override_toml, str) or not self.base_override_toml:
+            raise ValueError("review session requires the base override TOML payload")
         refs = [item.review_ref for item in self.items]
         if len(refs) != len(set(refs)):
             raise ValueError("review session refs must be unique")
+        approved = tuple(sorted(set(self.approved_scope_refs)))
+        if len(approved) != len(self.approved_scope_refs):
+            raise ValueError("approved review scope refs must be unique and sorted")
+        known = set(refs)
+        if set(approved) - known:
+            raise ValueError("approved review scope references an unknown review item")
+        for ref in approved:
+            if self.item(ref).state is not ReviewItemState.ANSWERED:
+                raise ValueError("approved review scope may contain only answered items")
 
     @property
     def canonical_bytes(self) -> bytes:
@@ -138,6 +215,8 @@ class ReviewSession:
             "schema_version": self.schema_version,
             "plan_sha256": self.plan_sha256,
             "base_override_snapshot": self.base_override_snapshot,
+            "base_override_toml": self.base_override_toml,
+            "approved_scope_refs": list(self.approved_scope_refs),
             "items": [
                 {
                     "action": item.action,
@@ -149,6 +228,7 @@ class ReviewSession:
                     "review_ref": item.review_ref,
                     "show_key": item.show_key,
                     "source": item.source,
+                    "source_binding_sha256": item.source_binding_sha256,
                     "state": item.state.value,
                 }
                 for item in sorted(self.items, key=lambda entry: entry.review_ref)
@@ -164,6 +244,18 @@ class ReviewSession:
     @property
     def sha256(self) -> str:
         return _sha256_bytes(self.canonical_bytes)
+
+    @property
+    def complete(self) -> bool:
+        return all(item.state is ReviewItemState.ANSWERED for item in self.items)
+
+    @property
+    def approved_partial(self) -> bool:
+        return bool(self.approved_scope_refs) and not self.complete
+
+    @property
+    def usable_for_planning(self) -> bool:
+        return self.complete or self.approved_partial
 
     def item(self, review_ref: str) -> ReviewSessionItem:
         match = next((item for item in self.items if item.review_ref == review_ref), None)
@@ -195,7 +287,22 @@ class ReviewSession:
         )
         if updated == self.items:
             raise ValueError("review ref was not found")
-        return replace(self, items=updated)
+        approved = tuple(
+            ref
+            for ref in self.approved_scope_refs
+            if next(item for item in updated if item.review_ref == ref).state
+            is ReviewItemState.ANSWERED
+        )
+        return replace(self, items=updated, approved_scope_refs=approved)
+
+    def with_approved_scope(self, review_refs: tuple[str, ...]) -> ReviewSession:
+        refs = tuple(sorted(set(review_refs)))
+        if not refs:
+            raise ValueError("partial approval requires a non-empty explicit scope")
+        for ref in refs:
+            if self.item(ref).state is not ReviewItemState.ANSWERED:
+                raise ValueError("partial approval scope contains an unanswered item")
+        return replace(self, approved_scope_refs=refs)
 
 
 def _mapping(value: object, label: str) -> Mapping[str, object]:
@@ -247,7 +354,7 @@ def _candidate_binding(
 ) -> ReviewCandidateBinding:
     record = record_by_source.get(normalize_review_path(source))
     if record is None:
-        raise ValueError("duplicate candidate is missing its plan record")
+        raise ValueError("review source is missing its plan record")
     source_raw = _mapping(record.get("source"), "record.source")
     source_member = ReviewMemberBinding(
         path=source,
@@ -281,8 +388,13 @@ def build_review_session(
     manifest: object,
     *,
     base_override_snapshot: str,
+    base_override_payload: bytes,
 ) -> ReviewSession:
     validate_manifest(manifest)
+    try:
+        base_override_toml = base_override_payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("base override payload must be valid UTF-8") from exc
     root = cast(Mapping[str, object], manifest)
     raw_records = root.get("records")
     raw_companions = root.get("companions")
@@ -353,6 +465,7 @@ def build_review_session(
         if record.get("status") != "held":
             continue
         source = _source_path(record)
+        binding = _candidate_binding(source, record_by_source, frozen_companions)
         items.append(
             ReviewSessionItem(
                 review_ref=stable_held_ref(source),
@@ -360,6 +473,7 @@ def build_review_session(
                 state=ReviewItemState.PENDING,
                 show_key=_show_key(record),
                 source=source,
+                source_binding_sha256=source_binding_hash(binding),
             )
         )
 
@@ -367,6 +481,7 @@ def build_review_session(
         schema_version=REVIEW_SESSION_SCHEMA_VERSION,
         plan_sha256=manifest_sha256(manifest),
         base_override_snapshot=base_override_snapshot,
+        base_override_toml=base_override_toml,
         items=tuple(sorted(items, key=lambda item: item.review_ref)),
     )
 
@@ -382,11 +497,24 @@ def load_review_session(payload: bytes) -> ReviewSession:
         raise ValueError("invalid review session JSON") from exc
     if not isinstance(raw, dict):
         raise ValueError("review session root must be an object")
-    if set(raw) != {"schema_version", "plan_sha256", "base_override_snapshot", "items"}:
+    expected = {
+        "schema_version",
+        "plan_sha256",
+        "base_override_snapshot",
+        "base_override_toml",
+        "approved_scope_refs",
+        "items",
+    }
+    if set(raw) != expected:
         raise ValueError("review session has unexpected fields")
     raw_items = raw.get("items")
+    approved_scope_refs = raw.get("approved_scope_refs")
     if not isinstance(raw_items, list):
         raise ValueError("review session items must be an array")
+    if not isinstance(approved_scope_refs, list) or not all(
+        isinstance(ref, str) for ref in approved_scope_refs
+    ):
+        raise ValueError("approved review scope refs must be strings")
 
     items: list[ReviewSessionItem] = []
     for entry in raw_items:
@@ -412,9 +540,14 @@ def load_review_session(payload: bytes) -> ReviewSession:
                 state=state,
                 show_key=cast(str, entry.get("show_key")),
                 source=cast(str | None, entry.get("source")),
+                source_binding_sha256=cast(
+                    str | None,
+                    entry.get("source_binding_sha256"),
+                ),
                 duplicate_ref=cast(str | None, entry.get("duplicate_ref")),
                 candidate_set_sha256=cast(
-                    str | None, entry.get("candidate_set_sha256")
+                    str | None,
+                    entry.get("candidate_set_sha256"),
                 ),
                 candidates=tuple(candidates),
                 action=cast(str | None, entry.get("action")),
@@ -430,7 +563,9 @@ def load_review_session(payload: bytes) -> ReviewSession:
         schema_version=cast(int, raw.get("schema_version")),
         plan_sha256=cast(str, raw.get("plan_sha256")),
         base_override_snapshot=cast(str, raw.get("base_override_snapshot")),
+        base_override_toml=cast(str, raw.get("base_override_toml")),
         items=tuple(items),
+        approved_scope_refs=tuple(cast(list[str], approved_scope_refs)),
     )
 
 
