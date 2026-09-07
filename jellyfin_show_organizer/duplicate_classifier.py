@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
-from .models import DuplicateDecision, SourceFingerprint
+from .models import DuplicateCollisionClass, DuplicateDecision, SourceFingerprint
 from .release_quality import (
     ReleaseQualityEvidence,
     parse_release_quality,
@@ -222,6 +222,7 @@ def _duplicate_result(
             losers=(),
             confidence=0.5,
             evidence=_with_safety_evidence(evidence, candidates),
+            collision_class=DuplicateCollisionClass.SAME_LOGICAL_IDENTITY,
         )
         return DuplicateGroupResult(
             disposition=DuplicateDisposition.DUPLICATE,
@@ -239,6 +240,7 @@ def _duplicate_result(
         losers=losers,
         confidence=confidence,
         evidence=_with_safety_evidence(evidence, candidates),
+        collision_class=DuplicateCollisionClass.SAME_LOGICAL_IDENTITY,
     )
     return DuplicateGroupResult(
         disposition=DuplicateDisposition.DUPLICATE,
@@ -264,6 +266,7 @@ def _suspicious_result(
             "destination convergence spans multiple logical identities",
             f"logical identity count: {len(identities)}",
         ),
+        collision_class=DuplicateCollisionClass.DESTINATION_CONFLICT,
     )
     return DuplicateGroupResult(
         disposition=DuplicateDisposition.SUSPICIOUS,
