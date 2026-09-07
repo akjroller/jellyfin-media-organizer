@@ -43,9 +43,7 @@ class ReviewCollisionClass(StrEnum):
 
 
 _HELD_ACTIONS = frozenset({"keep_held", "episode", "special", "extra"})
-_DUPLICATE_ACTIONS = frozenset(
-    {"select_winner", "keep_all", "quarantine_candidate"}
-)
+_DUPLICATE_ACTIONS = frozenset({"select_winner", "keep_all", "quarantine_candidate"})
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -719,9 +717,7 @@ def load_review_session(payload: bytes) -> ReviewSession:
         except ValueError as exc:
             raise ValueError("review session item kind/state is invalid") from exc
         raw_collision_class = entry.get("collision_class")
-        if raw_collision_class is not None and not isinstance(
-            raw_collision_class, str
-        ):
+        if raw_collision_class is not None and not isinstance(raw_collision_class, str):
             raise ValueError("review session collision_class must be a string")
         try:
             collision_class = (
