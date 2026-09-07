@@ -85,7 +85,9 @@ def _bindings_by_source(plan: OrganizerPlan) -> dict[str, ReviewCandidateBinding
             ),
             companions=tuple(
                 sorted(
-                    companions.get(normalize_review_path(record.source.relative_path), ()),
+                    companions.get(
+                        normalize_review_path(record.source.relative_path), ()
+                    ),
                     key=lambda item: (normalize_review_path(item.path), item.path),
                 )
             ),
@@ -340,7 +342,9 @@ def _with_jellyfin_ids(
 
     if record.status is TerminalStatus.EXTRA:
         if record.extra is None:
-            raise PlanningConfigurationError("extra record is missing an extra decision")
+            raise PlanningConfigurationError(
+                "extra record is missing an extra decision"
+            )
         display_title = record.parse.title_hint if record.parse is not None else None
         reviewed = catalog.extra_decision_for(record.source.relative_path)
         if reviewed is not None and reviewed.display_title is not None:
@@ -484,8 +488,7 @@ def _duplicate_groups(
         decision_by_ref[ref] = decision
         grouped[ref].append(record)
     return {
-        ref: (decision_by_ref[ref], tuple(records))
-        for ref, records in grouped.items()
+        ref: (decision_by_ref[ref], tuple(records)) for ref, records in grouped.items()
     }
 
 
@@ -599,10 +602,11 @@ def _run_provenance_bytes(
         "session_sha256": session.sha256,
         "base_plan_sha256": session.plan_sha256,
         "base_override_snapshot": session.base_override_snapshot,
-        "scope_state": (
-            "complete" if session.complete else "approved-partial"
-        ),
+        "scope_state": "complete" if session.complete else "approved-partial",
         "approved_scope_refs": list(session.approved_scope_refs),
+        "authorization": "review-state-only",
+        "movement_authorized": False,
+        "full_plan_approval_required": True,
     }
     return (
         json.dumps(
@@ -632,16 +636,16 @@ def execute_plan(
         roots,
         "output directory",
     )
-    cache_dir = _planner._external_state_path(config.cache_dir, roots, "cache directory")
+    cache_dir = _planner._external_state_path(
+        config.cache_dir, roots, "cache directory"
+    )
     if output_dir.exists():
         raise PlanningConfigurationError("output directory already exists")
     if not output_dir.parent.is_dir():
         raise PlanningConfigurationError("output directory parent does not exist")
 
     overrides = load_review_contract(config.overrides_path)
-    review_catalog = (
-        overrides if isinstance(overrides, ReviewContractCatalog) else None
-    )
+    review_catalog = overrides if isinstance(overrides, ReviewContractCatalog) else None
     review_session: ReviewSession | None = None
     if review_catalog is not None:
         if review_session_path is None:
