@@ -10,11 +10,15 @@ from typing import Any, TextIO, cast
 
 from .destination import (
     DestinationStatus,
+    JellyfinProvider,
+    JellyfinProviderIdentifier,
     build_episode_destination,
+    build_extra_destination,
 )
 from .episode_assignment_strict import AssignmentStatus, SourceEpisodeAssignment
-from .models import CanonicalShow, MatchEvidence, NumberingMode
+from .models import CanonicalShow, ExtraDecision, MatchEvidence, NumberingMode
 from .providers import MetadataProvider, ProviderEpisode, ProviderShow
+from .review_overrides import REVIEW_OVERRIDE_SCHEMA_VERSION
 from .schema import validate_manifest
 
 InputFn = Callable[[str], str]
@@ -117,8 +121,17 @@ def _record_parse_episodes(record: Mapping[str, object]) -> tuple[int, ...]:
     raw = parse.get("episodes")
     if not isinstance(raw, list | tuple):
         return ()
-    values = tuple(value for value in raw if isinstance(value, int) and not isinstance(value, bool))
+    values = tuple(
+        value
+        for value in raw
+        if isinstance(value, int) and not isinstance(value, bool)
+    )
     return values if len(values) == len(raw) else ()
+
+
+def _record_title_hint(record: Mapping[str, object]) -> str | None:
+    parse = _mapping(record.get("parse"))
+    return _string(parse.get("title_hint")) if parse is not None else None
 
 
 def collect_duplicate_groups(manifest: object) -> tuple[DuplicateReviewGroup, ...]:
@@ -179,7 +192,13 @@ def collect_held_records(manifest: object) -> tuple[Mapping[str, object], ...]:
         if _string(cast(Mapping[str, object], record).get("status")) == "held"
     ]
     return tuple(
-        sorted(held, key=lambda record: (_normalize(_record_source(record)), _record_source(record)))
+        sorted(
+            held,
+            key=lambda record: (
+                _normalize(_record_source(record)),
+                _record_source(record),
+            ),
+        )
     )
 
 
@@ -236,7 +255,9 @@ def _table(raw: dict[str, Any], name: str) -> list[dict[str, Any]]:
     return cast(list[dict[str, Any]], value)
 
 
-def _remove_source_entries(raw: dict[str, Any], table_name: str, sources: Sequence[str]) -> None:
+def _remove_source_entries(
+    raw: dict[str, Any], table_name: str, sources: Sequence[str]
+) -> None:
     wanted = {_source_key(source) for source in sources}
     table = _table(raw, table_name)
     table[:] = [
@@ -247,8 +268,19 @@ def _remove_source_entries(raw: dict[str, Any], table_name: str, sources: Sequen
     ]
 
 
+def _remove_exact_dispositions(raw: dict[str, Any], sources: Sequence[str]) -> None:
+    for table_name in (
+        "episode_decisions",
+        "source_holds",
+        "reviewed_episode_decisions",
+        "extra_decisions",
+    ):
+        _remove_source_entries(raw, table_name, sources)
+
+
 def _add_hold(raw: dict[str, Any], source: str, reasons: Sequence[str]) -> None:
-    _remove_source_entries(raw, "source_holds", (source,))
+    _remove_exact_dispositions(raw, (source,))
+    _remove_source_entries(raw, "duplicate_preferences", (source,))
     _table(raw, "source_holds").append(
         {"source": source, "reasons": list(dict.fromkeys(reasons))}
     )
@@ -268,55 +300,183 @@ def _add_duplicate_preference(raw: dict[str, Any], source: str) -> None:
     )
 
 
-def _upsert_show(raw: dict[str, Any], key: str, show: ProviderShow) -> None:
-    shows = _table(raw, "shows")
+def _find_show_entry(raw: dict[str, Any], key: str) -> dict[str, Any] | None:
     normalized_key = _normalize(key)
-    entry = next(
+    return next(
         (
             item
-            for item in shows
+            for item in _table(raw, "shows")
             if isinstance(item.get("key"), str)
             and _normalize(cast(str, item["key"])) == normalized_key
         ),
         None,
     )
+
+
+def _upsert_show(raw: dict[str, Any], key: str, show: ProviderShow) -> dict[str, Any]:
+    entry = _find_show_entry(raw, key)
     if entry is None:
         entry = {
             "key": key,
             "aliases": [],
+            "numbering_mode": "aired",
             "title_preference": "provider",
         }
-        shows.append(entry)
+        _table(raw, "shows").append(entry)
     entry.pop("tvmaze_id", None)
     entry["provider"] = show.identity.provider
     entry["provider_id"] = show.identity.value
-    entry["numbering_mode"] = "aired"
+    entry.setdefault("numbering_mode", "aired")
+    entry.setdefault("title_preference", "provider")
+    entry.setdefault("aliases", [])
     if show.year is not None:
         entry["year"] = show.year
+    return entry
 
 
-def _add_aired_episode_decision(
+def _existing_jellyfin_ids(
+    raw: dict[str, Any], show_key: str
+) -> tuple[JellyfinProviderIdentifier, ...]:
+    entry = _find_show_entry(raw, show_key)
+    if entry is None:
+        return ()
+    values: list[JellyfinProviderIdentifier] = []
+    for field, provider in (
+        ("tmdb_id", JellyfinProvider.TMDB),
+        ("tvdb_id", JellyfinProvider.TVDB),
+        ("imdb_id", JellyfinProvider.IMDB),
+    ):
+        value = entry.get(field)
+        if value is not None:
+            values.append(JellyfinProviderIdentifier(provider, str(value)))
+    return tuple(values)
+
+
+def _prompt_identifier(
+    label: str,
+    provider: JellyfinProvider,
+    current: str | None,
+    *,
+    input_fn: InputFn,
+    output: TextIO,
+) -> JellyfinProviderIdentifier | None:
+    while True:
+        current_hint = f" [{current}]" if current is not None else ""
+        raw = input_fn(
+            f"{label}{current_hint} (blank keeps current, '-' clears): "
+        ).strip()
+        if not raw:
+            return (
+                JellyfinProviderIdentifier(provider, current)
+                if current is not None
+                else None
+            )
+        if raw == "-":
+            return None
+        try:
+            return JellyfinProviderIdentifier(provider, raw)
+        except ValueError as exc:
+            output.write(f"Invalid {label}: {exc}\n")
+
+
+def _prompt_jellyfin_ids(
+    raw: dict[str, Any],
+    show_key: str,
+    *,
+    input_fn: InputFn,
+    output: TextIO,
+) -> tuple[JellyfinProviderIdentifier, ...]:
+    existing = _existing_jellyfin_ids(raw, show_key)
+    by_provider = {identifier.provider: identifier.value for identifier in existing}
+    if input_fn("Edit Jellyfin show IDs (TVDB/TMDB/IMDb)? [y/N]: ").strip().casefold() not in {
+        "y",
+        "yes",
+    }:
+        return existing
+    identifiers = []
+    for label, provider in (
+        ("TVDB show ID", JellyfinProvider.TVDB),
+        ("TMDB show ID", JellyfinProvider.TMDB),
+        ("IMDb show ID", JellyfinProvider.IMDB),
+    ):
+        identifier = _prompt_identifier(
+            label,
+            provider,
+            by_provider.get(provider),
+            input_fn=input_fn,
+            output=output,
+        )
+        if identifier is not None:
+            identifiers.append(identifier)
+    return tuple(identifiers)
+
+
+def _write_show_metadata(
+    raw: dict[str, Any],
+    key: str,
+    show: ProviderShow,
+    identifiers: Sequence[JellyfinProviderIdentifier],
+) -> None:
+    entry = _upsert_show(raw, key, show)
+    for field in ("tmdb_id", "tvdb_id", "imdb_id"):
+        entry.pop(field, None)
+    field_by_provider = {
+        JellyfinProvider.TMDB: "tmdb_id",
+        JellyfinProvider.TVDB: "tvdb_id",
+        JellyfinProvider.IMDB: "imdb_id",
+    }
+    for identifier in identifiers:
+        entry[field_by_provider[identifier.provider]] = identifier.value
+
+
+def _add_reviewed_episode(
     raw: dict[str, Any],
     *,
     source: str,
     show: ProviderShow,
     episode: ProviderEpisode,
+    lookup_mode: str,
     reason: str,
 ) -> None:
     if episode.number is None:
         raise ReviewConfigurationError("provider episode has no numeric coordinate")
-    _remove_source_entries(raw, "source_holds", (source,))
-    _remove_source_entries(raw, "episode_decisions", (source,))
+    _remove_exact_dispositions(raw, (source,))
     _remove_source_entries(raw, "duplicate_preferences", (source,))
-    _table(raw, "episode_decisions").append(
+    entry: dict[str, Any] = {
+        "source": source,
+        "show_provider": show.identity.provider,
+        "show_provider_id": show.identity.value,
+        "episode_provider": episode.identity.provider,
+        "episode_provider_id": episode.identity.value,
+        "season": episode.season,
+        "number": episode.number,
+        "title": episode.title,
+        "lookup_mode": lookup_mode,
+        "reasons": [reason, f"provider episode confirmed:{episode.identity.key}"],
+    }
+    if episode.airdate is not None:
+        entry["airdate"] = episode.airdate
+    _table(raw, "reviewed_episode_decisions").append(entry)
+
+
+def _add_extra_decision(
+    raw: dict[str, Any],
+    *,
+    source: str,
+    show: ProviderShow,
+    kind: str,
+    display_title: str,
+) -> None:
+    _remove_exact_dispositions(raw, (source,))
+    _remove_source_entries(raw, "duplicate_preferences", (source,))
+    _table(raw, "extra_decisions").append(
         {
             "source": source,
             "show_provider": show.identity.provider,
             "show_provider_id": show.identity.value,
-            "numbering_mode": "aired",
-            "season": episode.season,
-            "episodes": [episode.number],
-            "reasons": [reason, f"provider episode confirmed:{episode.identity.key}"],
+            "kind": kind,
+            "display_title": display_title,
+            "reasons": ["manual review classified source as an explicit extra"],
         }
     )
 
@@ -344,6 +504,9 @@ _FIELD_ORDER: dict[str, tuple[str, ...]] = {
         "numbering_mode",
         "title_preference",
         "preferred_title",
+        "tmdb_id",
+        "tvdb_id",
+        "imdb_id",
     ),
     "duplicate_preferences": ("source", "rank", "reasons"),
     "episode_decisions": (
@@ -362,30 +525,62 @@ _FIELD_ORDER: dict[str, tuple[str, ...]] = {
         "reasons",
     ),
     "source_holds": ("source", "reasons"),
+    "reviewed_episode_decisions": (
+        "source",
+        "show_provider",
+        "show_provider_id",
+        "episode_provider",
+        "episode_provider_id",
+        "season",
+        "number",
+        "title",
+        "airdate",
+        "lookup_mode",
+        "reasons",
+    ),
+    "extra_decisions": (
+        "source",
+        "show_provider",
+        "show_provider_id",
+        "kind",
+        "display_title",
+        "reasons",
+    ),
 }
 
 
 def render_overrides(raw: Mapping[str, object]) -> bytes:
-    """Render the supported local override contract deterministically."""
+    """Render the supported local review override contract deterministically."""
 
     allowed = {"schema_version", *_FIELD_ORDER}
     unknown = set(raw) - allowed
     if unknown:
-        raise ReviewConfigurationError(f"override contains unsupported fields: {sorted(unknown)}")
-    schema_version = raw.get("schema_version")
-    if not isinstance(schema_version, int) or isinstance(schema_version, bool):
-        raise ReviewConfigurationError("override schema_version must be an integer")
-    lines = [f"schema_version = {schema_version}"]
-    for table_name in ("shows", "duplicate_preferences", "episode_decisions", "source_holds"):
+        raise ReviewConfigurationError(
+            f"override contains unsupported fields: {sorted(unknown)}"
+        )
+    lines = [f"schema_version = {REVIEW_OVERRIDE_SCHEMA_VERSION}"]
+    for table_name in (
+        "shows",
+        "duplicate_preferences",
+        "episode_decisions",
+        "source_holds",
+        "reviewed_episode_decisions",
+        "extra_decisions",
+    ):
         values = raw.get(table_name, [])
-        if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
-            raise ReviewConfigurationError(f"override {table_name} must be an array of tables")
+        if not isinstance(values, list) or not all(
+            isinstance(item, dict) for item in values
+        ):
+            raise ReviewConfigurationError(
+                f"override {table_name} must be an array of tables"
+            )
         order = _FIELD_ORDER[table_name]
         for item in cast(list[dict[str, object]], values):
             unknown_fields = set(item) - set(order)
             if unknown_fields:
                 raise ReviewConfigurationError(
-                    f"override {table_name} contains unsupported fields: {sorted(unknown_fields)}"
+                    f"override {table_name} contains unsupported fields: "
+                    f"{sorted(unknown_fields)}"
                 )
             lines.extend(("", f"[[{table_name}]]"))
             for field in order:
@@ -401,10 +596,14 @@ def parse_overrides(payload: bytes) -> dict[str, Any]:
         raise ReviewConfigurationError("override file must be UTF-8") from exc
     except tomllib.TOMLDecodeError as exc:
         raise ReviewConfigurationError(f"invalid override TOML: {exc}") from exc
-    if raw.get("schema_version") != 4:
+    schema_version = raw.get("schema_version")
+    if schema_version not in {4, REVIEW_OVERRIDE_SCHEMA_VERSION}:
         raise ReviewConfigurationError(
-            "interactive review currently requires the reviewed schema-4 override contract"
+            "interactive review requires schema-4 or schema-5 local overrides"
         )
+    raw["schema_version"] = REVIEW_OVERRIDE_SCHEMA_VERSION
+    for table_name in _FIELD_ORDER:
+        raw.setdefault(table_name, [])
     render_overrides(raw)
     return cast(dict[str, Any], raw)
 
@@ -430,7 +629,8 @@ def _select_show(
     for index, show in enumerate(choices, start=1):
         year = str(show.year) if show.year is not None else "unknown year"
         output.write(
-            f"  {index}) {show.title} ({year}) [{show.identity.provider}:{show.identity.value}]\n"
+            f"  {index}) {show.title} ({year}) "
+            f"[{show.identity.provider}:{show.identity.value}]\n"
         )
     selected = _prompt_int(
         "Choose show number (or cancel)", input_fn=input_fn, output=output
@@ -443,20 +643,24 @@ def _select_show(
     return choices[selected - 1]
 
 
-def _preview_episode(
-    record: Mapping[str, object],
-    show: ProviderShow,
-    episode: ProviderEpisode,
-) -> str | None:
-    if episode.number is None:
-        return None
-    canonical = CanonicalShow(
+def _canonical_show(record: Mapping[str, object], show: ProviderShow) -> CanonicalShow:
+    return CanonicalShow(
         source_key=_record_group_key(record),
         provider_identity=show.identity,
         title=show.title,
         year=show.year,
         numbering_mode=NumberingMode.AIRED,
     )
+
+
+def _preview_episode(
+    record: Mapping[str, object],
+    show: ProviderShow,
+    episode: ProviderEpisode,
+    provider_ids: Sequence[JellyfinProviderIdentifier],
+) -> str | None:
+    if episode.number is None:
+        return None
     assignment = SourceEpisodeAssignment(
         source_key=_record_source(record),
         status=AssignmentStatus.MATCHED,
@@ -468,11 +672,16 @@ def _preview_episode(
         ),
     )
     destination = build_episode_destination(
-        canonical,
+        _canonical_show(record, show),
         assignment,
         _record_extension(record),
+        provider_ids=provider_ids,
     )
-    return destination.relative_path if destination.status is DestinationStatus.READY else None
+    return (
+        destination.relative_path
+        if destination.status is DestinationStatus.READY
+        else None
+    )
 
 
 def _find_episode_by_coordinate(
@@ -512,34 +721,44 @@ def _confirm_episode_resolution(
     show: ProviderShow,
     episode: ProviderEpisode,
     *,
+    lookup_mode: str,
     reason: str,
     input_fn: InputFn,
     output: TextIO,
 ) -> bool:
-    destination = _preview_episode(record, show, episode)
-    if destination is None:
-        output.write("A safe Jellyfin destination cannot be produced for that provider episode.\n")
-        return False
-    coordinate = (
-        f"S{episode.season:02d}E{episode.number:02d}"
-        if episode.number is not None
-        else f"season {episode.season}, unnumbered"
+    show_key = _record_group_key(record)
+    provider_ids = _prompt_jellyfin_ids(
+        raw,
+        show_key,
+        input_fn=input_fn,
+        output=output,
     )
+    destination = _preview_episode(record, show, episode, provider_ids)
+    if destination is None:
+        output.write(
+            "A safe Jellyfin destination cannot be produced for that provider episode.\n"
+        )
+        return False
+    coordinate = f"S{episode.season:02d}E{episode.number:02d}"
     output.write(
         f"Provider confirmation: {show.title} {coordinate} - {episode.title} "
         f"[{episode.identity.key}]\n"
     )
     output.write(f"Destination preview: {destination}\n")
-    if input_fn("Write this decision? [y/N]: ").strip().casefold() not in {"y", "yes"}:
+    if input_fn("Write this decision? [y/N]: ").strip().casefold() not in {
+        "y",
+        "yes",
+    }:
         output.write("Decision deferred.\n")
         return False
     source = _record_source(record)
-    _upsert_show(raw, _record_group_key(record), show)
-    _add_aired_episode_decision(
+    _write_show_metadata(raw, show_key, show, provider_ids)
+    _add_reviewed_episode(
         raw,
         source=source,
         show=show,
         episode=episode,
+        lookup_mode=lookup_mode,
         reason=reason,
     )
     return True
@@ -573,6 +792,7 @@ def _review_specific_episode(
     )
     episode: ProviderEpisode | None = None
     reason = "manual review provider-confirmed episode"
+    lookup_mode = "coordinate"
     if mode == "1":
         default_season = _record_parse_int(record, "season")
         parsed = _record_parse_episodes(record)
@@ -596,21 +816,29 @@ def _review_specific_episode(
         if absolute is None:
             return False
         episode = _find_episode_by_absolute(catalog.episodes, absolute)
-        reason = f"manual review confirmed absolute episode {absolute} against provider catalog"
+        lookup_mode = "absolute"
+        reason = (
+            f"manual review confirmed absolute episode {absolute} "
+            "against provider catalog"
+        )
     elif mode == "3":
         airdate = input_fn("Air date (YYYY-MM-DD): ").strip()
         episode = _find_episode_by_date(catalog.episodes, airdate)
+        lookup_mode = "date"
         reason = f"manual review confirmed unique provider air date {airdate}"
     else:
         return False
-    if episode is None:
-        output.write("No unique provider episode matched that identity. Decision deferred.\n")
+    if episode is None or episode.number is None:
+        output.write(
+            "No unique numbered provider episode matched that identity. Decision deferred.\n"
+        )
         return False
     return _confirm_episode_resolution(
         raw,
         record,
         show,
         episode,
+        lookup_mode=lookup_mode,
         reason=reason,
         input_fn=input_fn,
         output=output,
@@ -661,6 +889,7 @@ def _review_special(
         record,
         show,
         episode,
+        lookup_mode="special",
         reason="manual review confirmed provider-catalog special",
         input_fn=input_fn,
         output=output,
@@ -668,16 +897,76 @@ def _review_special(
 
 
 def _review_extra(
+    raw: dict[str, Any],
     record: Mapping[str, object],
+    provider: MetadataProvider,
     *,
+    input_fn: InputFn,
     output: TextIO,
 ) -> bool:
-    output.write(
-        "Explicit extra classification is not representable in override schema 4 yet. "
-        "The source remains held; #191 keeps apply gated until this becomes a "
-        "first-class reviewed override rather than a free-form reason marker.\n"
+    show = _select_show(record, provider, input_fn=input_fn, output=output)
+    if show is None:
+        return False
+    kinds = (
+        "trailer",
+        "featurette",
+        "interview",
+        "behind-the-scenes",
+        "deleted-scene",
+        "clip",
+        "creditless-opening",
+        "creditless-ending",
+        "extra",
     )
-    return False
+    choices = {str(index): kind for index, kind in enumerate(kinds, start=1)}
+    selected = _prompt_choice(
+        "Choose extra type:",
+        choices,
+        input_fn=input_fn,
+        output=output,
+    )
+    kind = choices[selected]
+    default_title = _record_title_hint(record) or PurePosixPath(
+        _record_source(record)
+    ).stem
+    display_title = (
+        input_fn(f"Extra display title [{default_title}]: ").strip() or default_title
+    )
+    show_key = _record_group_key(record)
+    provider_ids = _prompt_jellyfin_ids(
+        raw,
+        show_key,
+        input_fn=input_fn,
+        output=output,
+    )
+    extra = ExtraDecision(kind=kind, rule="explicit-review-extra")
+    destination = build_extra_destination(
+        _canonical_show(record, show),
+        source_key=_record_source(record),
+        extra=extra,
+        source_extension=_record_extension(record),
+        display_title=display_title,
+        provider_ids=provider_ids,
+    )
+    if destination.status is not DestinationStatus.READY:
+        output.write("A safe Jellyfin extra destination cannot be produced.\n")
+        return False
+    output.write(f"Destination preview: {destination.relative_path}\n")
+    if input_fn("Write this extra decision? [y/N]: ").strip().casefold() not in {
+        "y",
+        "yes",
+    }:
+        output.write("Decision deferred.\n")
+        return False
+    _write_show_metadata(raw, show_key, show, provider_ids)
+    _add_extra_decision(
+        raw,
+        source=_record_source(record),
+        show=show,
+        kind=kind,
+        display_title=display_title,
+    )
+    return True
 
 
 def _review_duplicate_group(
@@ -705,11 +994,11 @@ def _review_duplicate_group(
         output=output,
     )
     candidates = group.candidates
-    _remove_source_entries(raw, "duplicate_preferences", candidates)
     if action == "1":
         if group.recommended_winner is None:
             output.write("There is no recommended winner; decision deferred.\n")
             return False, True
+        _remove_source_entries(raw, "duplicate_preferences", candidates)
         _add_duplicate_preference(raw, group.recommended_winner)
         return True, False
     if action == "2":
@@ -719,10 +1008,11 @@ def _review_duplicate_group(
         if selected is None or selected <= 0 or selected > len(candidates):
             output.write("Decision deferred.\n")
             return False, True
+        _remove_source_entries(raw, "duplicate_preferences", candidates)
         _add_duplicate_preference(raw, candidates[selected - 1])
         return True, False
     if action == "3":
-        _remove_source_entries(raw, "episode_decisions", candidates)
+        _remove_source_entries(raw, "duplicate_preferences", candidates)
         for candidate in candidates:
             _add_hold(
                 raw,
@@ -738,7 +1028,7 @@ def _review_duplicate_group(
         if not losers:
             output.write("There are no current loser candidates; decision deferred.\n")
             return False, True
-        _remove_source_entries(raw, "episode_decisions", losers)
+        _remove_source_entries(raw, "duplicate_preferences", candidates)
         for loser in losers:
             _add_hold(
                 raw,
@@ -761,11 +1051,7 @@ def run_review_wizard(
     input_fn: InputFn,
     output: TextIO,
 ) -> tuple[bytes, ReviewSummary]:
-    """Run one non-mutating review session and return a new override payload.
-
-    The function reads only the supplied plan/override values and provider cache/API.
-    It never reads, moves, renames, deletes, quarantines, or writes media.
-    """
+    """Run one non-mutating review session and return a new override payload."""
 
     validate_manifest(manifest)
     raw = parse_overrides(override_payload)
@@ -815,7 +1101,9 @@ def run_review_wizard(
                 raw, record, provider, input_fn=input_fn, output=output
             )
         elif action == "4":
-            changed = _review_extra(record, output=output)
+            changed = _review_extra(
+                raw, record, provider, input_fn=input_fn, output=output
+            )
         else:
             deferred += 1
         if action in {"2", "3", "4"} and not changed:
