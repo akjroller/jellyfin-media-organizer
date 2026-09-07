@@ -21,7 +21,7 @@ from .review_identity import (
 )
 from .schema import validate_manifest
 
-REVIEW_SESSION_SCHEMA_VERSION = 2
+REVIEW_SESSION_SCHEMA_VERSION = 3
 
 
 class ReviewItemKind(StrEnum):
@@ -33,6 +33,19 @@ class ReviewItemState(StrEnum):
     PENDING = "pending"
     ANSWERED = "answered"
     DEFERRED = "deferred"
+
+
+class ReviewCollisionClass(StrEnum):
+    """Structured duplicate authority; never infer safety from diagnostic prose."""
+
+    SAME_LOGICAL_IDENTITY = "same-logical-identity"
+    DESTINATION_CONFLICT = "destination-conflict"
+
+
+_HELD_ACTIONS = frozenset({"keep_held", "episode", "special", "extra"})
+_DUPLICATE_ACTIONS = frozenset(
+    {"select_winner", "keep_all", "quarantine_candidate"}
+)
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -77,8 +90,118 @@ def manifest_override_snapshot(manifest: object) -> str:
 
 
 def stable_held_ref(source: str) -> str:
-    digest = hashlib.sha256(normalize_review_path(source).encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.sha256(normalize_review_path(source).encode("utf-8")).hexdigest()[
+        :16
+    ]
     return f"held-{digest}"
+
+
+def _require_exact_keys(
+    data: Mapping[str, object], expected: set[str], label: str
+) -> None:
+    keys = set(data)
+    if keys != expected:
+        raise ValueError(
+            f"{label} data fields must be exactly {sorted(expected)}; got {sorted(keys)}"
+        )
+
+
+def _require_source_mapping(
+    value: object,
+    *,
+    source: str,
+    label: str,
+) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be an object")
+    raw_source = value.get("source")
+    if not isinstance(raw_source, str):
+        raise ValueError(f"{label}.source must be a string")
+    if normalize_review_path(raw_source) != normalize_review_path(source):
+        raise ValueError(f"{label}.source does not match the reviewed held source")
+    return cast(Mapping[str, object], value)
+
+
+def _validate_duplicate_answer(
+    action: str,
+    data: Mapping[str, object],
+    candidates: tuple[str, ...],
+    collision_class: ReviewCollisionClass,
+) -> None:
+    if action not in _DUPLICATE_ACTIONS:
+        raise ValueError("answered duplicate review item has an invalid action")
+
+    normalized_candidates = {
+        normalize_review_path(candidate): candidate for candidate in candidates
+    }
+    if action == "keep_all":
+        _require_exact_keys(data, {"active_action"}, "keep_all")
+        if data.get("active_action") != "keep_all":
+            raise ValueError("keep_all requires active_action='keep_all'")
+        return
+
+    if collision_class is ReviewCollisionClass.DESTINATION_CONFLICT:
+        raise ValueError(
+            "destination-conflict review items cannot select a duplicate winner"
+        )
+
+    expected = {"active_action", "winner"}
+    if action == "quarantine_candidate":
+        expected.add("quarantine_candidates")
+    _require_exact_keys(data, expected, action)
+    if data.get("active_action") != "select_winner":
+        raise ValueError(f"{action} requires active_action='select_winner'")
+
+    winner = data.get("winner")
+    if not isinstance(winner, str):
+        raise ValueError(f"{action} requires a winner string")
+    winner_key = normalize_review_path(winner)
+    if winner_key not in normalized_candidates:
+        raise ValueError(f"{action} winner must be one reviewed candidate")
+
+    if action != "quarantine_candidate":
+        return
+    raw_quarantine = data.get("quarantine_candidates")
+    if not isinstance(raw_quarantine, list) or not raw_quarantine:
+        raise ValueError(
+            "quarantine_candidate requires a non-empty quarantine_candidates list"
+        )
+    if not all(isinstance(candidate, str) for candidate in raw_quarantine):
+        raise ValueError("quarantine_candidates must contain strings")
+    quarantine = cast(list[str], raw_quarantine)
+    normalized = [normalize_review_path(candidate) for candidate in quarantine]
+    if len(normalized) != len(set(normalized)):
+        raise ValueError("quarantine_candidates must be unique")
+    if winner_key in normalized:
+        raise ValueError("duplicate winner cannot also be a quarantine candidate")
+    if any(candidate not in normalized_candidates for candidate in normalized):
+        raise ValueError("quarantine_candidates must be reviewed candidates")
+
+
+def _validate_held_answer(
+    action: str,
+    data: Mapping[str, object],
+    source: str,
+) -> None:
+    if action not in _HELD_ACTIONS:
+        raise ValueError("answered held review item has an invalid action")
+    if action == "keep_held":
+        _require_exact_keys(data, set(), "keep_held")
+        return
+    if action in {"episode", "special"}:
+        _require_exact_keys(data, {"reviewed_episode", "show"}, action)
+        _require_source_mapping(
+            data.get("reviewed_episode"),
+            source=source,
+            label="reviewed_episode",
+        )
+        if not isinstance(data.get("show"), Mapping):
+            raise ValueError(f"{action} show metadata must be an object")
+        return
+    _require_exact_keys(data, {"extra", "show"}, "extra")
+    _require_source_mapping(data.get("extra"), source=source, label="extra")
+    if not isinstance(data.get("show"), Mapping):
+        raise ValueError("extra show metadata must be an object")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +215,7 @@ class ReviewSessionItem:
     duplicate_ref: str | None = None
     candidate_set_sha256: str | None = None
     candidates: tuple[str, ...] = ()
+    collision_class: ReviewCollisionClass | None = None
     action: str | None = None
     data_json: str = "{}"
 
@@ -105,6 +229,7 @@ class ReviewSessionItem:
                 or self.duplicate_ref is not None
                 or self.candidate_set_sha256 is not None
                 or self.candidates
+                or self.collision_class is not None
             ):
                 raise ValueError("held review item has invalid identity fields")
             object.__setattr__(
@@ -121,6 +246,7 @@ class ReviewSessionItem:
             or self.duplicate_ref is None
             or self.candidate_set_sha256 is None
             or len(self.candidates) < 2
+            or self.collision_class is None
         ):
             raise ValueError("duplicate review item has invalid identity fields")
         else:
@@ -149,12 +275,34 @@ class ReviewSessionItem:
                 separators=(",", ":"),
             ),
         )
-        if self.state is ReviewItemState.PENDING and self.action is not None:
-            raise ValueError("pending review items cannot carry an action")
-        if self.state is ReviewItemState.DEFERRED and self.action != "defer":
-            raise ValueError("deferred review items must carry action='defer'")
-        if self.state is ReviewItemState.ANSWERED and self.action is None:
+
+        if self.state is ReviewItemState.PENDING:
+            if self.action is not None:
+                raise ValueError("pending review items cannot carry an action")
+            if data:
+                raise ValueError("pending review items cannot carry decision data")
+            return
+
+        if self.state is ReviewItemState.DEFERRED:
+            if self.action != "defer":
+                raise ValueError("deferred review items must carry action='defer'")
+            if data:
+                raise ValueError("deferred review items cannot carry decision data")
+            return
+
+        if self.action is None:
             raise ValueError("answered review items require an action")
+        if self.kind is ReviewItemKind.DUPLICATE:
+            assert self.collision_class is not None
+            _validate_duplicate_answer(
+                self.action,
+                data,
+                self.candidates,
+                self.collision_class,
+            )
+            return
+        assert self.source is not None
+        _validate_held_answer(self.action, data, self.source)
 
     @property
     def data(self) -> dict[str, object]:
@@ -200,14 +348,16 @@ class ReviewSession:
         if len(refs) != len(set(refs)):
             raise ValueError("review session refs must be unique")
         approved = tuple(sorted(set(self.approved_scope_refs)))
-        if len(approved) != len(self.approved_scope_refs):
+        if approved != self.approved_scope_refs:
             raise ValueError("approved review scope refs must be unique and sorted")
         known = set(refs)
         if set(approved) - known:
             raise ValueError("approved review scope references an unknown review item")
         for ref in approved:
             if self.item(ref).state is not ReviewItemState.ANSWERED:
-                raise ValueError("approved review scope may contain only answered items")
+                raise ValueError(
+                    "approved review scope may contain only answered items"
+                )
 
     @property
     def canonical_bytes(self) -> bytes:
@@ -222,6 +372,11 @@ class ReviewSession:
                     "action": item.action,
                     "candidate_set_sha256": item.candidate_set_sha256,
                     "candidates": list(item.candidates),
+                    "collision_class": (
+                        item.collision_class.value
+                        if item.collision_class is not None
+                        else None
+                    ),
                     "data": item.data,
                     "duplicate_ref": item.duplicate_ref,
                     "kind": item.kind.value,
@@ -255,10 +410,14 @@ class ReviewSession:
 
     @property
     def usable_for_planning(self) -> bool:
+        """Allow non-mutating planning; this never authorizes media movement."""
+
         return self.complete or self.approved_partial
 
     def item(self, review_ref: str) -> ReviewSessionItem:
-        match = next((item for item in self.items if item.review_ref == review_ref), None)
+        match = next(
+            (item for item in self.items if item.review_ref == review_ref), None
+        )
         if match is None:
             raise ValueError("review session does not contain requested review ref")
         return match
@@ -358,7 +517,9 @@ def _candidate_binding(
     source_raw = _mapping(record.get("source"), "record.source")
     source_member = ReviewMemberBinding(
         path=source,
-        fingerprint=_fingerprint(source_raw.get("fingerprint"), "record.source.fingerprint"),
+        fingerprint=_fingerprint(
+            source_raw.get("fingerprint"), "record.source.fingerprint"
+        ),
     )
     companions: list[ReviewMemberBinding] = []
     for companion in companions_by_source.get(normalize_review_path(source), ()):
@@ -381,6 +542,17 @@ def _candidate_binding(
                 key=lambda member: (normalize_review_path(member.path), member.path),
             )
         ),
+    )
+
+
+def _collision_class(record: Mapping[str, object]) -> ReviewCollisionClass:
+    status = record.get("status")
+    if status == "duplicate":
+        return ReviewCollisionClass.SAME_LOGICAL_IDENTITY
+    if status == "suspicious":
+        return ReviewCollisionClass.DESTINATION_CONFLICT
+    raise ValueError(
+        "duplicate review data must belong to a duplicate or suspicious plan record"
     )
 
 
@@ -409,9 +581,9 @@ def build_review_session(
     for companion in companions:
         source_video = companion.get("source_video")
         if isinstance(source_video, str) and source_video:
-            companions_by_source.setdefault(normalize_review_path(source_video), []).append(
-                companion
-            )
+            companions_by_source.setdefault(
+                normalize_review_path(source_video), []
+            ).append(companion)
     frozen_companions = {
         key: tuple(value) for key, value in companions_by_source.items()
     }
@@ -458,6 +630,7 @@ def build_review_session(
                         key=lambda value: (normalize_review_path(value), value),
                     )
                 ),
+                collision_class=_collision_class(record),
             )
         )
 
@@ -517,14 +690,47 @@ def load_review_session(payload: bytes) -> ReviewSession:
         raise ValueError("approved review scope refs must be strings")
 
     items: list[ReviewSessionItem] = []
+    expected_item_fields = {
+        "action",
+        "candidate_set_sha256",
+        "candidates",
+        "collision_class",
+        "data",
+        "duplicate_ref",
+        "kind",
+        "review_ref",
+        "show_key",
+        "source",
+        "source_binding_sha256",
+        "state",
+    }
     for entry in raw_items:
         if not isinstance(entry, dict):
             raise ValueError("review session item must be an object")
+        if set(entry) != expected_item_fields:
+            raise ValueError("review session item has unexpected fields")
+        raw_kind = entry.get("kind")
+        raw_state = entry.get("state")
+        if not isinstance(raw_kind, str) or not isinstance(raw_state, str):
+            raise ValueError("review session item kind/state must be strings")
         try:
-            kind = ReviewItemKind(entry.get("kind"))
-            state = ReviewItemState(entry.get("state"))
+            kind = ReviewItemKind(raw_kind)
+            state = ReviewItemState(raw_state)
         except ValueError as exc:
             raise ValueError("review session item kind/state is invalid") from exc
+        raw_collision_class = entry.get("collision_class")
+        if raw_collision_class is not None and not isinstance(
+            raw_collision_class, str
+        ):
+            raise ValueError("review session collision_class must be a string")
+        try:
+            collision_class = (
+                ReviewCollisionClass(raw_collision_class)
+                if raw_collision_class is not None
+                else None
+            )
+        except ValueError as exc:
+            raise ValueError("review session collision_class is invalid") from exc
         data = entry.get("data", {})
         candidates = entry.get("candidates", [])
         if not isinstance(data, dict):
@@ -550,6 +756,7 @@ def load_review_session(payload: bytes) -> ReviewSession:
                     entry.get("candidate_set_sha256"),
                 ),
                 candidates=tuple(candidates),
+                collision_class=collision_class,
                 action=cast(str | None, entry.get("action")),
                 data_json=json.dumps(
                     data,
