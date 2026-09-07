@@ -57,6 +57,37 @@ class ReviewCandidateBinding:
             raise ValueError("review candidate members must be unique")
 
 
+def _canonical_candidate(candidate: ReviewCandidateBinding) -> dict[str, object]:
+    members = (candidate.source, *candidate.companions)
+    return {
+        "source": normalize_review_path(candidate.source.path),
+        "members": sorted(
+            (
+                {
+                    "path": normalize_review_path(member.path),
+                    "size": member.fingerprint.size,
+                    "mtime_ns": member.fingerprint.mtime_ns,
+                    "sha256": member.fingerprint.sha256,
+                }
+                for member in members
+            ),
+            key=lambda item: str(item["path"]),
+        ),
+    }
+
+
+def source_binding_hash(candidate: ReviewCandidateBinding) -> str:
+    """Bind one reviewed video to its fingerprint and companion member set."""
+
+    encoded = json.dumps(
+        _canonical_candidate(candidate),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def stable_duplicate_ref(destination_key: str, candidates: Iterable[str]) -> str:
     identity = {
         "destination_key": normalize_review_path(destination_key),
@@ -75,27 +106,8 @@ def duplicate_candidate_set_hash(
     destination_key: str,
     candidates: Iterable[ReviewCandidateBinding],
 ) -> str:
-    canonical = []
-    for candidate in candidates:
-        members = (candidate.source, *candidate.companions)
-        canonical.append(
-            {
-                "source": normalize_review_path(candidate.source.path),
-                "members": sorted(
-                    (
-                        {
-                            "path": normalize_review_path(member.path),
-                            "size": member.fingerprint.size,
-                            "mtime_ns": member.fingerprint.mtime_ns,
-                            "sha256": member.fingerprint.sha256,
-                        }
-                        for member in members
-                    ),
-                    key=lambda item: item["path"],
-                ),
-            }
-        )
-    canonical.sort(key=lambda item: item["source"])
+    canonical = [_canonical_candidate(candidate) for candidate in candidates]
+    canonical.sort(key=lambda item: str(item["source"]))
     payload = {
         "destination_key": normalize_review_path(destination_key),
         "candidates": canonical,
