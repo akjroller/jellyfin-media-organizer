@@ -141,7 +141,7 @@ def _preference_winner(
                 None,
                 (
                     "explicit duplicate preferences do not produce a unique highest rank",
-                    "automatic release-quality evidence is not allowed to override tied explicit preferences",
+                    "automatic equivalence and release-quality evidence are not allowed to override tied explicit preferences",
                 ),
                 True,
             )
@@ -195,13 +195,16 @@ def _duplicate_result(
     destination_key: str,
     candidates: tuple[DuplicateCandidate, ...],
 ) -> DuplicateGroupResult:
-    winner, evidence = _exact_hash_winner(candidates)
-    confidence = 1.0
+    # Human-reviewed preferences are authoritative. Exact-hash equality proves
+    # content equivalence, but it does not prove that sidecars, source location,
+    # naming, or operator intent are interchangeable. Therefore an explicit
+    # preference must be evaluated before automatic equivalence evidence.
+    winner, evidence, preference_present = _preference_winner(candidates)
+    confidence = 1.0 if winner is not None else 0.9
 
-    preference_present = False
-    if winner is None:
-        winner, evidence, preference_present = _preference_winner(candidates)
-        confidence = 0.9
+    if winner is None and not preference_present:
+        winner, evidence = _exact_hash_winner(candidates)
+        confidence = 1.0
 
     if winner is None and not preference_present:
         winner, evidence = _release_quality_winner(candidates)
@@ -279,12 +282,12 @@ def classify_duplicate_candidates(
     refers to the same logical identity. Different logical identities converging
     on one destination are suspicious and never receive a winner.
 
-    Winner selection is fail-closed. Exact SHA-256 equality has highest authority,
-    followed by a unique highest explicit preference. Automatic release-quality
-    evidence is considered only after those cases and only when one candidate
-    uniquely dominates all others within compatible source/remux dimensions.
-    Size, timestamps, path length, lexical order, or input order are never quality
-    evidence. No duplicate decision authorizes deletion.
+    Winner selection is fail-closed. A unique explicit operator preference has
+    highest authority. Exact SHA-256 equality is the next automatic proof, followed
+    by release-quality evidence only when one candidate uniquely dominates all
+    others within compatible source/remux dimensions. Size, timestamps, path length,
+    lexical order, or input order are never quality evidence. No duplicate decision
+    authorizes deletion.
     """
 
     grouped: dict[str, list[DuplicateCandidate]] = defaultdict(list)
