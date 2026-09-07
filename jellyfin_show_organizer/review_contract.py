@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import tomllib
 import unicodedata
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from . import overrides as _base
 from .overrides import DuplicatePreferenceOverride, OverrideCatalog
@@ -20,11 +22,88 @@ from .review_overrides import (
     _parse_reviewed_episode,
     _show_ids,
 )
+from .review_session import ReviewItemKind, ReviewItemState, ReviewSession
 
 
 class DuplicateGroupAction(StrEnum):
     SELECT_WINNER = "select_winner"
     KEEP_ALL = "keep_all"
+
+
+_TABLE_ORDER = (
+    "shows",
+    "duplicate_preferences",
+    "duplicate_group_decisions",
+    "episode_decisions",
+    "source_holds",
+    "reviewed_episode_decisions",
+    "extra_decisions",
+)
+
+_FIELD_ORDER: dict[str, tuple[str, ...]] = {
+    "shows": (
+        "key",
+        "tvmaze_id",
+        "provider",
+        "provider_id",
+        "aliases",
+        "year",
+        "numbering_mode",
+        "title_preference",
+        "preferred_title",
+        "tmdb_id",
+        "tvdb_id",
+        "imdb_id",
+    ),
+    "duplicate_preferences": ("source", "rank", "reasons"),
+    "duplicate_group_decisions": (
+        "duplicate_ref",
+        "candidate_set_sha256",
+        "candidates",
+        "action",
+        "winner",
+        "reasons",
+    ),
+    "episode_decisions": (
+        "source",
+        "show_provider",
+        "show_provider_id",
+        "numbering_mode",
+        "season",
+        "episodes",
+        "absolute_episode",
+        "special_kind",
+        "special_episode",
+        "episode_date",
+        "segment_hint",
+        "title_hint",
+        "reasons",
+    ),
+    "source_holds": ("source", "reasons"),
+    "reviewed_episode_decisions": (
+        "source",
+        "source_binding_sha256",
+        "show_provider",
+        "show_provider_id",
+        "episode_provider",
+        "episode_provider_id",
+        "season",
+        "number",
+        "title",
+        "airdate",
+        "lookup_mode",
+        "reasons",
+    ),
+    "extra_decisions": (
+        "source",
+        "source_binding_sha256",
+        "show_provider",
+        "show_provider_id",
+        "kind",
+        "display_title",
+        "reasons",
+    ),
+}
 
 
 def _sha256(value: object, label: str) -> str:
@@ -84,19 +163,35 @@ class DuplicateGroupDecision:
 
 @dataclass(frozen=True, slots=True)
 class ReviewContractCatalog(ReviewOverrideCatalog):
-    """Schema-5 active planner state produced by the review system."""
+    """Schema-5 active planner state produced by one verifiable review session."""
 
     duplicate_group_decisions: tuple[DuplicateGroupDecision, ...] = ()
-    review_session_sha256: str | None = None
+    review_session_sha256: str = ""
+    review_base_plan_sha256: str = ""
+    review_base_override_snapshot: str = ""
 
     def __post_init__(self) -> None:
-        super().__post_init__()
-        if self.review_session_sha256 is not None:
-            object.__setattr__(
-                self,
-                "review_session_sha256",
-                _sha256(self.review_session_sha256, "review_session_sha256"),
-            )
+        # Explicit base call avoids zero-argument super() with slotted dataclass
+        # inheritance, which is not reliable across our supported Python matrix.
+        ReviewOverrideCatalog.__post_init__(self)
+        object.__setattr__(
+            self,
+            "review_session_sha256",
+            _sha256(self.review_session_sha256, "review_session_sha256"),
+        )
+        object.__setattr__(
+            self,
+            "review_base_plan_sha256",
+            _sha256(self.review_base_plan_sha256, "review_base_plan_sha256"),
+        )
+        object.__setattr__(
+            self,
+            "review_base_override_snapshot",
+            _sha256(
+                self.review_base_override_snapshot,
+                "review_base_override_snapshot",
+            ),
+        )
 
         refs: set[str] = set()
         candidate_sources: set[str] = set()
@@ -148,6 +243,8 @@ class ReviewContractCatalog(ReviewOverrideCatalog):
         )
         payload = json.loads(base.canonical_bytes().decode("utf-8"))
         payload["review_session_sha256"] = self.review_session_sha256
+        payload["review_base_plan_sha256"] = self.review_base_plan_sha256
+        payload["review_base_override_snapshot"] = self.review_base_override_snapshot
         payload["duplicate_group_decisions"] = [
             {
                 "action": decision.action.value,
@@ -255,25 +352,72 @@ def _compiled_preferences(
     return tuple(compiled)
 
 
-def load_review_contract(path: Path | None = None) -> OverrideCatalog:
-    """Load legacy overrides or the full schema-5 review contract."""
-
-    if path is None:
-        return _base.load_overrides(None)
-    payload = path.read_bytes()
+def _raw_override(payload: bytes) -> dict[str, Any]:
     try:
         raw = tomllib.loads(payload.decode("utf-8"))
     except UnicodeDecodeError as exc:
         raise ValueError("override file must be valid UTF-8") from exc
     except tomllib.TOMLDecodeError as exc:
         raise ValueError(f"invalid override TOML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("override root must be a table")
+    return cast(dict[str, Any], raw)
 
-    if raw.get("schema_version") != REVIEW_OVERRIDE_SCHEMA_VERSION:
-        return _base.load_overrides(path)
+
+def _array_tables(raw: Mapping[str, object], names: tuple[str, ...]) -> None:
+    for label in names:
+        value = raw.get(label, [])
+        if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+            raise ValueError(f"override {label} must be an array of tables")
+
+
+def _schema4_catalog(raw: dict[str, Any]) -> OverrideCatalog:
+    allowed = {
+        "schema_version",
+        "shows",
+        "duplicate_preferences",
+        "episode_decisions",
+        "source_holds",
+    }
+    unknown = set(raw) - allowed
+    if unknown:
+        raise ValueError(f"unknown top-level override fields: {sorted(unknown)}")
+    _array_tables(
+        raw,
+        ("shows", "duplicate_preferences", "episode_decisions", "source_holds"),
+    )
+    return OverrideCatalog(
+        schema_version=4,
+        shows=tuple(_base._parse_override(item) for item in raw.get("shows", [])),
+        duplicate_preferences=tuple(
+            _base._parse_duplicate_preference(item)
+            for item in raw.get("duplicate_preferences", [])
+        ),
+        episode_decisions=tuple(
+            _base._parse_episode_decision(item)
+            for item in raw.get("episode_decisions", [])
+        ),
+        source_holds=tuple(
+            _base._parse_source_hold(item) for item in raw.get("source_holds", [])
+        ),
+    )
+
+
+def load_review_contract_payload(payload: bytes) -> OverrideCatalog:
+    """Load schema-4 base state or a fully session-bound schema-5 contract."""
+
+    raw = _raw_override(payload)
+    schema_version = raw.get("schema_version")
+    if schema_version != REVIEW_OVERRIDE_SCHEMA_VERSION:
+        if schema_version != 4:
+            raise ValueError("unsupported override schema version")
+        return _schema4_catalog(raw)
 
     allowed_top_level = {
         "schema_version",
         "review_session_sha256",
+        "review_base_plan_sha256",
+        "review_base_override_snapshot",
         "shows",
         "duplicate_preferences",
         "duplicate_group_decisions",
@@ -287,29 +431,23 @@ def load_review_contract(path: Path | None = None) -> OverrideCatalog:
         raise ValueError(
             f"unknown top-level override fields: {sorted(unknown_top_level)}"
         )
-
-    shows_raw = raw.get("shows", [])
-    duplicate_raw = raw.get("duplicate_preferences", [])
-    group_raw = raw.get("duplicate_group_decisions", [])
-    episode_raw = raw.get("episode_decisions", [])
-    holds_raw = raw.get("source_holds", [])
-    reviewed_raw = raw.get("reviewed_episode_decisions", [])
-    extras_raw = raw.get("extra_decisions", [])
-    for label, value in (
-        ("shows", shows_raw),
-        ("duplicate_preferences", duplicate_raw),
-        ("duplicate_group_decisions", group_raw),
-        ("episode_decisions", episode_raw),
-        ("source_holds", holds_raw),
-        ("reviewed_episode_decisions", reviewed_raw),
-        ("extra_decisions", extras_raw),
+    for field in (
+        "review_session_sha256",
+        "review_base_plan_sha256",
+        "review_base_override_snapshot",
     ):
-        if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
-            raise ValueError(f"override {label} must be an array of tables")
+        if not isinstance(raw.get(field), str):
+            raise ValueError(f"schema-5 override requires {field}")
 
-    groups = tuple(_parse_group_decision(item) for item in group_raw)
+    _array_tables(raw, _TABLE_ORDER)
+    shows_raw = cast(list[dict[str, Any]], raw.get("shows", []))
+    groups = tuple(
+        _parse_group_decision(item)
+        for item in cast(list[dict[str, Any]], raw.get("duplicate_group_decisions", []))
+    )
     legacy_preferences = tuple(
-        _base._parse_duplicate_preference(item) for item in duplicate_raw
+        _base._parse_duplicate_preference(item)
+        for item in cast(list[dict[str, Any]], raw.get("duplicate_preferences", []))
     )
 
     shows = []
@@ -326,23 +464,231 @@ def load_review_contract(path: Path | None = None) -> OverrideCatalog:
                 ShowJellyfinIdentifiers(show_key=show.key, identifiers=ids)
             )
 
-    session_hash = raw.get("review_session_sha256")
-    if session_hash is not None and not isinstance(session_hash, str):
-        raise ValueError("review_session_sha256 must be a string")
-
     return ReviewContractCatalog(
         schema_version=REVIEW_OVERRIDE_SCHEMA_VERSION,
         shows=tuple(shows),
         duplicate_preferences=_compiled_preferences(legacy_preferences, groups),
         episode_decisions=tuple(
-            _base._parse_episode_decision(item) for item in episode_raw
+            _base._parse_episode_decision(item)
+            for item in cast(list[dict[str, Any]], raw.get("episode_decisions", []))
         ),
-        source_holds=tuple(_base._parse_source_hold(item) for item in holds_raw),
+        source_holds=tuple(
+            _base._parse_source_hold(item)
+            for item in cast(list[dict[str, Any]], raw.get("source_holds", []))
+        ),
         reviewed_episode_decisions=tuple(
-            _parse_reviewed_episode(item) for item in reviewed_raw
+            _parse_reviewed_episode(item)
+            for item in cast(
+                list[dict[str, Any]],
+                raw.get("reviewed_episode_decisions", []),
+            )
         ),
-        extra_decisions=tuple(_parse_extra_decision(item) for item in extras_raw),
+        extra_decisions=tuple(
+            _parse_extra_decision(item)
+            for item in cast(list[dict[str, Any]], raw.get("extra_decisions", []))
+        ),
         show_jellyfin_identifiers=tuple(identifiers),
         duplicate_group_decisions=groups,
-        review_session_sha256=session_hash,
+        review_session_sha256=cast(str, raw["review_session_sha256"]),
+        review_base_plan_sha256=cast(str, raw["review_base_plan_sha256"]),
+        review_base_override_snapshot=cast(
+            str,
+            raw["review_base_override_snapshot"],
+        ),
     )
+
+
+def load_review_contract(path: Path | None = None) -> OverrideCatalog:
+    if path is None:
+        return _base.load_overrides(None)
+    return load_review_contract_payload(path.read_bytes())
+
+
+def _toml_value(value: object) -> str:
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, list | tuple):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    raise ValueError("unsupported active override value")
+
+
+def render_active_overrides(raw: Mapping[str, object]) -> bytes:
+    lines = ["schema_version = 5"]
+    for field in (
+        "review_session_sha256",
+        "review_base_plan_sha256",
+        "review_base_override_snapshot",
+    ):
+        value = raw.get(field)
+        if not isinstance(value, str):
+            raise ValueError(f"active review contract requires {field}")
+        lines.append(f"{field} = {_toml_value(value)}")
+    for table in _TABLE_ORDER:
+        values = raw.get(table, [])
+        if not isinstance(values, list) or not all(
+            isinstance(item, dict) for item in values
+        ):
+            raise ValueError(f"override {table} must be an array of tables")
+        order = _FIELD_ORDER[table]
+        for item in cast(list[dict[str, object]], values):
+            unknown = set(item) - set(order)
+            if unknown:
+                raise ValueError(
+                    f"override {table} contains unsupported fields: {sorted(unknown)}"
+                )
+            lines.extend(("", f"[[{table}]]"))
+            for field in order:
+                if field in item and item[field] is not None:
+                    lines.append(f"{field} = {_toml_value(item[field])}")
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _source_key(value: str) -> str:
+    return value.replace("\\", "/").casefold()
+
+
+def _remove_source(raw: dict[str, Any], table: str, source: str) -> None:
+    values = cast(list[dict[str, Any]], raw.setdefault(table, []))
+    key = _source_key(source)
+    values[:] = [
+        item
+        for item in values
+        if not isinstance(item.get("source"), str)
+        or _source_key(cast(str, item["source"])) != key
+    ]
+
+
+def _upsert_show(raw: dict[str, Any], show: Mapping[str, object]) -> None:
+    key = show.get("key")
+    if not isinstance(key, str):
+        raise ValueError("reviewed show metadata is missing its key")
+    values = cast(list[dict[str, Any]], raw.setdefault("shows", []))
+    normalized = key.casefold()
+    values[:] = [
+        item
+        for item in values
+        if not isinstance(item.get("key"), str)
+        or cast(str, item["key"]).casefold() != normalized
+    ]
+    values.append(copy.deepcopy(dict(show)))
+
+
+def compile_active_overrides(session: ReviewSession) -> bytes:
+    """Compile exactly the answered ledger items over the ledger's stored base state."""
+
+    raw = _raw_override(session.base_override_toml.encode("utf-8"))
+    raw.pop("review_session_sha256", None)
+    raw.pop("review_base_plan_sha256", None)
+    raw.pop("review_base_override_snapshot", None)
+    for table in _TABLE_ORDER:
+        raw.setdefault(table, [])
+
+    for item in session.items:
+        if item.state is not ReviewItemState.ANSWERED:
+            continue
+        data = item.data
+        if item.kind is ReviewItemKind.DUPLICATE:
+            groups = cast(
+                list[dict[str, Any]],
+                raw.setdefault("duplicate_group_decisions", []),
+            )
+            groups[:] = [
+                group
+                for group in groups
+                if group.get("duplicate_ref") != item.duplicate_ref
+            ]
+            for candidate in item.candidates:
+                _remove_source(raw, "duplicate_preferences", candidate)
+            action = data.get("active_action")
+            winner = data.get("winner")
+            if action not in {
+                DuplicateGroupAction.SELECT_WINNER.value,
+                DuplicateGroupAction.KEEP_ALL.value,
+            }:
+                raise ValueError("answered duplicate item has no active action")
+            assert item.duplicate_ref is not None
+            assert item.candidate_set_sha256 is not None
+            group: dict[str, object] = {
+                "duplicate_ref": item.duplicate_ref,
+                "candidate_set_sha256": item.candidate_set_sha256,
+                "candidates": list(item.candidates),
+                "action": action,
+                "reasons": ["human-reviewed duplicate group decision"],
+            }
+            if winner is not None:
+                if not isinstance(winner, str):
+                    raise ValueError("reviewed duplicate winner is invalid")
+                group["winner"] = winner
+            groups.append(group)
+            continue
+
+        assert item.source is not None
+        assert item.source_binding_sha256 is not None
+        if item.action == "keep_held":
+            continue
+        for table in (
+            "source_holds",
+            "episode_decisions",
+            "reviewed_episode_decisions",
+            "extra_decisions",
+            "duplicate_preferences",
+        ):
+            _remove_source(raw, table, item.source)
+        show = data.get("show")
+        if isinstance(show, Mapping):
+            _upsert_show(raw, cast(Mapping[str, object], show))
+        reviewed_episode = data.get("reviewed_episode")
+        if isinstance(reviewed_episode, Mapping):
+            decision = copy.deepcopy(dict(reviewed_episode))
+            decision["source_binding_sha256"] = item.source_binding_sha256
+            cast(list[dict[str, Any]], raw["reviewed_episode_decisions"]).append(
+                decision
+            )
+        extra = data.get("extra")
+        if isinstance(extra, Mapping):
+            decision = copy.deepcopy(dict(extra))
+            decision["source_binding_sha256"] = item.source_binding_sha256
+            cast(list[dict[str, Any]], raw["extra_decisions"]).append(decision)
+
+    raw["schema_version"] = REVIEW_OVERRIDE_SCHEMA_VERSION
+    raw["review_session_sha256"] = session.sha256
+    raw["review_base_plan_sha256"] = session.plan_sha256
+    raw["review_base_override_snapshot"] = session.base_override_snapshot
+    return render_active_overrides(raw)
+
+
+def verify_review_contract_session(
+    catalog: ReviewContractCatalog,
+    session: ReviewSession,
+) -> None:
+    """Fail closed unless the active contract is exactly derived from this ledger."""
+
+    if catalog.review_session_sha256 != session.sha256:
+        raise ValueError("active review contract does not match the supplied session hash")
+    if catalog.review_base_plan_sha256 != session.plan_sha256:
+        raise ValueError("active review contract does not match the session base plan")
+    if catalog.review_base_override_snapshot != session.base_override_snapshot:
+        raise ValueError(
+            "active review contract does not match the session base override snapshot"
+        )
+    if not session.usable_for_planning:
+        raise ValueError(
+            "review session still has unresolved work and has no approved partial scope"
+        )
+
+    base_catalog = load_review_contract_payload(session.base_override_toml.encode("utf-8"))
+    if base_catalog.snapshot_id != session.base_override_snapshot:
+        raise ValueError("review session base override payload no longer matches its snapshot")
+
+    expected_payload = compile_active_overrides(session)
+    expected = load_review_contract_payload(expected_payload)
+    if not isinstance(expected, ReviewContractCatalog):
+        raise ValueError("compiled review session did not produce a schema-5 contract")
+    if expected.snapshot_id != catalog.snapshot_id:
+        raise ValueError(
+            "active review contract decisions do not match the supplied review session"
+        )
