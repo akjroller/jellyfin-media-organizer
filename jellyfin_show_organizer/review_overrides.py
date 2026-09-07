@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tomllib
 import unicodedata
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from . import overrides as _base
@@ -17,11 +15,33 @@ REVIEW_OVERRIDE_SCHEMA_VERSION = 5
 REVIEW_LOOKUP_MODES = frozenset({"coordinate", "absolute", "date", "special"})
 
 
+def _sha256(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a SHA-256 string")
+    digest = value.casefold()
+    if len(digest) != 64:
+        raise ValueError(f"{label} must contain 64 hex characters")
+    try:
+        int(digest, 16)
+    except ValueError as exc:
+        raise ValueError(f"{label} must contain 64 hex characters") from exc
+    return digest
+
+
+def _validate_reasons(reasons: tuple[str, ...], label: str) -> None:
+    if not reasons or any(not reason or reason != reason.strip() for reason in reasons):
+        raise ValueError(f"{label} reasons must contain non-empty trimmed strings")
+    normalized = [unicodedata.normalize("NFKC", reason).casefold() for reason in reasons]
+    if len(normalized) != len(set(normalized)):
+        raise ValueError(f"{label} reasons must be unique")
+
+
 @dataclass(frozen=True, slots=True)
 class ReviewedEpisodeOverride:
     """One exact provider episode identity confirmed by a human review."""
 
     source: str
+    source_binding_sha256: str
     show_provider_identity: ProviderIdentity
     episode_provider_identity: ProviderIdentity
     season: int
@@ -40,6 +60,11 @@ class ReviewedEpisodeOverride:
                 label="reviewed episode source",
             ),
         )
+        object.__setattr__(
+            self,
+            "source_binding_sha256",
+            _sha256(self.source_binding_sha256, "reviewed episode source_binding_sha256"),
+        )
         if self.show_provider_identity.provider != self.episode_provider_identity.provider:
             raise ValueError("reviewed episode and show must use the same provider")
         if self.season < 0 or self.number < 0:
@@ -57,17 +82,7 @@ class ReviewedEpisodeOverride:
             if not airdate:
                 raise ValueError("reviewed episode airdate cannot be empty")
             object.__setattr__(self, "airdate", airdate)
-        if not self.reasons or any(
-            not reason or reason != reason.strip() for reason in self.reasons
-        ):
-            raise ValueError(
-                "reviewed episode reasons must contain non-empty trimmed strings"
-            )
-        normalized_reasons = [
-            unicodedata.normalize("NFKC", reason).casefold() for reason in self.reasons
-        ]
-        if len(normalized_reasons) != len(set(normalized_reasons)):
-            raise ValueError("reviewed episode reasons must be unique")
+        _validate_reasons(self.reasons, "reviewed episode")
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +90,7 @@ class ExplicitExtraOverride:
     """One exact-source reviewed decision to classify a video as an extra."""
 
     source: str
+    source_binding_sha256: str
     show_provider_identity: ProviderIdentity
     kind: str
     display_title: str | None = None
@@ -89,6 +105,11 @@ class ExplicitExtraOverride:
                 label="extra decision source",
             ),
         )
+        object.__setattr__(
+            self,
+            "source_binding_sha256",
+            _sha256(self.source_binding_sha256, "extra decision source_binding_sha256"),
+        )
         kind = self.kind.strip().casefold()
         if not kind:
             raise ValueError("extra decision kind must be non-empty")
@@ -98,17 +119,7 @@ class ExplicitExtraOverride:
             if not title:
                 raise ValueError("extra decision display_title must be non-empty")
             object.__setattr__(self, "display_title", title)
-        if not self.reasons or any(
-            not reason or reason != reason.strip() for reason in self.reasons
-        ):
-            raise ValueError(
-                "extra decision reasons must contain non-empty trimmed strings"
-            )
-        normalized_reasons = [
-            unicodedata.normalize("NFKC", reason).casefold() for reason in self.reasons
-        ]
-        if len(normalized_reasons) != len(set(normalized_reasons)):
-            raise ValueError("extra decision reasons must be unique")
+        _validate_reasons(self.reasons, "extra decision")
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +139,7 @@ class ShowJellyfinIdentifiers:
 
 @dataclass(frozen=True, slots=True)
 class ReviewOverrideCatalog(OverrideCatalog):
-    """Schema-5 extension of the existing override contract."""
+    """Schema-5 structural extension used by the session-bound review contract."""
 
     reviewed_episode_decisions: tuple[ReviewedEpisodeOverride, ...] = ()
     extra_decisions: tuple[ExplicitExtraOverride, ...] = ()
@@ -139,8 +150,6 @@ class ReviewOverrideCatalog(OverrideCatalog):
             raise ValueError(
                 f"review override catalog requires schema {REVIEW_OVERRIDE_SCHEMA_VERSION}"
             )
-
-        # Reuse the complete schema-4 validation contract for inherited fields.
         _base.OverrideCatalog(
             schema_version=4,
             shows=self.shows,
@@ -276,6 +285,7 @@ class ReviewOverrideCatalog(OverrideCatalog):
                 "show_provider": decision.show_provider_identity.provider,
                 "show_provider_id": decision.show_provider_identity.value,
                 "source": decision.source,
+                "source_binding_sha256": decision.source_binding_sha256,
                 "title": decision.title,
             }
             for decision in sorted(
@@ -300,6 +310,7 @@ class ReviewOverrideCatalog(OverrideCatalog):
                 "show_provider": decision.show_provider_identity.provider,
                 "show_provider_id": decision.show_provider_identity.value,
                 "source": decision.source,
+                "source_binding_sha256": decision.source_binding_sha256,
             }
             for decision in sorted(
                 self.extra_decisions,
@@ -374,6 +385,7 @@ def _identity(
 def _parse_reviewed_episode(raw: dict[str, Any]) -> ReviewedEpisodeOverride:
     allowed = {
         "source",
+        "source_binding_sha256",
         "show_provider",
         "show_provider_id",
         "episode_provider",
@@ -389,12 +401,15 @@ def _parse_reviewed_episode(raw: dict[str, Any]) -> ReviewedEpisodeOverride:
     if unknown:
         raise ValueError(f"unknown reviewed episode fields: {sorted(unknown)}")
     source = raw.get("source")
+    source_binding = raw.get("source_binding_sha256")
     title = raw.get("title")
     airdate = raw.get("airdate")
     lookup_mode = raw.get("lookup_mode")
     reasons = raw.get("reasons", ["explicit reviewed provider episode"])
     if not isinstance(source, str):
         raise ValueError("reviewed episode source must be a string")
+    if not isinstance(source_binding, str):
+        raise ValueError("reviewed episode source_binding_sha256 must be a string")
     if not isinstance(title, str):
         raise ValueError("reviewed episode title must be a string")
     if airdate is not None and not isinstance(airdate, str):
@@ -407,6 +422,7 @@ def _parse_reviewed_episode(raw: dict[str, Any]) -> ReviewedEpisodeOverride:
         raise ValueError("reviewed episode reasons must be a list of strings")
     return ReviewedEpisodeOverride(
         source=source,
+        source_binding_sha256=source_binding,
         show_provider_identity=_identity(
             raw,
             provider_field="show_provider",
@@ -431,6 +447,7 @@ def _parse_reviewed_episode(raw: dict[str, Any]) -> ReviewedEpisodeOverride:
 def _parse_extra_decision(raw: dict[str, Any]) -> ExplicitExtraOverride:
     allowed = {
         "source",
+        "source_binding_sha256",
         "show_provider",
         "show_provider_id",
         "kind",
@@ -441,11 +458,14 @@ def _parse_extra_decision(raw: dict[str, Any]) -> ExplicitExtraOverride:
     if unknown:
         raise ValueError(f"unknown extra decision fields: {sorted(unknown)}")
     source = raw.get("source")
+    source_binding = raw.get("source_binding_sha256")
     kind = raw.get("kind")
     display_title = raw.get("display_title")
     reasons = raw.get("reasons", ["explicit local extra decision"])
     if not isinstance(source, str):
         raise ValueError("extra decision source must be a string")
+    if not isinstance(source_binding, str):
+        raise ValueError("extra decision source_binding_sha256 must be a string")
     if not isinstance(kind, str):
         raise ValueError("extra decision kind must be a string")
     if display_title is not None and not isinstance(display_title, str):
@@ -456,6 +476,7 @@ def _parse_extra_decision(raw: dict[str, Any]) -> ExplicitExtraOverride:
         raise ValueError("extra decision reasons must be a list of strings")
     return ExplicitExtraOverride(
         source=source,
+        source_binding_sha256=source_binding,
         show_provider_identity=_identity(
             raw,
             provider_field="show_provider",
@@ -485,84 +506,3 @@ def _show_ids(raw: dict[str, Any]) -> tuple[JellyfinProviderIdentifier, ...]:
             raise ValueError(f"show {field} must be a string or integer")
         values.append(JellyfinProviderIdentifier(provider, str(value)))
     return tuple(values)
-
-
-def load_planning_overrides(path: Path | None = None) -> OverrideCatalog:
-    """Load legacy overrides or the schema-5 reviewed extension."""
-
-    if path is None:
-        return _base.load_overrides(None)
-    payload = path.read_bytes()
-    try:
-        raw = tomllib.loads(payload.decode("utf-8"))
-    except UnicodeDecodeError as exc:
-        raise ValueError("override file must be valid UTF-8") from exc
-    except tomllib.TOMLDecodeError as exc:
-        raise ValueError(f"invalid override TOML: {exc}") from exc
-
-    schema_version = raw.get("schema_version")
-    if schema_version != REVIEW_OVERRIDE_SCHEMA_VERSION:
-        return _base.load_overrides(path)
-
-    allowed_top_level = {
-        "schema_version",
-        "shows",
-        "duplicate_preferences",
-        "episode_decisions",
-        "source_holds",
-        "reviewed_episode_decisions",
-        "extra_decisions",
-    }
-    unknown_top_level = set(raw) - allowed_top_level
-    if unknown_top_level:
-        raise ValueError(
-            f"unknown top-level override fields: {sorted(unknown_top_level)}"
-        )
-
-    shows_raw = raw.get("shows", [])
-    duplicate_raw = raw.get("duplicate_preferences", [])
-    episode_raw = raw.get("episode_decisions", [])
-    holds_raw = raw.get("source_holds", [])
-    reviewed_raw = raw.get("reviewed_episode_decisions", [])
-    extras_raw = raw.get("extra_decisions", [])
-    for label, value in (
-        ("shows", shows_raw),
-        ("duplicate_preferences", duplicate_raw),
-        ("episode_decisions", episode_raw),
-        ("source_holds", holds_raw),
-        ("reviewed_episode_decisions", reviewed_raw),
-        ("extra_decisions", extras_raw),
-    ):
-        if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
-            raise ValueError(f"override {label} must be an array of tables")
-
-    shows = []
-    identifiers = []
-    for raw_show in shows_raw:
-        show_payload = dict(raw_show)
-        ids = _show_ids(show_payload)
-        for field in ("tmdb_id", "tvdb_id", "imdb_id"):
-            show_payload.pop(field, None)
-        show = _base._parse_override(show_payload)
-        shows.append(show)
-        if ids:
-            identifiers.append(
-                ShowJellyfinIdentifiers(show_key=show.key, identifiers=ids)
-            )
-
-    return ReviewOverrideCatalog(
-        schema_version=REVIEW_OVERRIDE_SCHEMA_VERSION,
-        shows=tuple(shows),
-        duplicate_preferences=tuple(
-            _base._parse_duplicate_preference(item) for item in duplicate_raw
-        ),
-        episode_decisions=tuple(
-            _base._parse_episode_decision(item) for item in episode_raw
-        ),
-        source_holds=tuple(_base._parse_source_hold(item) for item in holds_raw),
-        reviewed_episode_decisions=tuple(
-            _parse_reviewed_episode(item) for item in reviewed_raw
-        ),
-        extra_decisions=tuple(_parse_extra_decision(item) for item in extras_raw),
-        show_jellyfin_identifiers=tuple(identifiers),
-    )
