@@ -10,7 +10,17 @@ from jellyfin_show_organizer.duplicate_classifier import (
     DuplicatePreference,
     classify_duplicate_candidates,
 )
-from jellyfin_show_organizer.models import SourceFingerprint
+from jellyfin_show_organizer.models import (
+    CanonicalShow,
+    MatchEvidence,
+    NumberingMode,
+    OrganizerPlan,
+    ParseResult,
+    PlanRecord,
+    SourceFile,
+    SourceFingerprint,
+    TerminalStatus,
+)
 from jellyfin_show_organizer.review_contract import (
     DuplicateGroupAction,
     ReviewContractCatalog,
@@ -32,9 +42,12 @@ from jellyfin_show_organizer.review_session import (
     ReviewSession,
     ReviewSessionItem,
     atomic_write_new,
+    build_review_session,
     load_review_session,
     render_review_session,
 )
+from jellyfin_show_organizer.review_system import _collect_duplicate_groups
+from jellyfin_show_organizer.schema import plan_to_manifest
 
 pytestmark = pytest.mark.local
 
@@ -43,16 +56,19 @@ def _candidate(
     name: str,
     *,
     preference: DuplicatePreference | None = None,
+    logical_identity: str = "tvmaze:4242:episode:9001",
+    sha256: str | None = "a" * 64,
 ) -> DuplicateCandidate:
+    source = f"Fabricated Series/{name}.mkv"
     return DuplicateCandidate(
-        operation_key=f"Fabricated Series/{name}.mkv",
-        members=(f"Fabricated Series/{name}.mkv",),
+        operation_key=source,
+        members=(source,),
         destination="Fabricated Series/Season 01/Fabricated Series S01E01.mkv",
-        logical_identity="tvmaze:4242:episode:9001",
+        logical_identity=logical_identity,
         fingerprint=SourceFingerprint(
             size=100,
             mtime_ns=200,
-            sha256="a" * 64,
+            sha256=sha256,
         ),
         preference=preference,
     )
@@ -83,6 +99,72 @@ def _session_item_payload(**updates: object) -> bytes:
         "items": [item],
     }
     return (json.dumps(payload, sort_keys=True) + "\n").encode()
+
+
+def _duplicate_manifest(
+    *,
+    winner: bool,
+    cross_identity: bool = False,
+    reverse_records: bool = False,
+) -> dict[str, object]:
+    first = _candidate("A", sha256="a" * 64 if winner else None)
+    second = _candidate(
+        "B",
+        logical_identity=(
+            "tvmaze:4242:episode:9002"
+            if cross_identity
+            else "tvmaze:4242:episode:9001"
+        ),
+        sha256="a" * 64 if winner else None,
+    )
+    result = classify_duplicate_candidates((first, second))[0]
+    decision = result.decision
+    parse = ParseResult(series_hint="Fabricated Series", season=1, episodes=(1,))
+    show = CanonicalShow(
+        source_key="Fabricated Series",
+        tvmaze_id=4242,
+        title="Fabricated Series",
+        numbering_mode=NumberingMode.AIRED,
+    )
+    evidence = MatchEvidence(method="fabricated-test", confidence=1.0)
+
+    records = []
+    for candidate in (first, second):
+        is_winner = decision.winner == candidate.operation_key
+        status = (
+            TerminalStatus.MATCHED
+            if is_winner
+            else TerminalStatus.DUPLICATE
+            if decision.winner is not None
+            else TerminalStatus.SUSPICIOUS
+        )
+        records.append(
+            PlanRecord(
+                source=SourceFile(
+                    relative_path=candidate.operation_key,
+                    extension=".mkv",
+                    fingerprint=candidate.fingerprint,
+                ),
+                status=status,
+                parse=parse if is_winner else None,
+                show=show if is_winner else None,
+                evidence=evidence if is_winner else None,
+                destination=decision.destination_key if is_winner else None,
+                duplicate=decision,
+            )
+        )
+    manifest = plan_to_manifest(
+        OrganizerPlan(
+            schema_version=2,
+            overrides_version=4,
+            records=tuple(records),
+        )
+    )
+    if reverse_records:
+        raw_records = manifest["records"]
+        assert isinstance(raw_records, list)
+        manifest["records"] = list(reversed(raw_records))
+    return manifest
 
 
 def test_explicit_duplicate_preference_outranks_exact_hash_equivalence() -> None:
@@ -136,6 +218,48 @@ def test_candidate_set_hash_includes_companion_fingerprints() -> None:
     assert duplicate_candidate_set_hash("destination", (first,)) != (
         duplicate_candidate_set_hash("destination", (second,))
     )
+
+
+@pytest.mark.parametrize("reverse_records", [False, True])
+def test_automatic_duplicate_winner_record_order_does_not_break_session_creation(
+    reverse_records: bool,
+) -> None:
+    manifest = _duplicate_manifest(winner=True, reverse_records=reverse_records)
+
+    session = build_review_session(
+        manifest,
+        base_override_snapshot="b" * 64,
+        base_override_payload=b"schema_version = 4\n",
+    )
+
+    duplicate_items = [
+        item for item in session.items if item.kind is ReviewItemKind.DUPLICATE
+    ]
+    assert len(duplicate_items) == 1
+    assert (
+        duplicate_items[0].collision_class
+        is ReviewCollisionClass.SAME_LOGICAL_IDENTITY
+    )
+
+
+def test_winnerless_same_identity_group_permits_manual_selection() -> None:
+    manifest = _duplicate_manifest(winner=False)
+
+    (group,) = _collect_duplicate_groups(manifest)
+
+    assert group.recommended_winner is None
+    assert group.collision_class is ReviewCollisionClass.SAME_LOGICAL_IDENTITY
+    assert group.manual_selection_allowed is True
+
+
+def test_multiple_logical_identity_convergence_prohibits_manual_selection() -> None:
+    manifest = _duplicate_manifest(winner=False, cross_identity=True)
+
+    (group,) = _collect_duplicate_groups(manifest)
+
+    assert group.recommended_winner is None
+    assert group.collision_class is ReviewCollisionClass.DESTINATION_CONFLICT
+    assert group.manual_selection_allowed is False
 
 
 @pytest.mark.parametrize("schema_version", [1, 2, 3, 4])
@@ -281,12 +405,12 @@ def test_same_identity_duplicate_winner_does_not_depend_on_evidence_text() -> No
 
 def test_keep_held_compiler_preserves_existing_hold(tmp_path: Path) -> None:
     base_path = tmp_path / "base.toml"
-    base_payload = b'''schema_version = 4
+    base_payload = b"""schema_version = 4
 
 [[source_holds]]
 source = "Fabricated Series/Held.mkv"
 reasons = ["reviewed leave in place"]
-'''
+"""
     base_path.write_bytes(base_payload)
     base = load_review_contract(base_path)
     session = ReviewSession(
