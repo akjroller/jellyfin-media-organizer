@@ -22,16 +22,16 @@ from .review_session import (
     render_review_session,
 )
 from .review_wizard import (
-    DuplicateReviewGroup,
-    InputFn,
-    ReviewConfigurationError,
     _record_source,
     _review_extra,
     _review_special,
     _review_specific_episode,
     collect_duplicate_groups,
     collect_held_records,
+    DuplicateReviewGroup,
+    InputFn,
     parse_overrides,
+    ReviewConfigurationError,
 )
 from .schema import validate_manifest
 
