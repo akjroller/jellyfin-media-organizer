@@ -23,7 +23,9 @@ class ReviewFingerprint:
         if self.sha256 is not None:
             digest = self.sha256.casefold()
             if len(digest) != 64:
-                raise ValueError("review fingerprint sha256 must contain 64 hex characters")
+                raise ValueError(
+                    "review fingerprint sha256 must contain 64 hex characters"
+                )
             try:
                 int(digest, 16)
             except ValueError as exc:
