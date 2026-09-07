@@ -10,12 +10,10 @@ from typing import Any, TextIO, cast
 
 from . import review_wizard as _wizard
 from .providers import MetadataProvider
-from .review_contract import (
-    DuplicateGroupAction,
-    compile_active_overrides,
-)
+from .review_contract import DuplicateGroupAction, compile_active_overrides
 from .review_identity import normalize_review_path, stable_duplicate_ref
 from .review_session import (
+    ReviewCollisionClass,
     ReviewItemKind,
     ReviewItemState,
     ReviewSession,
@@ -40,7 +38,11 @@ class DuplicateReviewGroup:
     recommended_winner: str | None
     losers: tuple[str, ...]
     evidence: tuple[str, ...]
-    manual_selection_allowed: bool
+    collision_class: ReviewCollisionClass
+
+    @property
+    def manual_selection_allowed(self) -> bool:
+        return self.collision_class is ReviewCollisionClass.SAME_LOGICAL_IDENTITY
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +195,19 @@ def _record_show_key(record: Mapping[str, object]) -> str:
     return _record_source(record).replace("\\", "/").split("/", 1)[0]
 
 
+def _record_collision_class(
+    record: Mapping[str, object],
+) -> ReviewCollisionClass:
+    status = record.get("status")
+    if status == "duplicate":
+        return ReviewCollisionClass.SAME_LOGICAL_IDENTITY
+    if status == "suspicious":
+        return ReviewCollisionClass.DESTINATION_CONFLICT
+    raise ReviewConfigurationError(
+        "duplicate review data must belong to a duplicate or suspicious record"
+    )
+
+
 def _collect_duplicate_groups(manifest: object) -> tuple[DuplicateReviewGroup, ...]:
     validate_manifest(manifest)
     root = cast(Mapping[str, object], manifest)
@@ -226,18 +241,13 @@ def _collect_duplicate_groups(manifest: object) -> tuple[DuplicateReviewGroup, .
             raise ReviewConfigurationError("duplicate evidence is invalid")
         if winner is not None and not isinstance(winner, str):
             raise ReviewConfigurationError("duplicate winner is invalid")
-        evidence = tuple(cast(Sequence[str], evidence_raw))
-        multiple_identity = any(
-            reason == "destination convergence spans multiple logical identities"
-            for reason in evidence
-        )
         group = DuplicateReviewGroup(
             destination_key=destination_key,
             candidates=tuple(cast(Sequence[str], candidates_raw)),
             recommended_winner=cast(str | None, winner),
             losers=tuple(cast(Sequence[str], losers_raw)),
-            evidence=evidence,
-            manual_selection_allowed=not multiple_identity,
+            evidence=tuple(cast(Sequence[str], evidence_raw)),
+            collision_class=_record_collision_class(record),
         )
         ref = stable_duplicate_ref(destination_key, group.candidates)
         existing = groups.get(ref)
@@ -292,7 +302,9 @@ def _record_context(
         companion = cast(Mapping[str, object], raw)
         source_video = companion.get("source_video")
         if isinstance(source_video, str) and source_video:
-            companions.setdefault(normalize_review_path(source_video), []).append(companion)
+            companions.setdefault(normalize_review_path(source_video), []).append(
+                companion
+            )
     return records, {
         key: tuple(
             sorted(
@@ -346,17 +358,17 @@ def _capture_held_delta(raw: dict[str, Any], source: str) -> dict[str, object]:
             None,
         )
         if match is not None:
-            decision = copy.deepcopy(match)
-            decision.pop("source_binding_sha256", None)
-            data[key] = decision
-    decision = data.get("reviewed_episode") or data.get("extra")
-    if isinstance(decision, Mapping):
-        provider = decision.get("show_provider")
-        provider_id = decision.get("show_provider_id")
+            captured = copy.deepcopy(match)
+            captured.pop("source_binding_sha256", None)
+            data[key] = captured
+    disposition = data.get("reviewed_episode") or data.get("extra")
+    if isinstance(disposition, Mapping):
+        provider = disposition.get("show_provider")
+        provider_id = disposition.get("show_provider_id")
         for entry in cast(list[dict[str, Any]], raw.get("shows", [])):
-            if entry.get("provider") == provider and str(entry.get("provider_id")) == str(
-                provider_id
-            ):
+            if entry.get("provider") == provider and str(
+                entry.get("provider_id")
+            ) == str(provider_id):
                 data["show"] = copy.deepcopy(entry)
                 break
     return data
@@ -404,6 +416,7 @@ def _display_duplicate(
 ) -> None:
     ref = stable_duplicate_ref(group.destination_key, group.candidates)
     output.write(f"\nDuplicate review {ref}\n")
+    output.write(f"Collision class: {group.collision_class.value}\n")
     output.write(f"Planned destination: {group.destination_key}\n")
     output.write("Group evidence:\n")
     for reason in group.evidence:
@@ -426,9 +439,7 @@ def _display_duplicate(
             method = evidence.get("method")
             confidence = evidence.get("confidence")
             if method is not None:
-                output.write(
-                    f"       resolution: {method}; confidence: {confidence}\n"
-                )
+                output.write(f"       resolution: {method}; confidence: {confidence}\n")
             reasons = evidence.get("reasons")
             if isinstance(reasons, list | tuple):
                 for reason in reasons:
@@ -443,7 +454,9 @@ def _display_duplicate(
                 size_text = "unknown size"
                 if isinstance(fingerprint, Mapping):
                     member_size = fingerprint.get("size")
-                    if isinstance(member_size, int) and not isinstance(member_size, bool):
+                    if isinstance(member_size, int) and not isinstance(
+                        member_size, bool
+                    ):
                         size_text = f"{member_size} bytes"
                 output.write(f"         - {path} ({size_text})\n")
         else:
@@ -493,6 +506,9 @@ def _answer_duplicate(
     output: TextIO,
 ) -> ReviewSession:
     ref = stable_duplicate_ref(group.destination_key, group.candidates)
+    session_item = session.item(ref)
+    if session_item.collision_class is not group.collision_class:
+        raise ReviewConfigurationError("duplicate collision class changed within the plan")
     _display_duplicate(group, records, companions, output)
 
     if answer is None:
@@ -506,14 +522,13 @@ def _answer_duplicate(
             output.write("  [Q] Mark current loser(s) for future quarantine review\n")
         output.write("  [D] Defer\n")
         selected_action = input_fn("Action: ").strip().casefold()
-        action_map = {
+        action = {
             "a": "accept_recommended",
             "s": "select_winner",
             "k": "keep_all",
             "q": "quarantine_candidate",
             "d": "defer",
-        }
-        action = action_map.get(selected_action, "defer")
+        }.get(selected_action, "defer")
         winner_override: str | None = None
     else:
         _validate_answer_identity(session, answer)
@@ -531,17 +546,20 @@ def _answer_duplicate(
             raise ReviewConfigurationError(
                 "accept_recommended requires a displayed recommended winner"
             )
-        winner = group.recommended_winner
         return session.with_answer(
             ref,
             state=ReviewItemState.ANSWERED,
             action="select_winner",
             data={
                 "active_action": DuplicateGroupAction.SELECT_WINNER.value,
-                "winner": winner,
+                "winner": group.recommended_winner,
             },
         )
     if action == "quarantine_candidate":
+        if not group.manual_selection_allowed:
+            raise ReviewConfigurationError(
+                "quarantine-candidate winner selection is prohibited for destination conflicts"
+            )
         if group.recommended_winner is None or not group.losers:
             raise ReviewConfigurationError(
                 "quarantine candidate review requires a displayed winner and losers"
@@ -566,24 +584,25 @@ def _answer_duplicate(
     if action == "select_winner":
         if not group.manual_selection_allowed:
             raise ReviewConfigurationError(
-                "manual winner selection is prohibited for multi-identity collisions"
+                "manual winner selection is prohibited for destination conflicts"
             )
+        selected_winner: str
         if answer is not None:
-            winner = winner_override
-            if winner is None:
+            if winner_override is None:
                 raise ReviewConfigurationError(
                     "select_winner answer requires an explicit winner source"
                 )
             matches = [
                 candidate
                 for candidate in group.candidates
-                if normalize_review_path(candidate) == normalize_review_path(winner)
+                if normalize_review_path(candidate)
+                == normalize_review_path(winner_override)
             ]
             if len(matches) != 1:
                 raise ReviewConfigurationError(
                     "selected duplicate winner is not one current candidate"
                 )
-            winner = matches[0]
+            selected_winner = matches[0]
         else:
             selected = input_fn("Candidate label (for example C2): ").strip().casefold()
             if selected.startswith("c"):
@@ -591,17 +610,21 @@ def _answer_duplicate(
             try:
                 index = int(selected)
             except ValueError as exc:
-                raise ReviewConfigurationError("invalid duplicate candidate label") from exc
+                raise ReviewConfigurationError(
+                    "invalid duplicate candidate label"
+                ) from exc
             if not 1 <= index <= len(group.candidates):
-                raise ReviewConfigurationError("duplicate candidate label is out of range")
-            winner = group.candidates[index - 1]
+                raise ReviewConfigurationError(
+                    "duplicate candidate label is out of range"
+                )
+            selected_winner = group.candidates[index - 1]
         return session.with_answer(
             ref,
             state=ReviewItemState.ANSWERED,
             action="select_winner",
             data={
                 "active_action": DuplicateGroupAction.SELECT_WINNER.value,
-                "winner": winner,
+                "winner": selected_winner,
             },
         )
     raise ReviewConfigurationError(f"unsupported duplicate review action: {action}")
@@ -702,7 +725,9 @@ def _answer_held(
         return session.with_answer(ref, state=ReviewItemState.DEFERRED, action="defer")
     data = _capture_held_delta(working, source)
     if not data:
-        raise ReviewConfigurationError("reviewed held decision produced no active state")
+        raise ReviewConfigurationError(
+            "reviewed held decision produced no active state"
+        )
     scratch.clear()
     scratch.update(working)
     return session.with_answer(
@@ -739,7 +764,9 @@ def run_review_system(
     if resume:
         session = load_review_session(session_path.read_bytes())
         if session.plan_sha256 != expected_plan:
-            raise ReviewConfigurationError("resume plan hash does not match the session")
+            raise ReviewConfigurationError(
+                "resume plan hash does not match the session"
+            )
         if session.base_override_snapshot != base_override_snapshot:
             raise ReviewConfigurationError(
                 "resume base override snapshot does not match the session"
@@ -827,25 +854,25 @@ def run_review_system(
                 )
             output.write("Batch recommended winners:\n")
             for ref in duplicate_refs:
-                group = duplicate_by_ref[ref]
+                batch_group = duplicate_by_ref[ref]
                 output.write(
-                    f"  {ref}: {group.recommended_winner} -> {group.destination_key}\n"
+                    f"  {ref}: {batch_group.recommended_winner} -> "
+                    f"{batch_group.destination_key}\n"
                 )
-            if input_fn("Accept every displayed recommended winner? [y/N]: ").strip().casefold() in {
-                "y",
-                "yes",
-            }:
+            if input_fn(
+                "Accept every displayed recommended winner? [y/N]: "
+            ).strip().casefold() in {"y", "yes"}:
                 accepted = set(duplicate_refs)
                 for ref in duplicate_refs:
-                    group = duplicate_by_ref[ref]
-                    assert group.recommended_winner is not None
+                    batch_group = duplicate_by_ref[ref]
+                    assert batch_group.recommended_winner is not None
                     session = session.with_answer(
                         ref,
                         state=ReviewItemState.ANSWERED,
                         action="select_winner",
                         data={
                             "active_action": DuplicateGroupAction.SELECT_WINNER.value,
-                            "winner": group.recommended_winner,
+                            "winner": batch_group.recommended_winner,
                         },
                     )
                     atomic_replace(session_path, render_review_session(session))
@@ -857,12 +884,12 @@ def run_review_system(
             continue
         answer = answer_by_ref.get(ref)
         if item.kind is ReviewItemKind.DUPLICATE:
-            group = duplicate_by_ref.get(ref)
-            if group is None:
+            current_group = duplicate_by_ref.get(ref)
+            if current_group is None:
                 raise ReviewConfigurationError("duplicate review group disappeared")
             session = _answer_duplicate(
                 session,
-                group,
+                current_group,
                 records,
                 companions,
                 answer=answer,
@@ -873,7 +900,9 @@ def run_review_system(
             assert item.source is not None
             record = held_by_source.get(normalize_review_path(item.source))
             if record is None:
-                raise ReviewConfigurationError("held review source disappeared from plan")
+                raise ReviewConfigurationError(
+                    "held review source disappeared from plan"
+                )
             session = _answer_held(
                 session,
                 record,
@@ -891,7 +920,9 @@ def run_review_system(
                 "partial approval requires an explicit --show, --kind, or --ref scope"
             )
         if not selected_scope:
-            raise ReviewConfigurationError("partial approval scope selected no review items")
+            raise ReviewConfigurationError(
+                "partial approval scope selected no review items"
+            )
         try:
             session = session.with_approved_scope(selected_scope)
         except ValueError as exc:
