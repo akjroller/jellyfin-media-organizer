@@ -13,14 +13,15 @@ from . import __version__
 from .models import TerminalStatus
 from .providers import TvmazeProviderAdapter
 from .review import render_override_stub
-from .review_overrides import load_planning_overrides
-from .review_planner import (
+from .review_contract import ReviewContractCatalog, load_review_contract
+from .review_execution import (
     PlanningConfig,
     PlanningConfigurationError,
     execute_plan,
     http_json_getter,
 )
-from .review_wizard import ReviewConfigurationError, run_review_wizard
+from .review_session import ReviewItemState, manifest_sha256
+from .review_system import ReviewConfigurationError, run_review_system
 from .tvmaze_cache import TvmazeCatalogCache
 
 CommandHandler = Callable[[argparse.Namespace], int]
@@ -88,18 +89,37 @@ def build_parser() -> argparse.ArgumentParser:
 
     review_parser = subparsers.add_parser(
         "review",
-        help="Review duplicate and held plan decisions without touching media.",
+        help="Review duplicate and held decisions without touching media.",
         description=(
-            "Process duplicate groups and held video records one decision at a time. "
-            "The command reads an explicit plan and override file, may consult the "
-            "provider cache/API, and writes a new override file only. Media mutation "
-            "and deletion are unavailable."
+            "Maintain a resumable review-session ledger and compile answered review "
+            "items into a new active planner override file. Media mutation, deletion, "
+            "and quarantine execution are unavailable."
         ),
     )
     review_parser.add_argument("plan", type=Path)
     review_parser.add_argument("--overrides", type=Path, required=True)
     review_parser.add_argument("--output", type=Path, required=True)
+    review_parser.add_argument("--session", type=Path, required=True)
     review_parser.add_argument("--cache-dir", type=Path, required=True)
+    review_parser.add_argument("--resume", action="store_true")
+    review_parser.add_argument("--answers", type=Path)
+    review_parser.add_argument("--show", dest="show_filter")
+    review_parser.add_argument(
+        "--kind",
+        choices=("duplicate", "held"),
+        dest="kind_filter",
+    )
+    review_parser.add_argument("--ref", dest="ref_filter")
+    review_parser.add_argument("--pending-only", action="store_true")
+    review_parser.add_argument(
+        "--batch-accept-recommended",
+        action="store_true",
+        help=(
+            "For the selected duplicate subset only, offer one explicit confirmation "
+            "to accept each displayed recommended winner while persisting one bound "
+            "decision per group."
+        ),
+    )
     review_mode = review_parser.add_mutually_exclusive_group()
     review_mode.add_argument("--offline", action="store_true")
     review_mode.add_argument("--online", action="store_true")
@@ -266,45 +286,107 @@ def _run_plan(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def _answers_input(path: Path, expected_plan_sha256: str) -> Callable[[str], str]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or set(raw) != {
+        "schema_version",
+        "plan_sha256",
+        "responses",
+    }:
+        raise ReviewConfigurationError("answers file has an unsupported contract")
+    if raw["schema_version"] != 1 or raw["plan_sha256"] != expected_plan_sha256:
+        raise ReviewConfigurationError("answers file is not bound to this exact plan")
+    responses = raw["responses"]
+    if not isinstance(responses, list) or not all(
+        isinstance(response, str) for response in responses
+    ):
+        raise ReviewConfigurationError("answers responses must be a list of strings")
+    iterator = iter(cast(list[str], responses))
+
+    def read(_prompt: str) -> str:
+        try:
+            return next(iterator)
+        except StopIteration as exc:
+            raise ReviewConfigurationError("answers file ran out of responses") from exc
+
+    return read
+
+
 def _run_review(args: argparse.Namespace) -> int:
     plan_path = cast(Path, args.plan)
     overrides_path = cast(Path, args.overrides)
     output_path = cast(Path, args.output)
+    session_path = cast(Path, args.session)
     cache_dir = cast(Path, args.cache_dir)
-    output_file: Path | None = None
+    answers_path = cast(Path | None, args.answers)
     try:
         plan_file = plan_path.expanduser().resolve(strict=True)
         override_file = overrides_path.expanduser().resolve(strict=True)
         output_file = output_path.expanduser().resolve(strict=False)
-        if output_file == override_file:
-            raise ReviewConfigurationError(
-                "review output must be a new file; in-place override edits are not allowed"
-            )
+        session_file = session_path.expanduser().resolve(strict=False)
+        if output_file == override_file or session_file in {override_file, output_file}:
+            raise ReviewConfigurationError("review inputs and outputs must be distinct")
         if output_file.exists():
-            raise ReviewConfigurationError("review output already exists")
-        if not output_file.parent.is_dir():
+            raise ReviewConfigurationError("active override output already exists")
+        if bool(args.resume):
+            if not session_file.is_file():
+                raise ReviewConfigurationError("--resume requires an existing session file")
+        elif session_file.exists():
+            raise ReviewConfigurationError("new review session output already exists")
+        if not output_file.parent.is_dir() or not session_file.parent.is_dir():
             raise ReviewConfigurationError("review output parent directory does not exist")
+
         manifest = json.loads(plan_file.read_text(encoding="utf-8"))
+        plan_hash = manifest_sha256(manifest)
         override_payload = override_file.read_bytes()
+        base_catalog = load_review_contract(override_file)
+        input_fn: Callable[[str], str]
+        if answers_path is not None:
+            input_fn = _answers_input(
+                answers_path.expanduser().resolve(strict=True),
+                plan_hash,
+            )
+        else:
+            if not sys.stdin.isatty():
+                raise ReviewConfigurationError(
+                    "interactive review requires a TTY unless --answers is supplied"
+                )
+            input_fn = input
+
         cache = TvmazeCatalogCache(
             cache_dir.expanduser().resolve(strict=False),
             offline=bool(args.offline),
             refresh=False,
         )
         provider = TvmazeProviderAdapter(cache, http_json_getter)
-        rendered, summary = run_review_wizard(
+        session, _active = run_review_system(
             manifest,
             override_payload,
-            provider,
-            input_fn=input,
+            base_override_snapshot=base_catalog.snapshot_id,
+            provider=provider,
+            session_path=session_file,
+            output_override_path=output_file,
+            resume=bool(args.resume),
+            input_fn=input_fn,
             output=sys.stdout,
+            show_filter=cast(str | None, args.show_filter),
+            kind_filter=cast(str | None, args.kind_filter),
+            ref_filter=cast(str | None, args.ref_filter),
+            pending_only=bool(args.pending_only),
+            batch_accept_recommended=bool(args.batch_accept_recommended),
         )
-        output_file.write_bytes(rendered)
-        load_planning_overrides(output_file)
+        active_catalog = load_review_contract(output_file)
+        if not isinstance(active_catalog, ReviewContractCatalog):
+            raise ReviewConfigurationError("review did not produce a schema-5 contract")
+        if active_catalog.review_session_sha256 != session.sha256:
+            raise ReviewConfigurationError(
+                "active override is not bound to the resulting review session"
+            )
     except KeyboardInterrupt:
-        if output_file is not None and output_file.exists():
-            output_file.unlink(missing_ok=True)
-        print("Review cancelled; no override output was written.", file=sys.stderr)
+        print(
+            "Review interrupted; the last atomically saved session remains resumable.",
+            file=sys.stderr,
+        )
         return 130
     except (
         OSError,
@@ -314,22 +396,17 @@ def _run_review(args: argparse.Namespace) -> int:
         RuntimeError,
         ValueError,
     ) as exc:
-        try:
-            if output_file is not None and output_file.exists():
-                output_file.unlink()
-        except OSError:
-            pass
         print(f"Review failed safely: {exc}", file=sys.stderr)
         return 2
 
+    states = Counter(item.state for item in session.items)
     print(
         "Review complete: "
-        f"duplicate_groups={summary.duplicate_groups_seen} "
-        f"duplicate_changes={summary.duplicate_groups_changed} "
-        f"held_records={summary.held_records_seen} "
-        f"held_changes={summary.held_records_changed} "
-        f"deferred={summary.deferred} "
-        f"output={output_file}"
+        f"session_sha256={session.sha256} "
+        f"answered={states[ReviewItemState.ANSWERED]} "
+        f"deferred={states[ReviewItemState.DEFERRED]} "
+        f"pending={states[ReviewItemState.PENDING]} "
+        f"override_snapshot={active_catalog.snapshot_id}"
     )
     return 0
 
@@ -337,7 +414,7 @@ def _run_review(args: argparse.Namespace) -> int:
 def _run_overrides_validate(args: argparse.Namespace) -> int:
     path = cast(Path, args.path)
     try:
-        catalog = load_planning_overrides(path)
+        catalog = load_review_contract(path)
     except OSError as exc:
         detail = exc.strerror or exc.__class__.__name__
         print(
