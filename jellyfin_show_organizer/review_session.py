@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 from .review_identity import (
     ReviewCandidateBinding,
@@ -74,27 +74,30 @@ class ReviewSessionItem:
         if self.kind is ReviewItemKind.HELD:
             if self.source is None or self.duplicate_ref is not None or self.candidates:
                 raise ValueError("held review item has invalid identity fields")
-        else:
-            if (
-                self.source is not None
-                or self.duplicate_ref is None
-                or self.candidate_set_sha256 is None
-                or len(self.candidates) < 2
-            ):
-                raise ValueError("duplicate review item has invalid identity fields")
+        elif (
+            self.source is not None
+            or self.duplicate_ref is None
+            or self.candidate_set_sha256 is None
+            or len(self.candidates) < 2
+        ):
+            raise ValueError("duplicate review item has invalid identity fields")
+
         try:
             data = json.loads(self.data_json)
         except json.JSONDecodeError as exc:
             raise ValueError("review item data_json must contain valid JSON") from exc
         if not isinstance(data, dict):
             raise ValueError("review item data_json must contain a JSON object")
-        canonical = json.dumps(
-            data,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
+        object.__setattr__(
+            self,
+            "data_json",
+            json.dumps(
+                data,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
         )
-        object.__setattr__(self, "data_json", canonical)
         if self.state is ReviewItemState.PENDING and self.action is not None:
             raise ValueError("pending review items cannot carry an action")
         if self.state is ReviewItemState.DEFERRED and self.action != "defer":
@@ -234,8 +237,7 @@ def _show_key(record: Mapping[str, object]) -> str:
         series_hint = parse.get("series_hint")
         if isinstance(series_hint, str) and series_hint:
             return series_hint
-    source = _source_path(record).replace("\\", "/")
-    return source.split("/", 1)[0]
+    return _source_path(record).replace("\\", "/").split("/", 1)[0]
 
 
 def _candidate_binding(
@@ -251,25 +253,24 @@ def _candidate_binding(
         path=source,
         fingerprint=_fingerprint(source_raw.get("fingerprint"), "record.source.fingerprint"),
     )
-    companion_members = []
+    companions: list[ReviewMemberBinding] = []
     for companion in companions_by_source.get(normalize_review_path(source), ()):
         path = companion.get("relative_path")
         if not isinstance(path, str) or not path:
             raise ValueError("companion relative_path is invalid")
         fingerprint = companion.get("fingerprint")
-        if fingerprint is None:
-            continue
-        companion_members.append(
-            ReviewMemberBinding(
-                path=path,
-                fingerprint=_fingerprint(fingerprint, "companion.fingerprint"),
+        if fingerprint is not None:
+            companions.append(
+                ReviewMemberBinding(
+                    path=path,
+                    fingerprint=_fingerprint(fingerprint, "companion.fingerprint"),
+                )
             )
-        )
     return ReviewCandidateBinding(
         source=source_member,
         companions=tuple(
             sorted(
-                companion_members,
+                companions,
                 key=lambda member: (normalize_review_path(member.path), member.path),
             )
         ),
@@ -325,11 +326,7 @@ def build_review_session(
             continue
         seen_duplicate_refs.add(duplicate_ref)
         bindings = tuple(
-            _candidate_binding(
-                source,
-                record_by_source,
-                frozen_companions,
-            )
+            _candidate_binding(source, record_by_source, frozen_companions)
             for source in candidates
         )
         items.append(
@@ -344,7 +341,10 @@ def build_review_session(
                     bindings,
                 ),
                 candidates=tuple(
-                    sorted(candidates, key=lambda value: (normalize_review_path(value), value))
+                    sorted(
+                        candidates,
+                        key=lambda value: (normalize_review_path(value), value),
+                    )
                 ),
             )
         )
@@ -382,13 +382,13 @@ def load_review_session(payload: bytes) -> ReviewSession:
         raise ValueError("invalid review session JSON") from exc
     if not isinstance(raw, dict):
         raise ValueError("review session root must be an object")
-    allowed = {"schema_version", "plan_sha256", "base_override_snapshot", "items"}
-    if set(raw) != allowed:
+    if set(raw) != {"schema_version", "plan_sha256", "base_override_snapshot", "items"}:
         raise ValueError("review session has unexpected fields")
     raw_items = raw.get("items")
     if not isinstance(raw_items, list):
         raise ValueError("review session items must be an array")
-    items = []
+
+    items: list[ReviewSessionItem] = []
     for entry in raw_items:
         if not isinstance(entry, dict):
             raise ValueError("review session item must be an object")
@@ -398,9 +398,9 @@ def load_review_session(payload: bytes) -> ReviewSession:
         except ValueError as exc:
             raise ValueError("review session item kind/state is invalid") from exc
         data = entry.get("data", {})
+        candidates = entry.get("candidates", [])
         if not isinstance(data, dict):
             raise ValueError("review session item data must be an object")
-        candidates = entry.get("candidates", [])
         if not isinstance(candidates, list) or not all(
             isinstance(candidate, str) for candidate in candidates
         ):
@@ -434,11 +434,7 @@ def load_review_session(payload: bytes) -> ReviewSession:
     )
 
 
-def atomic_write_new(path: Path, payload: bytes) -> None:
-    """Publish one new artifact without overwriting an existing path."""
-
-    if path.exists():
-        raise FileExistsError("review output already exists")
+def _write_temp(path: Path, payload: bytes) -> Path:
     path.parent.mkdir(parents=False, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temp = Path(temp_name)
@@ -447,12 +443,25 @@ def atomic_write_new(path: Path, payload: bytes) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+    return temp
+
+
+def atomic_write_new(path: Path, payload: bytes) -> None:
+    """Publish one new artifact without overwriting an existing path."""
+
+    if path.exists():
+        raise FileExistsError("review output already exists")
+    temp = _write_temp(path, payload)
+    try:
         try:
             os.link(temp, path)
             temp.unlink()
-        except (AttributeError, NotImplementedError, OSError):
+        except (AttributeError, NotImplementedError, OSError) as exc:
             if path.exists():
-                raise FileExistsError("review output already exists")
+                raise FileExistsError("review output already exists") from exc
             os.rename(temp, path)
     finally:
         temp.unlink(missing_ok=True)
@@ -461,14 +470,8 @@ def atomic_write_new(path: Path, payload: bytes) -> None:
 def atomic_replace(path: Path, payload: bytes) -> None:
     """Atomically replace an existing resumable session with another valid session."""
 
-    path.parent.mkdir(parents=False, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temp = Path(temp_name)
+    temp = _write_temp(path, payload)
     try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
         os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
