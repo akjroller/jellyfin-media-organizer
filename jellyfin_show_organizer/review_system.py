@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import copy
 import json
-import sys
 import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any, TextIO, cast
 
 from .providers import MetadataProvider
-from .review_contract import DuplicateGroupAction, load_review_contract
+from .review_contract import DuplicateGroupAction
 from .review_identity import stable_duplicate_ref
 from .review_session import (
     ReviewItemKind,
@@ -26,7 +25,6 @@ from .review_wizard import (
     DuplicateReviewGroup,
     InputFn,
     ReviewConfigurationError,
-    _record_group_key,
     _record_source,
     _review_extra,
     _review_special,
@@ -145,7 +143,9 @@ def _parse_active(payload: bytes) -> dict[str, Any]:
 
 def _render_legacy_lines(raw: Mapping[str, object]) -> list[str]:
     lines = [f"schema_version = {raw.get('schema_version', 4)}"]
-    legacy_tables = tuple(table for table in _TABLE_ORDER if table != "duplicate_group_decisions")
+    legacy_tables = tuple(
+        table for table in _TABLE_ORDER if table != "duplicate_group_decisions"
+    )
     for table in legacy_tables:
         values = raw.get(table, [])
         if not isinstance(values, list):
@@ -170,8 +170,12 @@ def render_active_overrides(raw: Mapping[str, object]) -> bytes:
         lines.append(f"review_session_sha256 = {_toml_value(session_hash)}")
     for table in _TABLE_ORDER:
         values = raw.get(table, [])
-        if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
-            raise ReviewConfigurationError(f"override {table} must be an array of tables")
+        if not isinstance(values, list) or not all(
+            isinstance(item, dict) for item in values
+        ):
+            raise ReviewConfigurationError(
+                f"override {table} must be an array of tables"
+            )
         order = _FIELD_ORDER[table]
         for item in cast(list[dict[str, object]], values):
             unknown = set(item) - set(order)
@@ -223,7 +227,9 @@ def _compile_active(base_payload: bytes, session: ReviewSession) -> bytes:
             continue
         data = item.data
         if item.kind is ReviewItemKind.DUPLICATE:
-            groups = cast(list[dict[str, Any]], raw.setdefault("duplicate_group_decisions", []))
+            groups = cast(
+                list[dict[str, Any]], raw.setdefault("duplicate_group_decisions", [])
+            )
             groups[:] = [
                 group
                 for group in groups
@@ -237,7 +243,9 @@ def _compile_active(base_payload: bytes, session: ReviewSession) -> bytes:
                 DuplicateGroupAction.SELECT_WINNER.value,
                 DuplicateGroupAction.KEEP_ALL.value,
             }:
-                raise ReviewConfigurationError("answered duplicate item has no active action")
+                raise ReviewConfigurationError(
+                    "answered duplicate item has no active action"
+                )
             group: dict[str, object] = {
                 "duplicate_ref": item.duplicate_ref,
                 "candidate_set_sha256": item.candidate_set_sha256,
@@ -280,16 +288,12 @@ def _compile_active(base_payload: bytes, session: ReviewSession) -> bytes:
 
     raw["schema_version"] = 5
     raw["review_session_sha256"] = session.sha256
-    rendered = render_active_overrides(raw)
-    # The full loader validates conflicts, provider IDs, decision shapes, and hash fields.
-    temp = Path("review-contract-validation.toml")
-    # Avoid filesystem use here; parse via a private validation helper would duplicate
-    # the contract. Structural validation is completed by the CLI after atomic output.
-    del temp
-    return rendered
+    return render_active_overrides(raw)
 
 
-def _record_maps(manifest: object) -> tuple[
+def _record_maps(
+    manifest: object,
+) -> tuple[
     dict[str, Mapping[str, object]],
     dict[str, DuplicateReviewGroup],
 ]:
@@ -346,7 +350,6 @@ def _capture_held_delta(raw: dict[str, Any], source: str) -> dict[str, object]:
         )
         if match is not None:
             data[key] = copy.deepcopy(match)
-    show_key = None
     decision = data.get("reviewed_episode") or data.get("extra")
     if isinstance(decision, Mapping):
         provider = decision.get("show_provider")
@@ -355,10 +358,8 @@ def _capture_held_delta(raw: dict[str, Any], source: str) -> dict[str, object]:
             if entry.get("provider") == provider and str(entry.get("provider_id")) == str(
                 provider_id
             ):
-                show_key = entry.get("key")
                 data["show"] = copy.deepcopy(entry)
                 break
-    del show_key
     return data
 
 
@@ -370,7 +371,6 @@ def _answer_duplicate(
     output: TextIO,
 ) -> ReviewSession:
     ref = stable_duplicate_ref(group.destination_key, group.candidates)
-    item = session.item(ref)
     output.write(f"\nDuplicate review {ref}\n")
     for index, candidate in enumerate(group.candidates, start=1):
         marker = " [recommended]" if candidate == group.recommended_winner else ""
@@ -390,7 +390,7 @@ def _answer_duplicate(
     if action in {"1", "4"}:
         winner = group.recommended_winner
         if winner is None:
-            output.write("No recommended winner exists; item deferred.\n")
+            output.write("No safe recommended winner exists; item deferred.\n")
             return session.with_answer(
                 ref, state=ReviewItemState.DEFERRED, action="defer"
             )
@@ -410,6 +410,14 @@ def _answer_duplicate(
             data=data,
         )
     if action == "2":
+        if group.recommended_winner is None:
+            output.write(
+                "This collision has no safely classifiable duplicate winner. "
+                "Choosing a winner is prohibited; item deferred.\n"
+            )
+            return session.with_answer(
+                ref, state=ReviewItemState.DEFERRED, action="defer"
+            )
         selected = input_fn("Candidate number: ").strip()
         try:
             index = int(selected)
@@ -564,18 +572,22 @@ def run_review_system(
             and session.item(ref).state is not ReviewItemState.ANSWERED
         ]
         if duplicate_refs:
-            if any(duplicate_by_ref[ref].recommended_winner is None for ref in duplicate_refs):
+            if any(
+                duplicate_by_ref[ref].recommended_winner is None
+                for ref in duplicate_refs
+            ):
                 raise ReviewConfigurationError(
                     "batch recommended acceptance requires a winner for every selected group"
                 )
             output.write(
-                f"Batch action will accept the displayed recommended winner for "
+                "Batch action will accept the displayed recommended winner for "
                 f"{len(duplicate_refs)} independently audited groups.\n"
             )
             if input_fn("Proceed with this batch? [y/N]: ").strip().casefold() in {
                 "y",
                 "yes",
             }:
+                accepted = set(duplicate_refs)
                 for ref in duplicate_refs:
                     group = duplicate_by_ref[ref]
                     assert group.recommended_winner is not None
@@ -589,7 +601,7 @@ def run_review_system(
                         },
                     )
                     atomic_replace(session_path, render_review_session(session))
-                selected = tuple(ref for ref in selected if ref not in set(duplicate_refs))
+                selected = tuple(ref for ref in selected if ref not in accepted)
 
     for ref in selected:
         item = session.item(ref)
