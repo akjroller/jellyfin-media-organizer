@@ -7,6 +7,8 @@ from jellyfin_show_organizer.apply_contract import (
     ApplyContractError,
     ApplyJournalEntry,
     ApplyMemberRole,
+    ApplyReviewApproval,
+    ApplyReviewMode,
     JournalEvent,
     build_apply_contract,
     replay_journal,
@@ -46,7 +48,11 @@ def _cache_snapshot() -> CacheSnapshot:
     )
 
 
-def _plan(*, video_status: TerminalStatus = TerminalStatus.MATCHED) -> OrganizerPlan:
+def _plan(
+    *,
+    video_status: TerminalStatus = TerminalStatus.MATCHED,
+    overrides_version: int = 2,
+) -> OrganizerPlan:
     source = SourceFile(
         relative_path="Example Series/release-a.mkv",
         extension=".mkv",
@@ -94,7 +100,7 @@ def _plan(*, video_status: TerminalStatus = TerminalStatus.MATCHED) -> Organizer
     )
     return OrganizerPlan(
         schema_version=PLAN_SCHEMA_VERSION,
-        overrides_version=2,
+        overrides_version=overrides_version,
         records=(record,),
         companions=(companion,),
         provenance=PlanProvenance(
@@ -106,7 +112,12 @@ def _plan(*, video_status: TerminalStatus = TerminalStatus.MATCHED) -> Organizer
     )
 
 
-def _approval(plan: OrganizerPlan) -> ApplyApproval:
+def _approval(
+    plan: OrganizerPlan,
+    *,
+    review: ApplyReviewApproval | None = None,
+    authorized_group_ids: tuple[str, ...] = ("op-example",),
+) -> ApplyApproval:
     assert plan.provenance is not None
     return ApplyApproval(
         plan_sha256=stable_plan_hash(plan),
@@ -115,6 +126,8 @@ def _approval(plan: OrganizerPlan) -> ApplyApproval:
         config_snapshot_id=plan.provenance.config_snapshot_id,
         overrides_snapshot_id=plan.provenance.overrides_snapshot_id,
         cache_snapshots=plan.provenance.cache_snapshots,
+        authorized_group_ids=authorized_group_ids,
+        review=review,
     )
 
 
@@ -133,6 +146,28 @@ def _preflight(plan: OrganizerPlan, *, ready: bool = True) -> dict[str, object]:
                 "group_ids": ["op-example"],
             }
         ],
+    }
+
+
+def _review_provenance(
+    plan: OrganizerPlan,
+    *,
+    scope_state: ApplyReviewMode,
+    approved_scope_refs: tuple[str, ...] = (),
+    session_sha256: str = "c" * 64,
+) -> dict[str, object]:
+    return {
+        "plan_sha256": stable_plan_hash(plan),
+        "review": {
+            "session_sha256": session_sha256,
+            "base_plan_sha256": "e" * 64,
+            "base_override_snapshot": "f" * 64,
+            "scope_state": scope_state.value,
+            "approved_scope_refs": list(approved_scope_refs),
+            "authorization": "review-state-only",
+            "movement_authorized": False,
+            "full_plan_approval_required": True,
+        },
     }
 
 
@@ -171,6 +206,17 @@ def test_hash_snapshot_and_preflight_mismatches_fail_closed():
         build_apply_contract(manifest, _preflight(plan, ready=False), _approval(plan))
 
 
+def test_approval_binds_exact_derived_operation_group_scope():
+    plan = _plan()
+
+    with pytest.raises(ApplyContractError, match="operation-group scope"):
+        build_apply_contract(
+            plan_to_manifest(plan),
+            _preflight(plan),
+            _approval(plan, authorized_group_ids=()),
+        )
+
+
 def test_unresolved_video_cannot_cross_apply_boundary():
     plan = _plan(video_status=TerminalStatus.UNRESOLVED)
 
@@ -192,6 +238,85 @@ def test_associated_companion_must_share_its_video_operation_group():
             plan_to_manifest(changed),
             _preflight(changed),
             _approval(changed),
+        )
+
+
+def test_schema5_reviewed_plan_rejects_generic_full_plan_approval():
+    plan = _plan(overrides_version=5)
+    provenance = _review_provenance(plan, scope_state=ApplyReviewMode.COMPLETE)
+
+    with pytest.raises(ApplyContractError, match="exact review session"):
+        build_apply_contract(
+            plan_to_manifest(plan),
+            _preflight(plan),
+            _approval(plan),
+            run_provenance=provenance,
+        )
+
+
+def test_partial_review_provenance_can_never_authorize_apply():
+    plan = _plan(overrides_version=5)
+    refs = ("held-0123456789abcdef",)
+    review = ApplyReviewApproval(
+        session_sha256="c" * 64,
+        mode=ApplyReviewMode.APPROVED_PARTIAL,
+        approved_scope_refs=refs,
+    )
+    provenance = _review_provenance(
+        plan,
+        scope_state=ApplyReviewMode.APPROVED_PARTIAL,
+        approved_scope_refs=refs,
+    )
+
+    with pytest.raises(ApplyContractError, match="partial-review provenance"):
+        build_apply_contract(
+            plan_to_manifest(plan),
+            _preflight(plan),
+            _approval(plan, review=review),
+            run_provenance=provenance,
+        )
+
+
+def test_complete_review_apply_approval_binds_exact_session_and_scope():
+    plan = _plan(overrides_version=5)
+    review = ApplyReviewApproval(
+        session_sha256="c" * 64,
+        mode=ApplyReviewMode.COMPLETE,
+        approved_scope_refs=(),
+    )
+    provenance = _review_provenance(plan, scope_state=ApplyReviewMode.COMPLETE)
+
+    contract = build_apply_contract(
+        plan_to_manifest(plan),
+        _preflight(plan),
+        _approval(plan, review=review),
+        run_provenance=provenance,
+    )
+
+    assert [group.group_id for group in contract.groups] == ["op-example"]
+
+    wrong_session = replace(review, session_sha256="9" * 64)
+    with pytest.raises(ApplyContractError, match="session hash"):
+        build_apply_contract(
+            plan_to_manifest(plan),
+            _preflight(plan),
+            _approval(plan, review=wrong_session),
+            run_provenance=provenance,
+        )
+
+
+def test_schema5_reviewed_plan_requires_run_provenance():
+    plan = _plan(overrides_version=5)
+    review = ApplyReviewApproval(
+        session_sha256="c" * 64,
+        mode=ApplyReviewMode.COMPLETE,
+    )
+
+    with pytest.raises(ApplyContractError, match="review run provenance"):
+        build_apply_contract(
+            plan_to_manifest(plan),
+            _preflight(plan),
+            _approval(plan, review=review),
         )
 
 
