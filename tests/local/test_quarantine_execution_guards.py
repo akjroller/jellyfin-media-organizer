@@ -454,7 +454,7 @@ def test_confirmation_tokens_bind_roots_and_journal(tmp_path: Path) -> None:
 
 
 def test_journal_state_tracks_completion_and_rollback() -> None:
-    entries = [
+    entries: list[dict[str, object]] = [
         {
             "event": "member-started",
             "group_id": "g",
