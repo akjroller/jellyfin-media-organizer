@@ -2,7 +2,7 @@
 
 `jmo review` is the human-review boundary between an immutable JMO plan and a new reviewed override contract. It exists to record explicit decisions for duplicate groups and held sources without changing the media library.
 
-**Review never moves, renames, copies, overwrites, deletes, or quarantines media.** A quarantine-candidate answer records review state for a possible future workflow only; no quarantine execution exists. There is still no `jmo apply` command.
+**Review never moves, renames, copies, overwrites, deletes, or quarantines media.** A quarantine-candidate answer records review state only; no quarantine execution exists. `jmo apply` is a separate command and accepts only a complete reviewed state plus exact approval and live revalidation.
 
 ## Plan schema requirement
 
@@ -141,7 +141,7 @@ An ordinary incomplete review saves the ledger and exits with code `12`.
 
 `--approve-partial` is available only with an explicit `--show`, `--kind`, or `--ref` scope. Every item in that selected scope must be answered. Approved partial state permits further **non-mutating planning only**; it is recorded separately from complete review and does not authorize file movement.
 
-The apply-safety contract explicitly rejects approved-partial review provenance. Any future apply workflow still requires separate exact full-plan approval after complete review and fresh preflight.
+The apply-safety contract explicitly rejects approved-partial review provenance. Apply requires separate exact full-plan approval after complete review and fresh preflight.
 
 ## Exit codes
 
@@ -188,6 +188,6 @@ Offline mode is a hard zero-provider-call path. Compare the online and offline p
 
 ## Safety summary
 
-Review is a decision-recording and preview workflow only. It does not create an apply capability and does not weaken preflight. A reviewed plan may still be blocked by unresolved items, duplicate conflicts, destination safety findings, provider drift, fingerprint drift, or any other preflight condition.
+Review is a decision-recording and preview workflow only. It does not authorize apply or weaken preflight. A reviewed plan may still be blocked by unresolved items, duplicate conflicts, destination safety findings, provider drift, fingerprint drift, or any other preflight condition.
 
 No exact plan hash is approved merely because review completed successfully.

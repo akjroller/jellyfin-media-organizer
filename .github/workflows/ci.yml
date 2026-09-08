@@ -73,8 +73,11 @@ jobs:
           organizer --version
           python -m jellyfin_show_organizer --version
           jmo plan --help
+          jmo apply --help
           organizer plan --help
+          organizer apply --help
           python -m jellyfin_show_organizer plan --help
+          python -m jellyfin_show_organizer apply --help
           jmo review --help
           organizer review --help
           python -m jellyfin_show_organizer review --help
@@ -126,6 +129,7 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/wheel-venv/bin/jmo" --version
           "$RUNNER_TEMP/wheel-venv/bin/organizer" plan --help
+          "$RUNNER_TEMP/wheel-venv/bin/organizer" apply --help
           "$RUNNER_TEMP/wheel-venv/bin/jmo" review --help
           "$RUNNER_TEMP/wheel-venv/bin/python" - <<'PY'
           from importlib.metadata import version
@@ -154,6 +158,7 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/sdist-venv/bin/jmo" --version
           "$RUNNER_TEMP/sdist-venv/bin/organizer" plan --help
+          "$RUNNER_TEMP/sdist-venv/bin/organizer" apply --help
           "$RUNNER_TEMP/sdist-venv/bin/jmo" review --help
           "$RUNNER_TEMP/sdist-venv/bin/python" - <<'PY'
           from importlib.metadata import version

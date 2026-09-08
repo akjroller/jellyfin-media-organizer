@@ -41,11 +41,12 @@ def test_release_workflow_is_deliberate_and_read_only():
     assert "publish" not in workflow.casefold()
 
 
-def test_release_policy_keeps_plan_only_and_private_data_boundaries_explicit():
+def test_release_policy_keeps_gated_apply_and_private_data_boundaries_explicit():
     text = RELEASE_DOC.read_text(encoding="utf-8")
 
     assert "Semantic Versioning" in text
     assert "No JMO release or version tag has been created yet by design" in text
-    assert "must be described as **plan-only**" in text
+    assert "exact reviewed-artifact approval" in text
+    assert "no copy/delete/quarantine/source cleanup" in text
     assert "There is currently no automatic PyPI" in text
     assert "Real media, inventories, reports, provider caches, manifests" in text

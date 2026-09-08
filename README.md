@@ -2,7 +2,7 @@
 
 A plan-first Python CLI for organizing media into Jellyfin-friendly layouts. The current implementation is deliberately focused on **TV shows** while the planning and safety model is built out.
 
-JMO is intentionally conservative: planning, parsing, inventory, reconciliation, provider-cache handling, review, and manifest contracts are developed separately from filesystem mutation. There is currently **no apply command**, so the tool cannot move, rename, copy, overwrite, delete, or quarantine media.
+JMO is intentionally conservative: planning and review remain non-mutating, while `jmo apply` is an explicitly gated executor for one exact reviewed plan. Apply permits only same-filesystem, atomic, no-overwrite renames for `matched` and `extra` operation groups. It never copies across filesystems, overwrites, deletes, quarantines, or moves duplicate/held/ignored records.
 
 ## Current capabilities
 
@@ -20,11 +20,15 @@ JMO is intentionally conservative: planning, parsing, inventory, reconciliation,
 - immutable JSON/CSV/text audit bundles with provenance and stable hashes;
 - whole-plan preflight that blocks unresolved, colliding, or unsafe plans;
 - session-bound, resumable **non-mutating review** for duplicate groups and held sources;
+- exact-hash, revision, and root-bound apply confirmation;
+- append-only durable apply journals with group rollback, resume, and verification;
 - synthetic regression fixtures for ambiguous and adversarial cases.
 
 `jmo plan` is operational and remains strictly non-mutating. It inventories one explicit Shows root, resolves each show through the persistent provider cache, constructs destinations, classifies duplicates and companions, runs preflight, and writes an immutable audit bundle. It never moves, copies, renames, overwrites, or deletes media.
 
 `jmo review` consumes a fresh plan-schema-v3 manifest and records explicit review decisions into a resumable session plus a new reviewed override contract. Review can resolve duplicate decisions and held sources as provider-confirmed episodes/specials or explicit extras, but it is also strictly non-mutating: quarantine choices are markers only, and review never moves, deletes, or quarantines media. See the [non-mutating review workflow](docs/review-workflow.md) before using it.
+
+`jmo apply` consumes the already-reviewed `plan.json`, `preflight.json`, and `run-provenance.json`. It does not rerun parsing or make review decisions. Start with `--check-only`; an actual run additionally requires an external journal and the exact confirmation token bound to the plan hash, review-session hash, clean source revision, source root, and destination root. See the [apply safety contract](docs/apply-safety-contract.md).
 
 ## Requirements
 
@@ -95,7 +99,9 @@ python -m jellyfin_show_organizer plan --help
 
 The current implementation is **Shows-only**. Do not point it at a Movies directory, a mixed media root, or a parent directory containing unrelated media.
 
-Planning, review, and preflight are read-only with respect to media. A successful plan or completed review is not authorization to mutate files, and there is intentionally no `apply` command today.
+Planning, review, preflight, and `jmo apply --check-only` are read-only with respect to media. A successful plan or completed review is not authorization to mutate files. Mutation requires the explicit `apply` subcommand, three exact approval values, a root-bound confirmation token, a journal outside the media roots, and successful live revalidation.
+
+Apply eligibility is status-based. Only `matched` and `extra` video records plus their `associated` companions may move. A duplicate loser can retain the collided destination as audit evidence, so implementations and operators must never interpret a non-null destination as movement eligibility.
 
 Repository examples and tests use synthetic paths and fixtures. Real library inventories, provider caches, manifests, reports, media files, deployment-specific overrides, machine-specific paths, and other environment-specific data should remain local and untracked.
 
@@ -103,6 +109,7 @@ Repository examples and tests use synthetic paths and fixtures. Real library inv
 
 - [Operational runbook](docs/jellyfin-show-organizer-runbook.md)
 - [Non-mutating review workflow](docs/review-workflow.md)
+- [Apply safety contract and runbook](docs/apply-safety-contract.md)
 - [Troubleshooting safely](docs/troubleshooting.md)
 - [Contributor workflow](docs/contributing.md)
 - [Architecture](docs/jellyfin-show-organizer-architecture.md)
@@ -145,7 +152,7 @@ docs/                      architecture and operating guidance
 
 JMO uses Semantic Versioning. Pull-request CI builds and verifies both wheel and source-distribution installs in isolated environments. Verified artifacts can be built by the deliberate release-artifact workflow or a matching version tag; the repository does not automatically publish packages to a package registry.
 
-**No JMO release or tag has been created yet by design.** The first public release will be a deliberate decision once the plan-only milestone is considered ready. Until a separately gated apply milestone is implemented and approved, any future release notes must describe JMO as plan-only and must not imply media-moving capability.
+**No JMO release or tag has been created yet by design.** The first public release remains a separate deliberate decision after the gated apply milestone is validated on exact synthetic and local rehearsal evidence. The presence of `jmo apply` in source does not itself approve a release or authorize any media run.
 
 See the [release policy](docs/releasing.md) for the version source of truth, supported runtime matrix, tag rules, artifact verification process, and privacy boundary.
 

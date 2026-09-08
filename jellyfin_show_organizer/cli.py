@@ -10,6 +10,13 @@ from pathlib import Path
 from typing import cast
 
 from . import __version__
+from .apply_execution import (
+    ApplyExecutionError,
+    approval_token,
+    execute_apply,
+    prepare_apply,
+    total_moving_members,
+)
 from .models import TerminalStatus
 from .providers import TvmazeProviderAdapter
 from .review import render_override_stub
@@ -26,6 +33,7 @@ from .review_system import (
     load_review_answers,
     run_review_system,
 )
+from .run_provenance import detect_source_revision
 from .tvmaze_cache import TvmazeCatalogCache
 
 CommandHandler = Callable[[argparse.Namespace], int]
@@ -35,6 +43,7 @@ PLAN_PROVIDER_EXIT = 4
 PLAN_UNRESOLVED_EXIT = 10
 PLAN_PREFLIGHT_BLOCKED_EXIT = 20
 REVIEW_INCOMPLETE_EXIT = 12
+APPLY_FAILED_EXIT = 30
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,8 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="organizer",
         description=(
-            "Plan-first Jellyfin show organization tooling. "
-            "Media mutation is intentionally unavailable."
+            "Plan-first Jellyfin show organization tooling with an explicitly "
+            "approved, journaled apply boundary."
         ),
     )
     parser.add_argument(
@@ -163,6 +172,43 @@ def build_parser() -> argparse.ArgumentParser:
     review_mode.add_argument("--offline", action="store_true")
     review_mode.add_argument("--online", action="store_true")
     review_parser.set_defaults(handler=_run_review)
+
+    apply_parser = subparsers.add_parser(
+        "apply",
+        help="Apply one exactly approved reviewed plan with a durable journal.",
+        description=(
+            "Revalidate and atomically move only matched/extra operation groups from "
+            "one exact reviewed plan. Duplicate, held, and ignored records never move."
+        ),
+    )
+    apply_parser.add_argument("plan", type=Path)
+    apply_parser.add_argument("--preflight", type=Path, required=True)
+    apply_parser.add_argument("--run-provenance", type=Path, required=True)
+    apply_parser.add_argument("--source-root", type=Path, required=True)
+    apply_parser.add_argument("--destination-root", type=Path, required=True)
+    apply_parser.add_argument("--journal", type=Path)
+    apply_parser.add_argument("--approve-plan-sha256", required=True)
+    apply_parser.add_argument("--approve-review-session-sha256", required=True)
+    apply_parser.add_argument("--approve-source-revision", required=True)
+    apply_parser.add_argument(
+        "--confirm-apply",
+        help=(
+            "Exact confirmation token printed by --check-only. If omitted, an "
+            "interactive terminal must type the displayed token."
+        ),
+    )
+    apply_parser.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Revalidate the exact contract and print its confirmation token.",
+    )
+    apply_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume only from the exact existing append-only journal.",
+    )
+    apply_parser.add_argument("--json", action="store_true", dest="json_output")
+    apply_parser.set_defaults(handler=_run_apply)
 
     overrides_parser = subparsers.add_parser(
         "overrides",
@@ -465,6 +511,123 @@ def _run_review(args: argparse.Namespace) -> int:
         return 0
     print(f"Review saved: partial {state_text}")
     return REVIEW_INCOMPLETE_EXIT
+
+
+def _run_apply(args: argparse.Namespace) -> int:
+    try:
+        plan_path = cast(Path, args.plan).expanduser().resolve(strict=True)
+        preflight_path = cast(Path, args.preflight).expanduser().resolve(strict=True)
+        provenance_path = (
+            cast(Path, args.run_provenance).expanduser().resolve(strict=True)
+        )
+        source_root = cast(Path, args.source_root).expanduser().resolve(strict=True)
+        destination_root = (
+            cast(Path, args.destination_root).expanduser().resolve(strict=True)
+        )
+        journal_arg = cast(Path | None, args.journal)
+        journal_path = (
+            journal_arg.expanduser().resolve(strict=False)
+            if journal_arg is not None
+            else None
+        )
+        if journal_path in {plan_path, preflight_path, provenance_path}:
+            raise ApplyExecutionError("apply journal must be distinct from its inputs")
+
+        prepared = prepare_apply(
+            plan_path,
+            preflight_path,
+            provenance_path,
+            approved_plan_sha256=cast(str, args.approve_plan_sha256).casefold(),
+            approved_review_session_sha256=cast(
+                str, args.approve_review_session_sha256
+            ).casefold(),
+            approved_source_revision=cast(str, args.approve_source_revision).casefold(),
+        )
+        current_revision = detect_source_revision()
+        if current_revision.state != "git":
+            raise ApplyExecutionError(
+                "apply requires a verifiable clean Git source revision"
+            )
+        if current_revision.dirty:
+            raise ApplyExecutionError(
+                "apply refuses to run from a dirty source checkout"
+            )
+        if current_revision.commit != prepared.source_revision:
+            raise ApplyExecutionError(
+                "running source revision does not match the approved plan"
+            )
+
+        token = approval_token(prepared, source_root, destination_root)
+        check_only = bool(args.check_only)
+        if check_only:
+            result = execute_apply(
+                prepared,
+                source_root,
+                destination_root,
+                journal_path=None,
+                check_only=True,
+                resume=False,
+            )
+        else:
+            supplied = cast(str | None, args.confirm_apply)
+            if supplied is None:
+                if not sys.stdin.isatty():
+                    raise ApplyExecutionError(
+                        "non-interactive apply requires --confirm-apply"
+                    )
+                print(
+                    "Exact apply approval required. This will atomically move "
+                    f"{total_moving_members(prepared)} files in "
+                    f"{len(prepared.contract.groups)} operation groups."
+                )
+                print(f"Source root:      {source_root}")
+                print(f"Destination root: {destination_root}")
+                print(f"Confirmation token:\n{token}")
+                supplied = input("Type the exact confirmation token: ").strip()
+            if supplied != token:
+                raise ApplyExecutionError(
+                    "apply confirmation does not match the exact plan, review, "
+                    "revision, and roots"
+                )
+            result = execute_apply(
+                prepared,
+                source_root,
+                destination_root,
+                journal_path=journal_path,
+                check_only=False,
+                resume=bool(args.resume),
+            )
+    except KeyboardInterrupt:
+        print(
+            "Apply interrupted; inspect the journal and use --resume only after "
+            "verifying the exact roots.",
+            file=sys.stderr,
+        )
+        return 130
+    except (ApplyExecutionError, OSError, UnicodeError, ValueError) as exc:
+        print(f"Apply failed safely: {exc}", file=sys.stderr)
+        return APPLY_FAILED_EXIT
+
+    payload = result.to_dict()
+    if bool(args.json_output):
+        if check_only:
+            payload["confirmation_token"] = token
+        print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    elif check_only:
+        print(
+            "Apply check ready: "
+            f"plan={result.plan_sha256} groups={result.groups_total} "
+            f"members={total_moving_members(prepared)}"
+        )
+        print(f"Confirmation token:\n{token}")
+    else:
+        print(
+            "Apply complete: "
+            f"plan={result.plan_sha256} groups={result.groups_completed}/"
+            f"{result.groups_total} moved={result.members_moved} "
+            f"recovered={result.members_recovered} journal={result.journal_path}"
+        )
+    return 0
 
 
 def _run_overrides_validate(args: argparse.Namespace) -> int:

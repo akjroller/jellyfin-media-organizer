@@ -1,7 +1,7 @@
 # Jellyfin Show Organizer runbook
 
 > [!IMPORTANT]
-> JMO is **Shows-only** and currently **plan-only**. Do not point it at a Movies directory, a mixed media root, or any parent media-library directory. There is no `apply` command in the current product.
+> JMO is **Shows-only** and plan-first. Do not point it at a Movies directory, a mixed media root, or any parent media-library directory. Planning and review are non-mutating; `jmo apply` is separately gated by exact reviewed artifacts, live revalidation, confirmation, and a recovery journal.
 
 ## Installation
 
@@ -158,19 +158,21 @@ Current status: reports and preflight derive from the same canonical immutable p
 
 A human reviews the complete release-candidate plan and approves the exact stable plan hash intended for execution. Generating a plan or passing CI never implies approval.
 
-Current status: no apply workflow exists.
+Current status: approval requires the exact plan SHA-256, complete review-session SHA-256, clean source revision, matching provenance, and the complete operation-group scope. Approval of an older planner revision is not approval of a newly built executor.
 
 ### 6. Apply
 
-A future apply stage may consume only an explicitly approved plan hash, revalidate reality immediately before operations, journal every operation, and refuse unsafe overwrites.
+`jmo apply` consumes only an explicitly approved reviewed plan, matching preflight/provenance artifacts, and explicit source/destination roots. It revalidates reality immediately before operations, journals every operation, and refuses unsafe overwrites.
 
-Current status: **not implemented**. There is intentionally no organizer `apply` command.
+Run the exact command first with `--check-only`. Check-only moves nothing and prints a confirmation token bound to the plan hash, review-session hash, clean revision, and resolved roots. An actual run requires that token through `--confirm-apply` (or exact interactive entry) plus a new `--journal` path outside both media roots. Only `matched` and `extra` videos and their associated companions are eligible. Duplicate, held, and ignored rows never move, even if a duplicate audit row retains a destination.
+
+Initial apply supports same-filesystem atomic no-overwrite renames only. It never performs copy-and-delete, overwrite, duplicate deletion, quarantine execution, or source-directory cleanup. See `docs/apply-safety-contract.md` for the complete command and safety contract.
 
 ### 7. Verification and recovery
 
-Future verification compares completed operations with the approved plan. Recovery must be conservative and journal-driven; if an automatic rollback cannot be proven safe, the product should surface recovery information instead of guessing.
+Verification compares every completed operation with the approved fingerprint and requires its source to be absent. Recovery is conservative and journal-driven; if automatic rollback cannot be proven safe, JMO surfaces the exact affected member instead of guessing.
 
-Current status: future work.
+Current status: every journal event is append-only and fsynced. A failed multi-member group rolls completed members back in reverse order when safe. `--resume` verifies and skips completed groups, recognizes a move interrupted between rename and completion logging only from exact filesystem evidence, and refuses ambiguous state.
 
 ## Provider cache and offline policy
 

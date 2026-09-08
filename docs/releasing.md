@@ -10,7 +10,7 @@ The package version is defined once as `jellyfin_show_organizer.__version__`. Bu
 
 Before creating the first or any later public release:
 
-1. decide explicitly that the current plan-only product is ready to release;
+1. decide explicitly that the current product and gated apply boundary are ready to release;
 2. update `jellyfin_show_organizer.__version__` in a normal reviewed change when needed;
 3. run the complete CI suite;
 4. confirm `jmo --version`, `organizer --version`, and `python -m jellyfin_show_organizer --version` report the intended version;
@@ -47,7 +47,7 @@ A workflow artifact is not itself a decision to publish or announce a JMO releas
 
 There is currently no automatic PyPI or other package-registry publication. Pull requests and ordinary branch pushes never receive release credentials and cannot publish packages. Adding registry publication later requires a separate explicitly reviewed protected release mechanism with least-privilege credentials.
 
-Until the separately gated apply milestone is implemented and approved, the first and any subsequent public release must be described as **plan-only**. Release notes must not imply that media-moving or `apply` functionality exists when it does not.
+Release notes must describe the actual gated apply limitations precisely: exact reviewed-artifact approval, same-filesystem atomic no-overwrite moves, durable journaling, and no copy/delete/quarantine/source cleanup. A source implementation or successful workflow is not itself approval to publish.
 
 ## Privacy and repository hygiene
 

@@ -1,6 +1,6 @@
 # Troubleshooting JMO safely
 
-Jellyfin Media Organizer is currently **Shows-only** and **plan-only**. Troubleshooting should never require moving media by hand, weakening preflight, or publishing a real library listing.
+Jellyfin Media Organizer is **Shows-only** and plan-first. Troubleshooting should never require moving media by hand, weakening preflight, bypassing the exact apply confirmation, or publishing a real library listing.
 
 All examples below are fabricated. Replace them locally with your own paths, but do not paste private inventories, generated plans, provider caches, machine names, usernames, network addresses, or full production logs into public issues.
 
@@ -82,6 +82,18 @@ Keep the media unchanged, reduce the collision to a synthetic reproduction, and 
 Subtitle association is conservative. Supported subtitle extensions are `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub`, and `.idx`; `.idx` + `.sub` pairs stay together. Language/default/forced/SDH/CC suffixes are preserved when the association is deterministic.
 
 Ambiguous sidecars remain unresolved. Unsupported adjacent files remain untouched rather than being silently deleted. Do not rename or delete the source files merely to force the current planner to accept them.
+
+## Apply check fails
+
+Do not bypass the failure or move files manually. A changed plan/review hash, dirty or different source revision, stale fingerprint, existing destination, provider/preflight mismatch, unsafe root, or cross-filesystem target intentionally invalidates apply approval.
+
+Regenerate and review the plan when its inputs changed. Use `jmo apply --check-only` again with the final clean revision and exact artifacts. It must succeed immediately before obtaining a new confirmation token.
+
+## Apply was interrupted
+
+Keep the journal and adjacent lock file. The lock file is persistent, but its operating-system lock is released when the process exits. Run the same exact command with the same artifacts, approval values, roots, journal, and confirmation token, adding `--resume`.
+
+Resume verifies completed destinations and will not repeat a recorded move. If the journal and filesystem cannot prove one state, JMO stops with the affected source/destination identity. Inspect that group and preserve both sides; do not delete either copy or edit the journal to force progress.
 
 ## Reporting a bug publicly
 

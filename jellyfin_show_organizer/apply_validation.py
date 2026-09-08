@@ -57,6 +57,17 @@ def _validated_root(root: Path, label: str) -> Path:
     return root.resolve(strict=True)
 
 
+def validate_apply_roots(
+    source_root: Path, destination_root: Path
+) -> tuple[Path, Path]:
+    """Resolve and validate the two explicitly selected apply roots."""
+
+    return (
+        _validated_root(source_root, "source"),
+        _validated_root(destination_root, "destination"),
+    )
+
+
 def _relative_parts(value: str, label: str) -> tuple[str, ...]:
     normalized = unicodedata.normalize("NFC", value.replace("\\", "/"))
     if not normalized or _WINDOWS_DRIVE.match(normalized):
@@ -139,8 +150,7 @@ def revalidate_apply_member(
 ) -> ApplyMemberObservation:
     """Read live state immediately before a future move without mutating anything."""
 
-    source_root = _validated_root(source_root, "source")
-    destination_root = _validated_root(destination_root, "destination")
+    source_root, destination_root = validate_apply_roots(source_root, destination_root)
     source_parts = _relative_parts(member.source_relative_path, "source")
     destination_parts = _relative_parts(member.destination_relative_path, "destination")
 
