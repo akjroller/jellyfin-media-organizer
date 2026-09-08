@@ -17,7 +17,9 @@ from jellyfin_show_organizer.run_provenance import SourceRevision
 pytestmark = pytest.mark.local
 
 
-def _rollback_paths(tmp_path: Path) -> tuple[list[str], PreparedApply, PreparedRollback]:
+def _rollback_paths(
+    tmp_path: Path,
+) -> tuple[list[str], PreparedApply, PreparedRollback]:
     plan = tmp_path / "plan.json"
     preflight = tmp_path / "preflight.json"
     provenance = tmp_path / "run-provenance.json"
@@ -61,7 +63,9 @@ def _rollback_paths(tmp_path: Path) -> tuple[list[str], PreparedApply, PreparedR
     return args, prepared_apply, prepared_rollback
 
 
-def _result(*, check_only: bool, journal: Path | None = None) -> RollbackExecutionResult:
+def _result(
+    *, check_only: bool, journal: Path | None = None
+) -> RollbackExecutionResult:
     return RollbackExecutionResult(
         plan_sha256="a" * 64,
         review_session_sha256="b" * 64,
