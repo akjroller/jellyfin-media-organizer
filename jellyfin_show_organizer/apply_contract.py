@@ -87,9 +87,13 @@ class ApplyApproval:
             raise ValueError("approval cache snapshots must be unique")
         object.__setattr__(self, "cache_snapshots", ordered)
         group_ids = tuple(
-            sorted(self.authorized_group_ids, key=lambda value: (value.casefold(), value))
+            sorted(
+                self.authorized_group_ids, key=lambda value: (value.casefold(), value)
+            )
         )
-        if len(group_ids) != len(set(group_ids)) or any(not value for value in group_ids):
+        if len(group_ids) != len(set(group_ids)) or any(
+            not value for value in group_ids
+        ):
             raise ValueError("authorized apply group ids must be unique and non-empty")
         object.__setattr__(self, "authorized_group_ids", group_ids)
 
@@ -335,7 +339,10 @@ def _validate_review_boundary(
             raise ApplyContractError(
                 "non-reviewed plan cannot carry reviewed apply approval"
             )
-        if isinstance(run_provenance, Mapping) and run_provenance.get("review") is not None:
+        if (
+            isinstance(run_provenance, Mapping)
+            and run_provenance.get("review") is not None
+        ):
             raise ApplyContractError(
                 "non-reviewed plan cannot use reviewed run provenance"
             )
