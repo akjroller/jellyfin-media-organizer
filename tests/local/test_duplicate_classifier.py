@@ -61,8 +61,7 @@ def test_case_and_separator_equivalent_destinations_are_grouped_consistently():
     assert result.decision.destination_key == "example series/season 01/episode.mkv"
     assert result.decision.candidates == ("source-a", "source-b")
     assert (
-        result.decision.collision_class
-        is DuplicateCollisionClass.SAME_LOGICAL_IDENTITY
+        result.decision.collision_class is DuplicateCollisionClass.SAME_LOGICAL_IDENTITY
     )
 
 
@@ -167,8 +166,7 @@ def test_destination_convergence_across_logical_identities_is_suspicious():
     assert result.decision.losers == ()
     assert result.decision.confidence == 0.0
     assert (
-        result.decision.collision_class
-        is DuplicateCollisionClass.DESTINATION_CONFLICT
+        result.decision.collision_class is DuplicateCollisionClass.DESTINATION_CONFLICT
     )
     assert result.decision.evidence[0] == (
         "destination convergence spans multiple logical identities"
