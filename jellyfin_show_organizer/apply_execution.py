@@ -593,7 +593,10 @@ def _journal_lock(path: Path) -> BinaryIO:
         if os.name == "nt":
             import msvcrt
 
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            api = vars(msvcrt)
+            windows_lock = cast(Callable[[int, int, int], object], api["locking"])
+            lock_nonblocking = cast(int, api["LK_NBLCK"])
+            windows_lock(handle.fileno(), lock_nonblocking, 1)
         else:
             import fcntl
 
@@ -619,7 +622,10 @@ def _release_journal_lock(handle: BinaryIO) -> None:
         if os.name == "nt":
             import msvcrt
 
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            api = vars(msvcrt)
+            unlock = cast(Callable[[int, int, int], object], api["locking"])
+            unlock_mode = cast(int, api["LK_UNLCK"])
+            unlock(handle.fileno(), unlock_mode, 1)
         else:
             import fcntl
 

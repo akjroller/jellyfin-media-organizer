@@ -297,13 +297,15 @@ def test_apply_cli_interactive_confirmation_and_noninteractive_refusal(
         "detect_source_revision",
         lambda: SourceRevision("git", "c" * 40, False),
     )
+
+    def execute_with_resume(*_args: object, **kwargs: object) -> ApplyExecutionResult:
+        calls.append(bool(kwargs["resume"]))
+        return _apply_result(check_only=False, journal=journal)
+
     monkeypatch.setattr(
         cli,
         "execute_apply",
-        lambda *_args, **kwargs: (
-            calls.append(bool(kwargs["resume"]))
-            or _apply_result(check_only=False, journal=journal)
-        ),
+        execute_with_resume,
     )
 
     class Stdin:
