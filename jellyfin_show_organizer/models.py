@@ -343,7 +343,9 @@ class DuplicateDecision:
     losers: tuple[str, ...]
     confidence: float
     evidence: tuple[str, ...] = ()
-    collision_class: DuplicateCollisionClass = DuplicateCollisionClass.SAME_LOGICAL_IDENTITY
+    collision_class: DuplicateCollisionClass = (
+        DuplicateCollisionClass.SAME_LOGICAL_IDENTITY
+    )
 
     def __post_init__(self) -> None:
         if not self.destination_key:
@@ -358,7 +360,9 @@ class DuplicateDecision:
             raise ValueError("duplicate losers must be candidates")
         if self.collision_class is DuplicateCollisionClass.DESTINATION_CONFLICT:
             if self.winner is not None or self.losers:
-                raise ValueError("destination conflicts cannot carry a duplicate winner")
+                raise ValueError(
+                    "destination conflicts cannot carry a duplicate winner"
+                )
 
 
 @dataclass(frozen=True, slots=True, init=False)
