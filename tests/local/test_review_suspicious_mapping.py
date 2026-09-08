@@ -228,7 +228,10 @@ def test_compound_review_persists_exact_provider_episode_set(tmp_path: Path) -> 
     assert isinstance(catalog, ReviewContractCatalog)
     reviewed = catalog.reviewed_episodes_for(SOURCE)
     assert [(item.season, item.number) for item in reviewed] == [(1, 1), (1, 2)]
-    assert [item.episode_provider_identity.value for item in reviewed] == ["9001", "9002"]
+    assert [item.episode_provider_identity.value for item in reviewed] == [
+        "9001",
+        "9002",
+    ]
     assert len({item.source_binding_sha256 for item in reviewed}) == 1
 
     updated = _reviewed_episode_record(
@@ -242,7 +245,9 @@ def test_compound_review_persists_exact_provider_episode_set(tmp_path: Path) -> 
     assert updated.destination is not None
     assert updated.evidence is not None
     assert updated.evidence.method == "reviewed-provider-episode-set"
-    assert [episode.provider_identity.value for episode in updated.provider_episodes] == [
+    assert [
+        episode.provider_identity.value for episode in updated.provider_episodes
+    ] == [
         "9001",
         "9002",
     ]
