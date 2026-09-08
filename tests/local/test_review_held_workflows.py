@@ -8,7 +8,11 @@ from typing import cast
 
 import pytest
 
-from jellyfin_show_organizer.models import CompanionStatus, ProviderIdentity, TerminalStatus
+from jellyfin_show_organizer.models import (
+    CompanionStatus,
+    ProviderIdentity,
+    TerminalStatus,
+)
 from jellyfin_show_organizer.planner import (
     PlanningConfig,
     PlanningConfigurationError,
@@ -26,7 +30,9 @@ from jellyfin_show_organizer.review_contract import (
     load_review_contract_payload,
     verify_review_contract_session,
 )
-from jellyfin_show_organizer.review_execution import execute_plan as execute_reviewed_plan
+from jellyfin_show_organizer.review_execution import (
+    execute_plan as execute_reviewed_plan,
+)
 from jellyfin_show_organizer.review_session import (
     ReviewItemState,
     ReviewSession,
