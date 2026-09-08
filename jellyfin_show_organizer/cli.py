@@ -150,6 +150,15 @@ def build_parser() -> argparse.ArgumentParser:
             "decision per group."
         ),
     )
+    review_parser.add_argument(
+        "--batch-keep-held",
+        action="store_true",
+        help=(
+            "For selected source-review items only, list every source and offer one "
+            "explicit confirmation to leave them held and untouched. This makes no "
+            "episode inference and authorizes no media movement."
+        ),
+    )
     review_mode = review_parser.add_mutually_exclusive_group()
     review_mode.add_argument("--offline", action="store_true")
     review_mode.add_argument("--online", action="store_true")
@@ -409,6 +418,7 @@ def _run_review(args: argparse.Namespace) -> int:
             ref_filter=cast(str | None, args.ref_filter),
             pending_only=bool(args.pending_only),
             batch_accept_recommended=bool(args.batch_accept_recommended),
+            batch_keep_held=bool(args.batch_keep_held),
             approve_partial=bool(args.approve_partial),
             answers=answers,
         )
