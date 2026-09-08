@@ -209,7 +209,7 @@ def test_explicit_preference_has_authority_over_automatic_release_quality() -> N
     decision = _decision(preferred, automatic_quality)
 
     assert decision.winner == preferred.operation_key
-    assert decision.confidence == 0.9
+    assert decision.confidence == 1.0
     assert "reviewed local preference" in decision.evidence
 
 
