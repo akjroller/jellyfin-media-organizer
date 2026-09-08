@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import cast
 
 import pytest
 
@@ -81,6 +82,14 @@ def _manifest() -> dict[str, object]:
     }
 
 
+def _records(manifest: dict[str, object]) -> list[dict[str, object]]:
+    return cast(list[dict[str, object]], manifest["records"])
+
+
+def _companions(manifest: dict[str, object]) -> list[dict[str, object]]:
+    return cast(list[dict[str, object]], manifest["companions"])
+
+
 def _prepared() -> PreparedApply:
     return PreparedApply(
         contract=ApplyContract(plan_sha256=PLAN_SHA, groups=()),
@@ -154,12 +163,12 @@ def test_derivation_rejects_wrong_plan_and_missing_or_invalid_duplicate_state(
 
     _patch_hash(monkeypatch)
     manifest = _manifest()
-    manifest["records"] = [manifest["records"][0]]
+    manifest["records"] = [_records(manifest)[0]]
     with pytest.raises(QuarantineContractError, match="no duplicate losers"):
         derive_quarantine_plan(manifest, _prepared())
 
     manifest = _manifest()
-    loser = manifest["records"][1]
+    loser = _records(manifest)[1]
     loser["duplicate"] = {
         "candidates": ["Show/winner.mkv", "Show/loser-a.mkv", "Show/loser-a.mkv"],
         "losers": ["Show/loser-a.mkv"],
@@ -175,17 +184,17 @@ def test_derivation_rejects_missing_winner_nonmatched_winner_and_destination_dri
 ) -> None:
     _patch_hash(monkeypatch)
     manifest = _manifest()
-    manifest["records"] = manifest["records"][1:]
+    manifest["records"] = _records(manifest)[1:]
     with pytest.raises(QuarantineContractError, match="winner record is missing"):
         derive_quarantine_plan(manifest, _prepared())
 
     manifest = _manifest()
-    manifest["records"][0]["status"] = "held"
+    _records(manifest)[0]["status"] = "held"
     with pytest.raises(QuarantineContractError, match="approved matched"):
         derive_quarantine_plan(manifest, _prepared())
 
     manifest = _manifest()
-    manifest["records"][1]["destination"] = "Wrong/Season 01/wrong.mkv"
+    _records(manifest)[1]["destination"] = "Wrong/Season 01/wrong.mkv"
     with pytest.raises(QuarantineContractError, match="share the reviewed destination"):
         derive_quarantine_plan(manifest, _prepared())
 
@@ -195,13 +204,13 @@ def test_derivation_rejects_winner_decision_drift_and_orphan_duplicate_companion
 ) -> None:
     _patch_hash(monkeypatch)
     manifest = _manifest()
-    winner_duplicate = manifest["records"][0]["duplicate"]
+    winner_duplicate = cast(dict[str, object], _records(manifest)[0]["duplicate"])
     winner_duplicate["destination_key"] = "different-key"
     with pytest.raises(QuarantineContractError, match="disagree"):
         derive_quarantine_plan(manifest, _prepared())
 
     manifest = _manifest()
-    manifest["companions"].append(
+    _companions(manifest).append(
         {
             "status": "duplicate",
             "relative_path": "Other/orphan.srt",
@@ -214,7 +223,7 @@ def test_derivation_rejects_winner_decision_drift_and_orphan_duplicate_companion
         derive_quarantine_plan(manifest, _prepared())
 
     manifest = _manifest()
-    manifest["companions"][0]["destination"] = "not-allowed.srt"
+    _companions(manifest)[0]["destination"] = "not-allowed.srt"
     with pytest.raises(QuarantineContractError, match="unexpectedly has"):
         derive_quarantine_plan(manifest, _prepared())
 
