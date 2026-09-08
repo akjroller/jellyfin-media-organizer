@@ -261,9 +261,7 @@ def _verify_all_restored(
 
 
 class _RollbackJournal:
-    def __init__(
-        self, path: Path, prepared: PreparedRollback, *, resume: bool
-    ) -> None:
+    def __init__(self, path: Path, prepared: PreparedRollback, *, resume: bool) -> None:
         self.path = path
         self.prepared = prepared
         self.entries: list[dict[str, object]] = []
@@ -311,10 +309,7 @@ class _RollbackJournal:
                 raise RollbackExecutionError(
                     "rollback journal belongs to another revision"
                 )
-            if (
-                entry.get("apply_journal_sha256")
-                != self.prepared.apply_journal_sha256
-            ):
+            if entry.get("apply_journal_sha256") != self.prepared.apply_journal_sha256:
                 raise RollbackExecutionError(
                     "rollback journal belongs to another apply journal"
                 )
@@ -471,9 +466,7 @@ def execute_rollback(
         restored_count = 0
         recovered_count = 0
         try:
-            journal = _RollbackJournal(
-                rollback_journal_path, prepared, resume=resume
-            )
+            journal = _RollbackJournal(rollback_journal_path, prepared, resume=resume)
             if not resume:
                 _verify_all_pending(prepared, source_root, destination_root)
                 journal.append("rollback-started", result="started")
@@ -499,7 +492,10 @@ def execute_rollback(
                 members = list(reversed(group.moving_members))
                 if group.group_id in completed_groups:
                     for member in members:
-                        if _member_state(member, source_root, destination_root) != "restored":
+                        if (
+                            _member_state(member, source_root, destination_root)
+                            != "restored"
+                        ):
                             raise RollbackExecutionError(
                                 "completed rollback group no longer matches restored state"
                             )
@@ -546,7 +542,10 @@ def execute_rollback(
                 )
                 try:
                     for member in pending:
-                        if _member_state(member, source_root, destination_root) != "pending":
+                        if (
+                            _member_state(member, source_root, destination_root)
+                            != "pending"
+                        ):
                             raise RollbackExecutionError(
                                 "rollback member changed after group validation"
                             )
@@ -563,7 +562,10 @@ def execute_rollback(
                         destination = _safe_existing_path(
                             destination_root, member.destination_relative_path
                         )
-                        if _member_state(member, source_root, destination_root) != "pending":
+                        if (
+                            _member_state(member, source_root, destination_root)
+                            != "pending"
+                        ):
                             raise RollbackExecutionError(
                                 "rollback member changed immediately before restore"
                             )
@@ -630,6 +632,5 @@ def execute_rollback(
 
 def total_rollback_members(prepared: PreparedRollback) -> int:
     return sum(
-        len(group.moving_members)
-        for group in prepared.prepared_apply.contract.groups
+        len(group.moving_members) for group in prepared.prepared_apply.contract.groups
     )
