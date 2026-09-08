@@ -799,6 +799,7 @@ def run_review_system(
     ref_filter: str | None = None,
     pending_only: bool = False,
     batch_accept_recommended: bool = False,
+    batch_keep_held: bool = False,
     approve_partial: bool = False,
     answers: ReviewAnswerBundle | None = None,
 ) -> tuple[ReviewSession, bytes]:
@@ -919,6 +920,44 @@ def run_review_system(
                             "active_action": DuplicateGroupAction.SELECT_WINNER.value,
                             "winner": batch_group.recommended_winner,
                         },
+                    )
+                    atomic_replace(session_path, render_review_session(session))
+                selected = tuple(ref for ref in selected if ref not in accepted)
+
+    if batch_keep_held:
+        if answers is not None:
+            raise ReviewConfigurationError(
+                "--batch-keep-held cannot be combined with --answers"
+            )
+        held_refs = [
+            ref
+            for ref in selected
+            if session.item(ref).kind is ReviewItemKind.HELD
+            and session.item(ref).state is not ReviewItemState.ANSWERED
+        ]
+        if held_refs:
+            output.write("Batch leave-untouched sources:\n")
+            for ref in held_refs:
+                item = session.item(ref)
+                assert item.source is not None
+                record = held_by_source.get(normalize_review_path(item.source))
+                if record is None:
+                    raise ReviewConfigurationError(
+                        "source review item disappeared from plan"
+                    )
+                status = record.get("status")
+                reason = record.get("reason")
+                reason_text = f"; reason={reason}" if isinstance(reason, str) else ""
+                output.write(f"  {ref}: {item.source} [{status}]{reason_text}\n")
+            if input_fn(
+                "Leave every displayed source untouched / held? [y/N]: "
+            ).strip().casefold() in {"y", "yes"}:
+                accepted = set(held_refs)
+                for ref in held_refs:
+                    session = session.with_answer(
+                        ref,
+                        state=ReviewItemState.ANSWERED,
+                        action="keep_held",
                     )
                     atomic_replace(session_path, render_review_session(session))
                 selected = tuple(ref for ref in selected if ref not in accepted)
