@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from io import StringIO
 
 import pytest
@@ -89,7 +90,9 @@ class Provider:
             shows=self.shows,
         )
 
-    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
         if self.catalog_reason is not None:
             return ProviderEpisodeCatalog(
                 provider="tvmaze",
@@ -124,7 +127,7 @@ def _record() -> dict[str, object]:
     }
 
 
-def _input(*responses: str):
+def _input(*responses: str) -> Callable[[str], str]:
     iterator = iter(responses)
     return lambda _prompt: next(iterator)
 
@@ -260,27 +263,36 @@ def test_prompt_int_retries_invalid_and_negative_values() -> None:
     output = StringIO()
     values = iter(("nope", "-2", "3"))
 
-    assert _prompt_int(
-        "Episode",
-        input_fn=lambda _prompt: next(values),
-        output=output,
-    ) == 3
+    assert (
+        _prompt_int(
+            "Episode",
+            input_fn=lambda _prompt: next(values),
+            output=output,
+        )
+        == 3
+    )
     assert "Enter an integer" in output.getvalue()
     assert "cannot be negative" in output.getvalue()
 
 
 def test_prompt_int_honors_default_and_cancel() -> None:
-    assert _prompt_int(
-        "Episode",
-        input_fn=lambda _prompt: "",
-        output=StringIO(),
-        default=7,
-    ) == 7
-    assert _prompt_int(
-        "Episode",
-        input_fn=lambda _prompt: "cancel",
-        output=StringIO(),
-    ) is None
+    assert (
+        _prompt_int(
+            "Episode",
+            input_fn=lambda _prompt: "",
+            output=StringIO(),
+            default=7,
+        )
+        == 7
+    )
+    assert (
+        _prompt_int(
+            "Episode",
+            input_fn=lambda _prompt: "cancel",
+            output=StringIO(),
+        )
+        is None
+    )
 
 
 def test_prompt_choice_retries_until_valid() -> None:
