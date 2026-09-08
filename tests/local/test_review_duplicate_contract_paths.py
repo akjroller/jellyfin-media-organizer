@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from io import StringIO
 
@@ -271,6 +271,11 @@ def _companion_context() -> dict[str, tuple[Mapping[str, object], ...]]:
     return {}
 
 
+def _input(*responses: str) -> Callable[[str], str]:
+    iterator = iter(responses)
+    return lambda _prompt: next(iterator)
+
+
 @pytest.mark.parametrize(
     ("action", "winner", "expected_action"),
     [
@@ -372,20 +377,18 @@ def test_destination_conflict_rejects_duplicate_winner_and_quarantine_actions() 
 
 def test_interactive_duplicate_candidate_labels_are_validated() -> None:
     session = _review_session()
-    responses = iter(("s", "C2"))
     updated = _answer_duplicate(
         session,
         _review_group(recommended=None),
         _record_context(),
         _companion_context(),
         answer=None,
-        input_fn=lambda _prompt: next(responses),
+        input_fn=_input("s", "C2"),
         output=StringIO(),
     )
     assert updated.items[0].data["winner"] == SECOND
 
     for candidate_label, message in (("wat", "invalid"), ("C9", "out of range")):
-        candidate_responses = iter(("s", candidate_label))
         with pytest.raises(ReviewConfigurationError, match=message):
             _answer_duplicate(
                 _review_session(),
@@ -393,7 +396,7 @@ def test_interactive_duplicate_candidate_labels_are_validated() -> None:
                 _record_context(),
                 _companion_context(),
                 answer=None,
-                input_fn=lambda _prompt, iterator=candidate_responses: next(iterator),
+                input_fn=_input("s", candidate_label),
                 output=StringIO(),
             )
 
