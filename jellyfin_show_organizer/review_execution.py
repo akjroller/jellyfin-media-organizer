@@ -198,11 +198,13 @@ def _reviewed_episode_record(
     provider: MetadataProvider,
     destination_policy: DestinationPolicy,
 ) -> PlanRecord:
-    decision = catalog.reviewed_episode_for(record.source.relative_path)
-    if decision is None:
+    decisions = catalog.reviewed_episodes_for(record.source.relative_path)
+    if not decisions:
         return record
-    if _source_binding(original_plan, record.source.relative_path) != (
-        decision.source_binding_sha256
+
+    source_binding = _source_binding(original_plan, record.source.relative_path)
+    if any(
+        decision.source_binding_sha256 != source_binding for decision in decisions
     ):
         raise PlanningConfigurationError(
             "reviewed episode source fingerprint or companion set changed"
@@ -211,25 +213,47 @@ def _reviewed_episode_record(
         raise PlanningConfigurationError(
             "reviewed episode could not resolve a verified show identity"
         )
-    if record.show.provider_identity != decision.show_provider_identity:
+    if any(
+        record.show.provider_identity != decision.show_provider_identity
+        for decision in decisions
+    ):
         raise PlanningConfigurationError(
             "reviewed episode conflicts with resolved show identity"
         )
-    episode = _confirmed_provider_episode(provider, decision)
-    evidence = MatchEvidence(
-        method="reviewed-provider-episode",
-        confidence=1.0,
-        reasons=(
+
+    episodes = tuple(_confirmed_provider_episode(provider, decision) for decision in decisions)
+    if len({episode.identity for episode in episodes}) != len(episodes):
+        raise PlanningConfigurationError(
+            "reviewed provider episode set contains duplicate identities"
+        )
+    if len({(episode.season, episode.number) for episode in episodes}) != len(episodes):
+        raise PlanningConfigurationError(
+            "reviewed provider episode set contains duplicate coordinates"
+        )
+
+    reasons: list[str] = []
+    for decision, episode in zip(decisions, episodes, strict=True):
+        for reason in (
             f"manual-review-lookup-mode:{decision.lookup_mode}",
             f"reviewed-provider-episode:{episode.identity.key}",
-            f"reviewed-source-binding:{decision.source_binding_sha256}",
             *decision.reasons,
+        ):
+            if reason not in reasons:
+                reasons.append(reason)
+    reasons.append(f"reviewed-source-binding:{source_binding}")
+    evidence = MatchEvidence(
+        method=(
+            "reviewed-provider-episode"
+            if len(episodes) == 1
+            else "reviewed-provider-episode-set"
         ),
+        confidence=1.0,
+        reasons=tuple(reasons),
     )
     assignment = SourceEpisodeAssignment(
         source_key=record.source.relative_path,
         status=AssignmentStatus.MATCHED,
-        episodes=(episode,),
+        episodes=episodes,
         evidence=evidence,
     )
     provider_ids = catalog.jellyfin_identifiers_for(record.show.source_key)
@@ -251,7 +275,7 @@ def _reviewed_episode_record(
         destination=destination.relative_path,
         extra=None,
         duplicate=None,
-        provider_episodes=(_planner._plan_episode(episode),),
+        provider_episodes=tuple(_planner._plan_episode(episode) for episode in episodes),
         reason=None,
     )
 
