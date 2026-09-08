@@ -810,20 +810,52 @@ def _write_temp(path: Path, payload: bytes) -> Path:
     return temp
 
 
-def atomic_write_new(path: Path, payload: bytes) -> None:
-    """Publish one new artifact without overwriting an existing path."""
+def _fsync_parent(path: Path) -> None:
+    """Best-effort durability for a directory entry on platforms that support it."""
 
-    if path.exists():
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        fd = os.open(path.parent, flags)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def _write_new_exclusive(path: Path, payload: bytes) -> None:
+    """Create one new path without replacing anything already at that name."""
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+    except FileExistsError as exc:
+        raise FileExistsError("review output already exists") from exc
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    _fsync_parent(path)
+
+
+def atomic_write_new(path: Path, payload: bytes) -> None:
+    """Publish one new artifact without ever replacing an existing path."""
+
+    if os.path.lexists(path):
         raise FileExistsError("review output already exists")
     temp = _write_temp(path, payload)
     try:
         try:
             os.link(temp, path)
-            temp.unlink()
-        except (AttributeError, NotImplementedError, OSError) as exc:
-            if path.exists():
-                raise FileExistsError("review output already exists") from exc
-            os.rename(temp, path)
+        except FileExistsError as exc:
+            raise FileExistsError("review output already exists") from exc
+        except (AttributeError, NotImplementedError, OSError):
+            _write_new_exclusive(path, payload)
+        else:
+            _fsync_parent(path)
     finally:
         temp.unlink(missing_ok=True)
 
@@ -834,5 +866,6 @@ def atomic_replace(path: Path, payload: bytes) -> None:
     temp = _write_temp(path, payload)
     try:
         os.replace(temp, path)
+        _fsync_parent(path)
     finally:
         temp.unlink(missing_ok=True)
