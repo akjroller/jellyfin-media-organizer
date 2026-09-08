@@ -203,9 +203,7 @@ def _reviewed_episode_record(
         return record
 
     source_binding = _source_binding(original_plan, record.source.relative_path)
-    if any(
-        decision.source_binding_sha256 != source_binding for decision in decisions
-    ):
+    if any(decision.source_binding_sha256 != source_binding for decision in decisions):
         raise PlanningConfigurationError(
             "reviewed episode source fingerprint or companion set changed"
         )
@@ -221,7 +219,9 @@ def _reviewed_episode_record(
             "reviewed episode conflicts with resolved show identity"
         )
 
-    episodes = tuple(_confirmed_provider_episode(provider, decision) for decision in decisions)
+    episodes = tuple(
+        _confirmed_provider_episode(provider, decision) for decision in decisions
+    )
     if len({episode.identity for episode in episodes}) != len(episodes):
         raise PlanningConfigurationError(
             "reviewed provider episode set contains duplicate identities"
@@ -275,7 +275,9 @@ def _reviewed_episode_record(
         destination=destination.relative_path,
         extra=None,
         duplicate=None,
-        provider_episodes=tuple(_planner._plan_episode(episode) for episode in episodes),
+        provider_episodes=tuple(
+            _planner._plan_episode(episode) for episode in episodes
+        ),
         reason=None,
     )
 
