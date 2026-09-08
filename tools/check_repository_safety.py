@@ -30,7 +30,24 @@ GENERATED_PARTS = {
     "organizer-cache",
     "organizer-reports",
 }
-PUBLIC_TEXT_SUFFIXES = {".json", ".md", ".toml", ".txt", ".yaml", ".yml"}
+PUBLIC_TEXT_SUFFIXES = {
+    ".bat",
+    ".cfg",
+    ".cmd",
+    ".csv",
+    ".ini",
+    ".json",
+    ".md",
+    ".ps1",
+    ".py",
+    ".sh",
+    ".toml",
+    ".tsv",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
 SELF = Path("tools/check_repository_safety.py")
 
 PROFILE_PATTERNS = (
