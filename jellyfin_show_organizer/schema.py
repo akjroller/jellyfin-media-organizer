@@ -246,6 +246,66 @@ def _validate_source(value: object, field: str) -> None:
     _validate_fingerprint(source["fingerprint"], f"{field}.fingerprint")
 
 
+def _validate_duplicate(value: object, field: str) -> None:
+    duplicate = _require_mapping(value, field)
+    required = {
+        "destination_key",
+        "candidates",
+        "winner",
+        "losers",
+        "confidence",
+        "evidence",
+        "collision_class",
+    }
+    if set(duplicate) != required:
+        raise ManifestValidationError(f"{field} has unexpected fields")
+    _require_string(duplicate["destination_key"], f"{field}.destination_key")
+    candidates = duplicate["candidates"]
+    if not isinstance(candidates, list | tuple) or len(candidates) < 2:
+        raise ManifestValidationError(f"{field}.candidates requires at least two items")
+    if not all(isinstance(candidate, str) and candidate for candidate in candidates):
+        raise ManifestValidationError(f"{field}.candidates must contain strings")
+    candidate_values = cast(Sequence[str], candidates)
+    if len(candidate_values) != len(set(candidate_values)):
+        raise ManifestValidationError(f"{field}.candidates must be unique")
+
+    winner = duplicate["winner"]
+    if winner is not None:
+        _require_string(winner, f"{field}.winner")
+        if winner not in candidate_values:
+            raise ManifestValidationError(f"{field}.winner must be one candidate")
+    losers = duplicate["losers"]
+    if not isinstance(losers, list | tuple) or not all(
+        isinstance(loser, str) and loser for loser in losers
+    ):
+        raise ManifestValidationError(f"{field}.losers must contain strings")
+    loser_values = cast(Sequence[str], losers)
+    if len(loser_values) != len(set(loser_values)):
+        raise ManifestValidationError(f"{field}.losers must be unique")
+    if any(loser not in candidate_values for loser in loser_values):
+        raise ManifestValidationError(f"{field}.losers must be candidates")
+
+    _require_number(duplicate["confidence"], f"{field}.confidence")
+    confidence = cast(float, duplicate["confidence"])
+    if not 0.0 <= confidence <= 1.0:
+        raise ManifestValidationError(f"{field}.confidence must be between 0 and 1")
+    evidence = duplicate["evidence"]
+    if not isinstance(evidence, list | tuple) or not all(
+        isinstance(reason, str) and reason for reason in evidence
+    ):
+        raise ManifestValidationError(f"{field}.evidence must contain strings")
+
+    collision_class = duplicate["collision_class"]
+    if collision_class not in {"same-logical-identity", "destination-conflict"}:
+        raise ManifestValidationError(f"{field}.collision_class is not supported")
+    if collision_class == "destination-conflict" and (
+        winner is not None or loser_values
+    ):
+        raise ManifestValidationError(
+            f"{field} destination conflicts cannot carry a winner or losers"
+        )
+
+
 def _validate_record(value: object, index: int) -> None:
     field = f"records[{index}]"
     record = _require_mapping(value, field)
@@ -285,6 +345,8 @@ def _validate_record(value: object, index: int) -> None:
         allow_none=True,
     )
     _require_string(record["reason"], f"{field}.reason", allow_none=True)
+    if record["duplicate"] is not None:
+        _validate_duplicate(record["duplicate"], f"{field}.duplicate")
 
     provider_episodes = record["provider_episodes"]
     if not isinstance(provider_episodes, list | tuple):
@@ -342,8 +404,8 @@ def _validate_record(value: object, index: int) -> None:
         if "confidence" not in evidence:
             raise ManifestValidationError(f"{field}.evidence.confidence is required")
         _require_number(evidence["confidence"], f"{field}.evidence.confidence")
-        confidence = cast(float, evidence["confidence"])
-        if not 0.0 <= confidence <= 1.0:
+        evidence_confidence = cast(float, evidence["confidence"])
+        if not 0.0 <= evidence_confidence <= 1.0:
             raise ManifestValidationError(
                 f"{field}.evidence.confidence must be between 0 and 1"
             )
