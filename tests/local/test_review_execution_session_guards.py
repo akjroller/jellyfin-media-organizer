@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -24,6 +25,7 @@ from jellyfin_show_organizer.review_session import (
     ReviewSessionItem,
     render_review_session,
 )
+from jellyfin_show_organizer.tvmaze_cache import JsonGetter
 
 pytestmark = pytest.mark.local
 
@@ -40,6 +42,9 @@ def _reject_network(
     _params: Mapping[str, str] | None = None,
 ) -> object:
     raise AssertionError("fabricated reviewed-plan test attempted network access")
+
+
+REJECT_NETWORK = cast(JsonGetter, _reject_network)
 
 
 def _roots(tmp_path: Path) -> tuple[Path, Path]:
@@ -61,7 +66,7 @@ def _session(
 ) -> ReviewSession:
     if base_snapshot is None:
         base_snapshot = load_review_contract_payload(BASE).snapshot_id
-    items = ()
+    items: tuple[ReviewSessionItem, ...] = ()
     if pending:
         items = (
             ReviewSessionItem(
@@ -123,7 +128,7 @@ def test_schema5_reviewed_held_plan_executes_without_network(tmp_path: Path) -> 
             override_path,
             output_name="reviewed-audit",
         ),
-        _reject_network,
+        REJECT_NETWORK,
         review_session_path=session_path,
     )
 
@@ -158,7 +163,7 @@ def test_schema5_review_requires_session_path(tmp_path: Path) -> None:
                 override_path,
                 output_name="missing-session-arg",
             ),
-            _reject_network,
+            REJECT_NETWORK,
         )
 
 
@@ -179,7 +184,7 @@ def test_schema5_review_rejects_missing_session_file(tmp_path: Path) -> None:
                 override_path,
                 output_name="missing-session-file",
             ),
-            _reject_network,
+            REJECT_NETWORK,
             review_session_path=tmp_path / "does-not-exist.json",
         )
 
@@ -203,7 +208,7 @@ def test_legacy_overrides_reject_review_session_argument(tmp_path: Path) -> None
                 legacy,
                 output_name="legacy-session",
             ),
-            _reject_network,
+            REJECT_NETWORK,
             review_session_path=session_path,
         )
 
@@ -228,7 +233,7 @@ def test_schema5_review_rejects_different_session_hash(tmp_path: Path) -> None:
                 override_path,
                 output_name="wrong-session-hash",
             ),
-            _reject_network,
+            REJECT_NETWORK,
             review_session_path=different_path,
         )
 
@@ -250,7 +255,7 @@ def test_schema5_review_rejects_unresolved_session(tmp_path: Path) -> None:
                 override_path,
                 output_name="pending-session",
             ),
-            _reject_network,
+            REJECT_NETWORK,
             review_session_path=session_path,
         )
 
@@ -281,7 +286,7 @@ def test_schema5_review_rejects_stale_base_override_payload(tmp_path: Path) -> N
                 override_path,
                 output_name="stale-base-payload",
             ),
-            _reject_network,
+            REJECT_NETWORK,
             review_session_path=session_path,
         )
 
@@ -301,7 +306,7 @@ def test_reviewed_plan_rejects_existing_or_uncreatable_output(tmp_path: Path) ->
                 output_dir=existing,
                 cache_dir=tmp_path / "existing-output-cache",
             ),
-            _reject_network,
+            REJECT_NETWORK,
         )
 
     with pytest.raises(
@@ -315,5 +320,5 @@ def test_reviewed_plan_rejects_existing_or_uncreatable_output(tmp_path: Path) ->
                 output_dir=tmp_path / "missing-parent" / "audit",
                 cache_dir=tmp_path / "missing-parent-cache",
             ),
-            _reject_network,
+            REJECT_NETWORK,
         )
