@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "overrides_version": 4,
+  "provenance": null,
+  "records": [
+    {
+      "source": {
+        "relative_path": "Fabricated Series/release-a.mkv",
+        "extension": ".mkv",
+        "fingerprint": {
+          "size": 100,
+          "mtime_ns": 200,
+          "sha256": null
+        }
+      },
+      "status": "duplicate",
+      "parse": null,
+      "show": null,
+      "evidence": null,
+      "destination": null,
+      "extra": null,
+      "duplicate": {
+        "destination_key": "Fabricated Series/Season 01/Fabricated Series S01E01.mkv",
+        "candidates": [
+          "Fabricated Series/release-a.mkv",
+          "Fabricated Series/release-b.mkv"
+        ],
+        "winner": "Fabricated Series/release-a.mkv",
+        "losers": ["Fabricated Series/release-b.mkv"],
+        "confidence": 1.0,
+        "evidence": ["frozen schema-v2 compatibility fixture"]
+      },
+      "operation_group_id": "op-v2-fixture",
+      "provider_episodes": [],
+      "reason": "legacy duplicate"
+    }
+  ],
+  "companions": []
+}
