@@ -29,6 +29,7 @@ from jellyfin_show_organizer.review_contract import (
 from jellyfin_show_organizer.review_execution import execute_plan as execute_reviewed_plan
 from jellyfin_show_organizer.review_session import (
     ReviewItemState,
+    ReviewSession,
     build_review_session,
     load_review_session,
 )
@@ -293,7 +294,7 @@ def _run_answered_review(
     action: str,
     responses: tuple[str, ...],
     provider: ReviewProvider | None = None,
-) -> tuple[Path, Path, Path, ReviewContractCatalog, object, StringIO]:
+) -> tuple[Path, Path, Path, ReviewContractCatalog, ReviewSession, StringIO]:
     shows, destination, _, base_payload, manifest, base_snapshot = _prepare_review(
         tmp_path, source
     )
@@ -349,7 +350,7 @@ def test_held_to_provider_episode_carries_jellyfin_ids_and_replays_offline(
         "tt333",
     }
     assert not catalog.source_holds
-    verify_review_contract_session(catalog, cast(object, session))
+    verify_review_contract_session(catalog, session)
     assert "Destination preview:" in output.getvalue()
 
     online_getter = HttpFixture()
@@ -479,7 +480,7 @@ def test_cancelled_held_actions_are_saved_as_deferred(
     assert not session.usable_for_planning
     assert load_review_session(session_path.read_bytes()) == session
     with pytest.raises(ValueError, match="unresolved work"):
-        verify_review_contract_session(catalog, cast(object, session))
+        verify_review_contract_session(catalog, session)
 
 
 def test_answer_prompt_exhaustion_fails_closed(tmp_path: Path) -> None:
