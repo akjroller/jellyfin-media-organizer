@@ -12,12 +12,13 @@ import pytest
 
 from jellyfin_show_organizer.models import CompanionStatus, TerminalStatus
 from jellyfin_show_organizer.planner import PlanningConfig, execute_plan
+from jellyfin_show_organizer.schema import PLAN_SCHEMA_VERSION
 from jellyfin_show_organizer.tvmaze_cache import JsonGetter
 
 pytestmark = pytest.mark.local
 FIXED_MTIME_NS = 1_700_000_000_000_000_000
 APPROVED_PLAN_SHA256 = (
-    "0a3574b94ef9ba0b6bbfa115678ada2b9cf82291bdd23cdeae7df4015b36beff"
+    "f7b6a0a8db1d676f35fadd6f24001eb40b268639065ad7d10682f1be38d2dd7b"
 )
 
 
@@ -231,7 +232,7 @@ def test_complete_ready_candidate_has_stable_approved_hash_and_zero_mutation(
 
     assert first.preflight.ready
     assert first.preflight.plan_hash == APPROVED_PLAN_SHA256
-    assert first.plan.schema_version == 2
+    assert first.plan.schema_version == PLAN_SCHEMA_VERSION
     assert first.plan.provenance is not None
     assert first.plan.provenance.tool_version == "0.1.0"
     assert len(first.plan.provenance.cache_snapshots) == 10

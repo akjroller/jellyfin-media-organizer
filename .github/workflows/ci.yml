@@ -54,7 +54,10 @@ jobs:
         run: python -m ruff check jellyfin_show_organizer tests tools
 
       - name: Format check
-        run: python -m ruff format --check jellyfin_show_organizer tests tools
+        shell: bash
+        run: |
+          python -m ruff format --diff jellyfin_show_organizer tests tools || true
+          python -m ruff format --check jellyfin_show_organizer tests tools
 
       - name: Type check
         run: python -m mypy jellyfin_show_organizer tests
@@ -72,6 +75,9 @@ jobs:
           jmo plan --help
           organizer plan --help
           python -m jellyfin_show_organizer plan --help
+          jmo review --help
+          organizer review --help
+          python -m jellyfin_show_organizer review --help
 
   repository-safety:
     name: Repository privacy and artifact gate
@@ -120,6 +126,7 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/wheel-venv/bin/jmo" --version
           "$RUNNER_TEMP/wheel-venv/bin/organizer" plan --help
+          "$RUNNER_TEMP/wheel-venv/bin/jmo" review --help
           "$RUNNER_TEMP/wheel-venv/bin/python" - <<'PY'
           from importlib.metadata import version
           from importlib.resources import files
@@ -147,6 +154,7 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/sdist-venv/bin/jmo" --version
           "$RUNNER_TEMP/sdist-venv/bin/organizer" plan --help
+          "$RUNNER_TEMP/sdist-venv/bin/jmo" review --help
           "$RUNNER_TEMP/sdist-venv/bin/python" - <<'PY'
           from importlib.metadata import version
           from importlib.resources import files

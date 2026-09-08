@@ -31,6 +31,13 @@ class TerminalStatus(StrEnum):
     UNRESOLVED = "unresolved"
 
 
+class DuplicateCollisionClass(StrEnum):
+    """Structured identity relationship for one destination collision."""
+
+    SAME_LOGICAL_IDENTITY = "same-logical-identity"
+    DESTINATION_CONFLICT = "destination-conflict"
+
+
 class CompanionStatus(StrEnum):
     ASSOCIATED = "associated"
     DUPLICATE = "duplicate"
@@ -336,6 +343,9 @@ class DuplicateDecision:
     losers: tuple[str, ...]
     confidence: float
     evidence: tuple[str, ...] = ()
+    collision_class: DuplicateCollisionClass = (
+        DuplicateCollisionClass.SAME_LOGICAL_IDENTITY
+    )
 
     def __post_init__(self) -> None:
         if not self.destination_key:
@@ -348,6 +358,11 @@ class DuplicateDecision:
             raise ValueError("duplicate winner must be one of the candidates")
         if any(loser not in self.candidates for loser in self.losers):
             raise ValueError("duplicate losers must be candidates")
+        if self.collision_class is DuplicateCollisionClass.DESTINATION_CONFLICT:
+            if self.winner is not None or self.losers:
+                raise ValueError(
+                    "destination conflicts cannot carry a duplicate winner"
+                )
 
 
 @dataclass(frozen=True, slots=True, init=False)

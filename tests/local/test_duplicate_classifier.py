@@ -6,7 +6,7 @@ from jellyfin_show_organizer.duplicate_classifier import (
     DuplicatePreference,
     classify_duplicate_candidates,
 )
-from jellyfin_show_organizer.models import SourceFingerprint
+from jellyfin_show_organizer.models import DuplicateCollisionClass, SourceFingerprint
 
 pytestmark = pytest.mark.local
 
@@ -60,6 +60,9 @@ def test_case_and_separator_equivalent_destinations_are_grouped_consistently():
     assert result.disposition is DuplicateDisposition.DUPLICATE
     assert result.decision.destination_key == "example series/season 01/episode.mkv"
     assert result.decision.candidates == ("source-a", "source-b")
+    assert (
+        result.decision.collision_class is DuplicateCollisionClass.SAME_LOGICAL_IDENTITY
+    )
 
 
 def test_exact_hash_duplicates_choose_stable_representative_only_as_tiebreaker():
@@ -115,7 +118,7 @@ def test_unique_explicit_preference_rank_can_select_winner():
 
     assert result.decision.winner == "disc-source"
     assert result.decision.losers == ("web-source",)
-    assert result.decision.confidence == 0.9
+    assert result.decision.confidence == 1.0
     assert "configured source preference: disc" in result.decision.evidence
 
 
@@ -162,6 +165,9 @@ def test_destination_convergence_across_logical_identities_is_suspicious():
     assert result.decision.winner is None
     assert result.decision.losers == ()
     assert result.decision.confidence == 0.0
+    assert (
+        result.decision.collision_class is DuplicateCollisionClass.DESTINATION_CONFLICT
+    )
     assert result.decision.evidence[0] == (
         "destination convergence spans multiple logical identities"
     )

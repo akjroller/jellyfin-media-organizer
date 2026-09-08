@@ -181,7 +181,12 @@ def test_cli_emits_stable_json_summary_without_absolute_paths(
     shows, destination, _, _ = _library(tmp_path)
     getter = CountingGetter()
 
-    def run_with_fixture(config: PlanningConfig):
+    def run_with_fixture(
+        config: PlanningConfig,
+        *,
+        review_session_path: Path | None = None,
+    ):
+        assert review_session_path is None
         return execute_plan(config, getter)
 
     monkeypatch.setattr("jellyfin_show_organizer.cli.execute_plan", run_with_fixture)

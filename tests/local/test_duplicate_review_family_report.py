@@ -20,7 +20,11 @@ from jellyfin_show_organizer.models import (
     TerminalStatus,
 )
 from jellyfin_show_organizer.reports import render_audit_bundle, render_mapping_csv
-from jellyfin_show_organizer.schema import canonical_manifest_bytes, stable_plan_hash
+from jellyfin_show_organizer.schema import (
+    PLAN_SCHEMA_VERSION,
+    canonical_manifest_bytes,
+    stable_plan_hash,
+)
 
 pytestmark = pytest.mark.local
 
@@ -76,7 +80,11 @@ def test_winnerless_duplicate_records_are_marked_duplicate_review() -> None:
         )
         for source in (FIRST, SECOND)
     )
-    plan = OrganizerPlan(schema_version=2, overrides_version=1, records=records)
+    plan = OrganizerPlan(
+        schema_version=PLAN_SCHEMA_VERSION,
+        overrides_version=1,
+        records=records,
+    )
 
     mapping_rows = _rows(render_mapping_csv(plan))
     unresolved_rows = _rows(render_audit_bundle(plan).unresolved_csv)
@@ -102,7 +110,7 @@ def test_duplicate_loser_is_not_reported_as_duplicate_review() -> None:
         evidence=("fabricated unique winner",),
     )
     plan = OrganizerPlan(
-        schema_version=2,
+        schema_version=PLAN_SCHEMA_VERSION,
         overrides_version=1,
         records=(
             replace(
@@ -139,7 +147,7 @@ def test_summary_separates_duplicate_review_from_other_suspicious_records() -> N
         reason="fabricated identification ambiguity",
     )
     plan = OrganizerPlan(
-        schema_version=2,
+        schema_version=PLAN_SCHEMA_VERSION,
         overrides_version=1,
         records=(duplicate_review, ordinary),
     )
@@ -161,7 +169,11 @@ def test_report_only_classification_does_not_change_manifest_or_hashes() -> None
         duplicate=decision,
         reason="fabricated duplicate ambiguity",
     )
-    plan = OrganizerPlan(schema_version=2, overrides_version=1, records=(record,))
+    plan = OrganizerPlan(
+        schema_version=PLAN_SCHEMA_VERSION,
+        overrides_version=1,
+        records=(record,),
+    )
     bundle = render_audit_bundle(plan)
 
     assert bundle.plan_json == canonical_manifest_bytes(plan) + b"\n"

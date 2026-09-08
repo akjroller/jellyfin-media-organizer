@@ -141,7 +141,7 @@ def test_held_record_is_first_class_plan_status_and_non_moving() -> None:
 
     manifest = plan_to_manifest(plan)
 
-    assert PLAN_SCHEMA_VERSION == 2
+    assert PLAN_SCHEMA_VERSION == 3
     assert manifest["records"][0]["status"] == "held"
     assert manifest["records"][0]["destination"] is None
     assert _video_preflight_status(record) is PreflightStatus.NON_MOVING
