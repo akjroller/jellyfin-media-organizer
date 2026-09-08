@@ -179,7 +179,9 @@ class ReviewProvider:
             shows=(self.show,),
         )
 
-    def episode_catalog(self, show_identity: ProviderIdentity) -> ProviderEpisodeCatalog:
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
         if not self.catalog_resolved:
             return ProviderEpisodeCatalog(
                 provider="tvmaze",
@@ -257,10 +259,19 @@ def _prepare_review(
     )
     assert [record.status for record in base.plan.records] == [TerminalStatus.HELD]
     if source == SOURCE_EPISODE:
-        assert [item.status for item in base.plan.companions] == [CompanionStatus.IGNORED]
+        assert [item.status for item in base.plan.companions] == [
+            CompanionStatus.IGNORED
+        ]
     manifest = cast(dict[str, object], json.loads(base.bundle.plan_json))
     base_catalog = load_review_contract(base_path)
-    return shows, destination, base_path, base_payload, manifest, base_catalog.snapshot_id
+    return (
+        shows,
+        destination,
+        base_path,
+        base_payload,
+        manifest,
+        base_catalog.snapshot_id,
+    )
 
 
 def _answer_bundle(
@@ -322,7 +333,9 @@ def _run_answered_review(
         session_path=session_path,
         output_override_path=active_path,
         resume=False,
-        input_fn=lambda _prompt: pytest.fail("answer-bound review requested live input"),
+        input_fn=lambda _prompt: pytest.fail(
+            "answer-bound review requested live input"
+        ),
         output=output,
         answers=answers,
     )
@@ -433,7 +446,11 @@ def test_held_to_provider_confirmed_special_compiles_exact_special(
     assert decision is not None
     assert decision.lookup_mode == "special"
     assert decision.episode_provider_identity == ProviderIdentity.tvmaze(SPECIAL_ID)
-    assert (decision.season, decision.number, decision.title) == (0, 1, "Launch Special")
+    assert (decision.season, decision.number, decision.title) == (
+        0,
+        1,
+        "Launch Special",
+    )
     assert session.items[0].action == "special"
     assert "Provider-confirmed specials:" in output.getvalue()
 
@@ -518,7 +535,9 @@ def test_answer_prompt_exhaustion_fails_closed(tmp_path: Path) -> None:
     assert not (tmp_path / "active.toml").exists()
 
 
-def test_unavailable_provider_search_defers_without_inventing_identity(tmp_path: Path) -> None:
+def test_unavailable_provider_search_defers_without_inventing_identity(
+    tmp_path: Path,
+) -> None:
     _, _, _, catalog, session, output = _run_answered_review(
         tmp_path,
         SOURCE_EPISODE,
