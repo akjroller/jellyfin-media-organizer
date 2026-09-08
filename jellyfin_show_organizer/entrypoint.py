@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from . import cli
 from .apply_execution import ApplyExecutionError, prepare_apply
+from .quarantine_cli import register_quarantine_commands
 from .rollback_execution import (
     RollbackExecutionError,
     execute_rollback,
@@ -23,7 +24,7 @@ ROLLBACK_FAILED_EXIT = 31
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Extend the existing CLI with successful-run rollback."""
+    """Extend the existing CLI with rollback and duplicate quarantine controls."""
 
     parser = cli.build_parser()
     subparsers = cast(
@@ -70,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rollback_parser.add_argument("--json", action="store_true", dest="json_output")
     rollback_parser.set_defaults(handler=_run_rollback)
+    register_quarantine_commands(subparsers)
     return parser
 
 
