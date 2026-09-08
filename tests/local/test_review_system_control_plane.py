@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from io import StringIO
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from jellyfin_show_organizer.review_contract import (
 from jellyfin_show_organizer.review_session import (
     ReviewItemKind,
     ReviewItemState,
+    ReviewSession,
     build_review_session,
     render_review_session,
 )
@@ -72,9 +74,7 @@ class NoProvider:
     def episode_catalog(
         self, show_identity: ProviderIdentity
     ) -> ProviderEpisodeCatalog:
-        raise AssertionError(
-            f"unexpected provider catalog for {show_identity.key}"
-        )
+        raise AssertionError(f"unexpected provider catalog for {show_identity.key}")
 
 
 PROVIDER = NoProvider()
@@ -190,7 +190,7 @@ def _paths(tmp_path: Path, prefix: str) -> tuple[Path, Path]:
     return tmp_path / f"{prefix}-session.json", tmp_path / f"{prefix}-active.toml"
 
 
-def _input(*responses: str):
+def _input(*responses: str) -> Callable[[str], str]:
     iterator = iter(responses)
     return lambda _prompt: next(iterator)
 
@@ -199,7 +199,7 @@ def _starting_session(
     manifest: dict[str, object],
     base_payload: bytes,
     base_snapshot: str,
-):
+) -> ReviewSession:
     return build_review_session(
         manifest,
         base_override_snapshot=base_snapshot,
@@ -208,7 +208,7 @@ def _starting_session(
 
 
 def _answer_bundle(
-    session,
+    session: ReviewSession,
     answers: tuple[ReviewAnswer, ...],
     *,
     plan_sha256: str | None = None,
@@ -375,7 +375,9 @@ def test_answers_must_match_selected_scope_and_cover_unresolved_items(
     manifest = _manifest(include_held=True)
     base_payload, base_snapshot = _base(held=True)
     starting = _starting_session(manifest, base_payload, base_snapshot)
-    duplicate = next(item for item in starting.items if item.kind is ReviewItemKind.DUPLICATE)
+    duplicate = next(
+        item for item in starting.items if item.kind is ReviewItemKind.DUPLICATE
+    )
     held = next(item for item in starting.items if item.kind is ReviewItemKind.HELD)
 
     held_answer = ReviewAnswer(
@@ -385,7 +387,9 @@ def test_answers_must_match_selected_scope_and_cover_unresolved_items(
     )
     outside = _answer_bundle(starting, (held_answer,))
     session_path, active_path = _paths(tmp_path, "outside-scope")
-    with pytest.raises(ReviewConfigurationError, match="outside the selected review scope"):
+    with pytest.raises(
+        ReviewConfigurationError, match="outside the selected review scope"
+    ):
         run_review_system(
             manifest,
             base_payload,
@@ -424,7 +428,9 @@ def test_answers_must_match_selected_scope_and_cover_unresolved_items(
     )
     exact = _answer_bundle(starting, (duplicate_answer,))
     session_path, active_path = _paths(tmp_path, "batch-answers")
-    with pytest.raises(ReviewConfigurationError, match="cannot be combined with --answers"):
+    with pytest.raises(
+        ReviewConfigurationError, match="cannot be combined with --answers"
+    ):
         run_review_system(
             manifest,
             base_payload,
@@ -500,7 +506,9 @@ def test_valid_partial_approval_binds_only_answered_duplicate_scope(
         approve_partial=True,
     )
 
-    duplicate = next(item for item in session.items if item.kind is ReviewItemKind.DUPLICATE)
+    duplicate = next(
+        item for item in session.items if item.kind is ReviewItemKind.DUPLICATE
+    )
     held = next(item for item in session.items if item.kind is ReviewItemKind.HELD)
     assert duplicate.state is ReviewItemState.ANSWERED
     assert held.state is ReviewItemState.PENDING
@@ -549,5 +557,7 @@ def test_resume_rejects_changed_plan_or_base_snapshot(tmp_path: Path) -> None:
 def test_scoped_input_rejects_unused_provider_responses() -> None:
     read, finish = _scoped_input(("used", "unused"))
     assert read("prompt") == "used"
-    with pytest.raises(ReviewConfigurationError, match="unused provider prompt responses"):
+    with pytest.raises(
+        ReviewConfigurationError, match="unused provider prompt responses"
+    ):
         finish()
