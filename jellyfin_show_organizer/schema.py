@@ -159,7 +159,9 @@ def _validate_record_v2(value: object, index: int) -> None:
                 f"{field} matched records require parse, show, and evidence"
             )
         if record["destination"] is None:
-            raise ManifestValidationError(f"{field} matched records require destination")
+            raise ManifestValidationError(
+                f"{field} matched records require destination"
+            )
     if status == "extra" and record["extra"] is None:
         raise ManifestValidationError(f"{field} extra records require extra")
     if status == "duplicate" and record["duplicate"] is None:
