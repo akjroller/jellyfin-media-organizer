@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:jmo:jellyfin-show-organizer:plan:v3",
+  "title": "Jellyfin Show Organizer Plan v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "overrides_version",
+    "provenance",
+    "records",
+    "companions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 3
+    },
+    "overrides_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "provenance": {
+      "anyOf": [
+        {"type": "null"},
+        {"$ref": "plan-schema-v2.json#/$defs/provenance"}
+      ]
+    },
+    "records": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/planRecord"}
+    },
+    "companions": {
+      "type": "array",
+      "items": {"$ref": "plan-schema-v2.json#/$defs/companion"}
+    }
+  },
+  "$defs": {
+    "duplicate": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "destination_key",
+        "candidates",
+        "winner",
+        "losers",
+        "confidence",
+        "evidence",
+        "collision_class"
+      ],
+      "properties": {
+        "destination_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "candidates": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "winner": {
+          "type": ["string", "null"]
+        },
+        "losers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "collision_class": {
+          "enum": ["same-logical-identity", "destination-conflict"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "collision_class": {"const": "destination-conflict"}
+            },
+            "required": ["collision_class"]
+          },
+          "then": {
+            "properties": {
+              "winner": {"type": "null"},
+              "losers": {"maxItems": 0}
+            }
+          }
+        }
+      ]
+    },
+    "planRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "status",
+        "parse",
+        "show",
+        "evidence",
+        "destination",
+        "extra",
+        "duplicate",
+        "operation_group_id",
+        "provider_episodes",
+        "reason"
+      ],
+      "properties": {
+        "source": {"$ref": "plan-schema-v2.json#/$defs/source"},
+        "status": {
+          "enum": [
+            "matched",
+            "extra",
+            "duplicate",
+            "held",
+            "suspicious",
+            "unresolved"
+          ]
+        },
+        "parse": {"$ref": "plan-schema-v2.json#/$defs/parse"},
+        "show": {"$ref": "plan-schema-v2.json#/$defs/show"},
+        "evidence": {"$ref": "plan-schema-v2.json#/$defs/evidence"},
+        "destination": {"type": ["string", "null"]},
+        "extra": {"$ref": "plan-schema-v2.json#/$defs/extra"},
+        "duplicate": {"$ref": "#/$defs/duplicate"},
+        "operation_group_id": {"type": ["string", "null"]},
+        "provider_episodes": {
+          "type": "array",
+          "items": {"$ref": "plan-schema-v2.json#/$defs/providerEpisode"}
+        },
+        "reason": {"type": ["string", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "matched"}}},
+          "then": {
+            "properties": {
+              "parse": {"type": "object"},
+              "show": {"type": "object"},
+              "evidence": {"type": "object"},
+              "destination": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "extra"}}},
+          "then": {"properties": {"extra": {"type": "object"}}}
+        },
+        {
+          "if": {"properties": {"status": {"const": "duplicate"}}},
+          "then": {"properties": {"duplicate": {"type": "object"}}}
+        },
+        {
+          "if": {"properties": {"status": {"const": "held"}}},
+          "then": {
+            "properties": {
+              "destination": {"type": "null"},
+              "extra": {"type": "null"},
+              "duplicate": {"type": "null"},
+              "provider_episodes": {"maxItems": 0},
+              "evidence": {"type": "object"},
+              "reason": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      ]
+    }
+  }
+}
