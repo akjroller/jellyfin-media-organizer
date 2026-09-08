@@ -312,19 +312,16 @@ def _write_show_metadata(
         entry[field_by_provider[identifier.provider]] = identifier.value
 
 
-def _add_reviewed_episode(
-    raw: dict[str, Any],
+def _reviewed_episode_entry(
     *,
     source: str,
     show: ProviderShow,
     episode: ProviderEpisode,
     lookup_mode: str,
     reason: str,
-) -> None:
+) -> dict[str, Any]:
     if episode.number is None:
         raise ReviewConfigurationError("provider episode has no numeric coordinate")
-    _remove_exact_dispositions(raw, (source,))
-    _remove_source_entries(raw, "duplicate_preferences", (source,))
     entry: dict[str, Any] = {
         "source": source,
         "show_provider": show.identity.provider,
@@ -339,7 +336,52 @@ def _add_reviewed_episode(
     }
     if episode.airdate is not None:
         entry["airdate"] = episode.airdate
-    _table(raw, "reviewed_episode_decisions").append(entry)
+    return entry
+
+
+def _add_reviewed_episode_set(
+    raw: dict[str, Any],
+    *,
+    source: str,
+    show: ProviderShow,
+    episodes: Sequence[ProviderEpisode],
+    lookup_mode: str,
+    reason: str,
+) -> None:
+    if not episodes:
+        raise ReviewConfigurationError("reviewed episode set cannot be empty")
+    _remove_exact_dispositions(raw, (source,))
+    _remove_source_entries(raw, "duplicate_preferences", (source,))
+    table = _table(raw, "reviewed_episode_decisions")
+    for episode in episodes:
+        table.append(
+            _reviewed_episode_entry(
+                source=source,
+                show=show,
+                episode=episode,
+                lookup_mode=lookup_mode,
+                reason=reason,
+            )
+        )
+
+
+def _add_reviewed_episode(
+    raw: dict[str, Any],
+    *,
+    source: str,
+    show: ProviderShow,
+    episode: ProviderEpisode,
+    lookup_mode: str,
+    reason: str,
+) -> None:
+    _add_reviewed_episode_set(
+        raw,
+        source=source,
+        show=show,
+        episodes=(episode,),
+        lookup_mode=lookup_mode,
+        reason=reason,
+    )
 
 
 def _add_extra_decision(
@@ -409,22 +451,24 @@ def _canonical_show(record: Mapping[str, object], show: ProviderShow) -> Canonic
     )
 
 
-def _preview_episode(
+def _preview_episodes(
     record: Mapping[str, object],
     show: ProviderShow,
-    episode: ProviderEpisode,
+    episodes: Sequence[ProviderEpisode],
     provider_ids: Sequence[JellyfinProviderIdentifier],
 ) -> str | None:
-    if episode.number is None:
+    if not episodes or any(episode.number is None for episode in episodes):
         return None
     assignment = SourceEpisodeAssignment(
         source_key=_record_source(record),
         status=AssignmentStatus.MATCHED,
-        episodes=(episode,),
+        episodes=tuple(episodes),
         evidence=MatchEvidence(
             method="manual-review-provider-confirmation",
             confidence=1.0,
-            reasons=(f"provider-episode:{episode.identity.key}",),
+            reasons=tuple(
+                f"provider-episode:{episode.identity.key}" for episode in episodes
+            ),
         ),
     )
     destination = build_episode_destination(
@@ -436,6 +480,15 @@ def _preview_episode(
     if destination.status is not DestinationStatus.READY:
         return None
     return destination.relative_path
+
+
+def _preview_episode(
+    record: Mapping[str, object],
+    show: ProviderShow,
+    episode: ProviderEpisode,
+    provider_ids: Sequence[JellyfinProviderIdentifier],
+) -> str | None:
+    return _preview_episodes(record, show, (episode,), provider_ids)
 
 
 def _find_episode_by_coordinate(
@@ -599,6 +652,124 @@ def _review_specific_episode(
         input_fn=input_fn,
         output=output,
     )
+
+
+def _review_multiple_episodes(
+    raw: dict[str, Any],
+    record: Mapping[str, object],
+    provider: MetadataProvider,
+    *,
+    input_fn: InputFn,
+    output: TextIO,
+) -> bool:
+    show = _select_show(record, provider, input_fn=input_fn, output=output)
+    if show is None:
+        return False
+    catalog = provider.episode_catalog(show.identity)
+    if not catalog.resolved or catalog.errors:
+        output.write("Provider episode catalog is unavailable or unsafe to use.\n")
+        return False
+
+    parsed = _record_parse_episodes(record)
+    default_count = len(parsed) if len(parsed) >= 2 else 2
+    count = _prompt_int(
+        "How many provider episodes are contained in this file",
+        input_fn=input_fn,
+        output=output,
+        default=default_count,
+    )
+    if count is None:
+        return False
+    if count < 2 or count > 50:
+        output.write("A compound review requires between 2 and 50 episodes.\n")
+        return False
+
+    default_season = _record_parse_int(record, "season")
+    selected: list[ProviderEpisode] = []
+    for index in range(count):
+        output.write(f"Episode {index + 1} of {count}:\n")
+        season = _prompt_int(
+            "  Season",
+            input_fn=input_fn,
+            output=output,
+            default=default_season,
+        )
+        if season is None:
+            return False
+        default_episode = parsed[index] if index < len(parsed) else None
+        number = _prompt_int(
+            "  Episode",
+            input_fn=input_fn,
+            output=output,
+            default=default_episode,
+        )
+        if number is None:
+            return False
+        episode = _find_episode_by_coordinate(catalog.episodes, season, number)
+        if episode is None or episode.number is None:
+            output.write(
+                f"No unique provider episode matched S{season:02d}E{number:02d}. "
+                "Decision deferred.\n"
+            )
+            return False
+        if any(
+            existing.identity == episode.identity
+            or (existing.season, existing.number) == (episode.season, episode.number)
+            for existing in selected
+        ):
+            output.write("The same provider episode cannot be selected twice.\n")
+            return False
+        selected.append(episode)
+
+    episodes = tuple(
+        sorted(
+            selected,
+            key=lambda episode: (
+                episode.season,
+                cast(int, episode.number),
+                episode.identity.key,
+            ),
+        )
+    )
+    show_key = _record_group_key(record)
+    provider_ids = _prompt_jellyfin_ids(
+        raw,
+        show_key,
+        input_fn=input_fn,
+        output=output,
+    )
+    destination = _preview_episodes(record, show, episodes, provider_ids)
+    if destination is None:
+        output.write(
+            "A safe Jellyfin destination cannot be produced for that provider episode set.\n"
+        )
+        return False
+
+    output.write("Provider-confirmed compound episode set:\n")
+    for episode in episodes:
+        assert episode.number is not None
+        output.write(
+            f"  - S{episode.season:02d}E{episode.number:02d} - {episode.title} "
+            f"[{episode.identity.key}]\n"
+        )
+    output.write(f"Destination preview: {destination}\n")
+    if input_fn("Write this compound decision? [y/N]: ").strip().casefold() not in {
+        "y",
+        "yes",
+    }:
+        output.write("Decision deferred.\n")
+        return False
+
+    _write_show_metadata(raw, show_key, show, provider_ids)
+    _add_reviewed_episode_set(
+        raw,
+        source=_record_source(record),
+        show=show,
+        episodes=episodes,
+        lookup_mode="coordinate",
+        reason="manual review confirmed provider compound episode set",
+    )
+    return True
 
 
 def _review_special(

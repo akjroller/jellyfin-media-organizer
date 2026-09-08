@@ -39,7 +39,7 @@ class ReviewItemState(StrEnum):
 ReviewCollisionClass = DuplicateCollisionClass
 
 
-_HELD_ACTIONS = frozenset({"keep_held", "episode", "special", "extra"})
+_HELD_ACTIONS = frozenset({"keep_held", "episode", "multi_episode", "special", "extra"})
 _DUPLICATE_ACTIONS = frozenset({"select_winner", "keep_all", "quarantine_candidate"})
 
 
@@ -202,6 +202,22 @@ def _validate_held_answer(
         )
         if not isinstance(data.get("show"), Mapping):
             raise ValueError(f"{action} show metadata must be an object")
+        return
+    if action == "multi_episode":
+        _require_exact_keys(data, {"reviewed_episodes", "show"}, action)
+        reviewed = data.get("reviewed_episodes")
+        if not isinstance(reviewed, list) or len(reviewed) < 2:
+            raise ValueError(
+                "multi_episode requires at least two reviewed provider episodes"
+            )
+        for index, decision in enumerate(reviewed):
+            _require_source_mapping(
+                decision,
+                source=source,
+                label=f"reviewed_episodes[{index}]",
+            )
+        if not isinstance(data.get("show"), Mapping):
+            raise ValueError("multi_episode show metadata must be an object")
         return
     _require_exact_keys(data, {"extra", "show"}, "extra")
     _require_source_mapping(data.get("extra"), source=source, label="extra")
@@ -638,7 +654,9 @@ def build_review_session(
         )
 
     for record in records:
-        if record.get("status") != "held":
+        if record.get("status") not in {"held", "suspicious", "unresolved"}:
+            continue
+        if isinstance(record.get("duplicate"), Mapping):
             continue
         source = _source_path(record)
         binding = _candidate_binding(source, record_by_source, frozen_companions)

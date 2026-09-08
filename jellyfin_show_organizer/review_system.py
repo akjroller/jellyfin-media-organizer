@@ -270,7 +270,9 @@ def _collect_held_records(manifest: object) -> tuple[Mapping[str, object], ...]:
     held = [
         cast(Mapping[str, object], record)
         for record in records
-        if cast(Mapping[str, object], record).get("status") == "held"
+        if cast(Mapping[str, object], record).get("status")
+        in {"held", "suspicious", "unresolved"}
+        and not isinstance(cast(Mapping[str, object], record).get("duplicate"), Mapping)
     ]
     return tuple(
         sorted(
@@ -346,25 +348,41 @@ def _source_key(value: str) -> str:
 
 def _capture_held_delta(raw: dict[str, Any], source: str) -> dict[str, object]:
     data: dict[str, object] = {}
-    for table, key in (
-        ("reviewed_episode_decisions", "reviewed_episode"),
-        ("extra_decisions", "extra"),
-    ):
-        values = cast(list[dict[str, Any]], raw.get(table, []))
-        match = next(
-            (
-                entry
-                for entry in reversed(values)
-                if isinstance(entry.get("source"), str)
-                and _source_key(cast(str, entry["source"])) == _source_key(source)
-            ),
-            None,
+    reviewed_matches = [
+        copy.deepcopy(entry)
+        for entry in cast(
+            list[dict[str, Any]], raw.get("reviewed_episode_decisions", [])
         )
-        if match is not None:
-            captured = copy.deepcopy(match)
-            captured.pop("source_binding_sha256", None)
-            data[key] = captured
-    disposition = data.get("reviewed_episode") or data.get("extra")
+        if isinstance(entry.get("source"), str)
+        and _source_key(cast(str, entry["source"])) == _source_key(source)
+    ]
+    for entry in reviewed_matches:
+        entry.pop("source_binding_sha256", None)
+    if len(reviewed_matches) == 1:
+        data["reviewed_episode"] = reviewed_matches[0]
+    elif len(reviewed_matches) > 1:
+        data["reviewed_episodes"] = reviewed_matches
+
+    values = cast(list[dict[str, Any]], raw.get("extra_decisions", []))
+    extra = next(
+        (
+            entry
+            for entry in reversed(values)
+            if isinstance(entry.get("source"), str)
+            and _source_key(cast(str, entry["source"])) == _source_key(source)
+        ),
+        None,
+    )
+    if extra is not None:
+        captured = copy.deepcopy(extra)
+        captured.pop("source_binding_sha256", None)
+        data["extra"] = captured
+
+    disposition: object | None = data.get("reviewed_episode") or data.get("extra")
+    if disposition is None:
+        reviewed_set = data.get("reviewed_episodes")
+        if isinstance(reviewed_set, list) and reviewed_set:
+            disposition = reviewed_set[0]
     if isinstance(disposition, Mapping):
         provider = disposition.get("show_provider")
         provider_id = disposition.get("show_provider_id")
@@ -658,14 +676,27 @@ def _answer_held(
         and normalize_review_path(item.source) == normalize_review_path(source)
     )
     ref = item.review_ref
-    output.write(f"\nHeld review {ref}\nSource: {source}\n")
+    status = record.get("status")
+    output.write(f"\nSource review {ref}\nSource: {source}\n")
+    output.write(f"Current plan status: {status}\n")
+    reason = record.get("reason")
+    if isinstance(reason, str) and reason:
+        output.write(f"Plan reason: {reason}\n")
+    evidence = record.get("evidence")
+    if isinstance(evidence, Mapping):
+        reasons = evidence.get("reasons")
+        if isinstance(reasons, list | tuple):
+            for entry in reasons:
+                if isinstance(entry, str):
+                    output.write(f"  evidence: {entry}\n")
     output.write(f"Reviewed source/member identity: {item.identity_sha256}\n")
 
     if answer is None:
         output.write(
             "Actions:\n"
-            "  [H] Continue leaving untouched\n"
-            "  [E] Identify as specific episode\n"
+            "  [H] Leave this source untouched / held\n"
+            "  [E] Identify as one specific provider episode\n"
+            "  [M] Identify as multiple provider episodes in one file\n"
             "  [S] Identify as provider-confirmed special\n"
             "  [X] Classify as explicit extra\n"
             "  [D] Defer\n"
@@ -674,6 +705,7 @@ def _answer_held(
         action = {
             "h": "keep_held",
             "e": "episode",
+            "m": "multi_episode",
             "s": "special",
             "x": "extra",
             "d": "defer",
@@ -701,6 +733,14 @@ def _answer_held(
     working = copy.deepcopy(scratch)
     if action == "episode":
         changed = _wizard._review_specific_episode(
+            working,
+            record,
+            provider,
+            input_fn=provider_input,
+            output=output,
+        )
+    elif action == "multi_episode":
+        changed = _wizard._review_multiple_episodes(
             working,
             record,
             provider,
@@ -906,7 +946,7 @@ def run_review_system(
             record = held_by_source.get(normalize_review_path(item.source))
             if record is None:
                 raise ReviewConfigurationError(
-                    "held review source disappeared from plan"
+                    "source review item disappeared from plan"
                 )
             session = _answer_held(
                 session,
