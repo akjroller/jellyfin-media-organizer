@@ -47,7 +47,7 @@ from jellyfin_show_organizer.review_session import (
     render_review_session,
 )
 from jellyfin_show_organizer.review_system import _collect_duplicate_groups
-from jellyfin_show_organizer.schema import plan_to_manifest
+from jellyfin_show_organizer.schema import PLAN_SCHEMA_VERSION, plan_to_manifest
 
 pytestmark = pytest.mark.local
 
@@ -153,7 +153,7 @@ def _duplicate_manifest(
         )
     manifest = plan_to_manifest(
         OrganizerPlan(
-            schema_version=2,
+            schema_version=PLAN_SCHEMA_VERSION,
             overrides_version=4,
             records=tuple(records),
         )
