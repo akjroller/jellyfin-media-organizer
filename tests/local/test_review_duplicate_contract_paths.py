@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import replace
 from io import StringIO
 
@@ -27,6 +28,7 @@ from jellyfin_show_organizer.review_execution import (
 )
 from jellyfin_show_organizer.review_identity import (
     duplicate_candidate_set_hash,
+    normalize_review_path,
     stable_duplicate_ref,
 )
 from jellyfin_show_organizer.review_session import (
@@ -258,6 +260,17 @@ def _manifest_record(path: str) -> dict[str, object]:
     }
 
 
+def _record_context() -> dict[str, Mapping[str, object]]:
+    return {
+        normalize_review_path(candidate): _manifest_record(candidate)
+        for candidate in CANDIDATES
+    }
+
+
+def _companion_context() -> dict[str, tuple[Mapping[str, object], ...]]:
+    return {}
+
+
 @pytest.mark.parametrize(
     ("action", "winner", "expected_action"),
     [
@@ -284,8 +297,8 @@ def test_duplicate_answer_actions_are_session_bound(
     updated = _answer_duplicate(
         session,
         _review_group(),
-        (_manifest_record(FIRST), _manifest_record(SECOND)),
-        (),
+        _record_context(),
+        _companion_context(),
         answer=answer,
         input_fn=lambda _prompt: pytest.fail("answer-bound duplicate requested input"),
         output=StringIO(),
@@ -304,8 +317,8 @@ def test_duplicate_answer_rejects_responses_and_unknown_winner() -> None:
         _answer_duplicate(
             session,
             _review_group(),
-            (_manifest_record(FIRST), _manifest_record(SECOND)),
-            (),
+            _record_context(),
+            _companion_context(),
             answer=ReviewAnswer(
                 review_ref=session.items[0].review_ref,
                 action="keep_all",
@@ -320,8 +333,8 @@ def test_duplicate_answer_rejects_responses_and_unknown_winner() -> None:
         _answer_duplicate(
             session,
             _review_group(),
-            (_manifest_record(FIRST), _manifest_record(SECOND)),
-            (),
+            _record_context(),
+            _companion_context(),
             answer=ReviewAnswer(
                 review_ref=session.items[0].review_ref,
                 action="select_winner",
@@ -349,8 +362,8 @@ def test_destination_conflict_rejects_duplicate_winner_and_quarantine_actions() 
             _answer_duplicate(
                 session,
                 group,
-                (_manifest_record(FIRST), _manifest_record(SECOND)),
-                (),
+                _record_context(),
+                _companion_context(),
                 answer=answer,
                 input_fn=lambda _prompt: "",
                 output=StringIO(),
@@ -358,29 +371,29 @@ def test_destination_conflict_rejects_duplicate_winner_and_quarantine_actions() 
 
 
 def test_interactive_duplicate_candidate_labels_are_validated() -> None:
-    records = (_manifest_record(FIRST), _manifest_record(SECOND))
     session = _review_session()
+    responses = iter(("s", "C2"))
     updated = _answer_duplicate(
         session,
         _review_group(recommended=None),
-        records,
-        (),
+        _record_context(),
+        _companion_context(),
         answer=None,
-        input_fn=iter(("s", "C2")).__next__,
+        input_fn=lambda _prompt: next(responses),
         output=StringIO(),
     )
     assert updated.items[0].data["winner"] == SECOND
 
     for candidate_label, message in (("wat", "invalid"), ("C9", "out of range")):
-        responses = iter(("s", candidate_label))
+        candidate_responses = iter(("s", candidate_label))
         with pytest.raises(ReviewConfigurationError, match=message):
             _answer_duplicate(
                 _review_session(),
                 _review_group(recommended=None),
-                records,
-                (),
+                _record_context(),
+                _companion_context(),
                 answer=None,
-                input_fn=lambda _prompt, responses=responses: next(responses),
+                input_fn=lambda _prompt, iterator=candidate_responses: next(iterator),
                 output=StringIO(),
             )
 
