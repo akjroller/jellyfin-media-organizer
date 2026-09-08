@@ -369,9 +369,9 @@ def _capture_held_delta(raw: dict[str, Any], source: str) -> dict[str, object]:
         provider = disposition.get("show_provider")
         provider_id = disposition.get("show_provider_id")
         for entry in cast(list[dict[str, Any]], raw.get("shows", [])):
-            if entry.get("provider") == provider and str(entry.get("provider_id")) == str(
-                provider_id
-            ):
+            if entry.get("provider") == provider and str(
+                entry.get("provider_id")
+            ) == str(provider_id):
                 data["show"] = copy.deepcopy(entry)
                 break
     return data
