@@ -32,7 +32,9 @@ def test_answer_hash_validation_rejects_non_string_and_non_hex_values() -> None:
     with pytest.raises(ReviewConfigurationError, match="must be a SHA-256 string"):
         load_review_answers(_answers_payload(7))
 
-    with pytest.raises(ReviewConfigurationError, match="must contain 64 hex characters"):
+    with pytest.raises(
+        ReviewConfigurationError, match="must contain 64 hex characters"
+    ):
         load_review_answers(_answers_payload("z" * 64))
 
 
@@ -40,7 +42,9 @@ def test_review_record_primitives_fail_closed_on_wrong_types() -> None:
     with pytest.raises(ReviewConfigurationError, match="record must be an object"):
         _mapping(None, "record")
 
-    with pytest.raises(ReviewConfigurationError, match="field must be a non-empty string"):
+    with pytest.raises(
+        ReviewConfigurationError, match="field must be a non-empty string"
+    ):
         _string("", "field")
 
 
