@@ -90,7 +90,9 @@ def _prepared() -> PreparedApply:
 
 
 def _patch_hash(monkeypatch: pytest.MonkeyPatch, value: str = PLAN_SHA) -> None:
-    monkeypatch.setattr(quarantine_contract, "manifest_plan_hash", lambda _manifest: value)
+    monkeypatch.setattr(
+        quarantine_contract, "manifest_plan_hash", lambda _manifest: value
+    )
 
 
 def test_derives_only_reviewed_duplicate_losers_and_bound_companions(
@@ -112,10 +114,11 @@ def test_derives_only_reviewed_duplicate_losers_and_bound_companions(
         QuarantineMemberRole.COMPANION,
     ]
     assert plan.groups[0].members[1].source_relative_path == "Show/loser-a.en.srt"
-    assert all(group.winner.source_relative_path == "Show/winner.mkv" for group in plan.groups)
     assert all(
-        group.winner.organized_relative_path
-        == "Show (2026)/Season 01/Show S01E01.mkv"
+        group.winner.source_relative_path == "Show/winner.mkv" for group in plan.groups
+    )
+    assert all(
+        group.winner.organized_relative_path == "Show (2026)/Season 01/Show S01E01.mkv"
         for group in plan.groups
     )
     assert len({group.group_id for group in plan.groups}) == 2
