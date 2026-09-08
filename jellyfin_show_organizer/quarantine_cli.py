@@ -99,7 +99,9 @@ def register_quarantine_commands(subparsers: Any) -> None:
     restore_parser.set_defaults(handler=_run_quarantine_restore)
 
 
-def _paths_and_prepared(args: argparse.Namespace) -> tuple[Path, Path, Path, PreparedApply]:
+def _paths_and_prepared(
+    args: argparse.Namespace,
+) -> tuple[Path, Path, Path, PreparedApply]:
     plan_path = cast(Path, args.plan).expanduser().resolve(strict=True)
     preflight_path = cast(Path, args.preflight).expanduser().resolve(strict=True)
     provenance_path = cast(Path, args.run_provenance).expanduser().resolve(strict=True)
@@ -161,7 +163,10 @@ def _run_quarantine_plan(args: argparse.Namespace) -> int:
         output = cast(Path, args.output).expanduser().resolve(strict=False)
         atomic_write_new(output, render_quarantine_plan(quarantine_plan))
     except KeyboardInterrupt:
-        print("Quarantine-plan creation interrupted; no media was changed.", file=sys.stderr)
+        print(
+            "Quarantine-plan creation interrupted; no media was changed.",
+            file=sys.stderr,
+        )
         return 130
     except (
         ApplyExecutionError,
@@ -217,9 +222,7 @@ def _run_quarantine(args: argparse.Namespace) -> int:
     try:
         prepared = _prepare_quarantine_from_args(args)
         source_root, organized_root, quarantine_root = _roots(args)
-        token = quarantine_token(
-            prepared, source_root, organized_root, quarantine_root
-        )
+        token = quarantine_token(prepared, source_root, organized_root, quarantine_root)
         check_only = bool(args.check_only)
         journal_arg = cast(Path | None, args.journal)
         journal_path = (
@@ -254,7 +257,9 @@ def _run_quarantine(args: argparse.Namespace) -> int:
                 print(f"Quarantine root:  {quarantine_root}")
                 print(f"Quarantine SHA:   {prepared.plan.sha256}")
                 print(f"Confirmation token:\n{token}")
-                supplied = input("Type the exact quarantine confirmation token: ").strip()
+                supplied = input(
+                    "Type the exact quarantine confirmation token: "
+                ).strip()
             if supplied != token:
                 raise QuarantineExecutionError(
                     "quarantine confirmation does not match the exact artifact, "
