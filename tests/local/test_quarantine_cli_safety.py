@@ -67,7 +67,7 @@ def _roots(tmp_path: Path) -> tuple[Path, Path, Path]:
     organized = tmp_path / "organized"
     quarantine = tmp_path / "quarantine"
     for root in (source, organized, quarantine):
-        root.mkdir()
+        root.mkdir(parents=True)
     return source, organized, quarantine
 
 
