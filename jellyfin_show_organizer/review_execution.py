@@ -556,6 +556,7 @@ def _apply_duplicate_group_contract(
                 *reviewed.reasons,
                 "all candidates remain in place; no delete or quarantine operation is authorized",
             ),
+            collision_class=decision.collision_class,
         )
         for record in records:
             by_source[record.source.relative_path] = replace(
