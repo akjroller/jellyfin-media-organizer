@@ -16,13 +16,12 @@ The current project boundary is deliberately narrow:
 8. construct deterministic Jellyfin destination paths from canonical assignments and extra decisions;
 9. build versioned plan records;
 10. reconcile every expected source into an explained terminal status;
-11. audit the completed plan before any future apply implementation.
-
-There is currently no `apply` command.
+11. audit and explicitly review the completed plan;
+12. optionally execute only its exact approved moving groups through the journaled apply boundary.
 
 ## Package layout
 
-- `cli.py` — operational plan-only command surface and configuration precedence.
+- `cli.py` — plan, review, and explicitly gated apply command surfaces.
 - `planner.py` — end-to-end inventory, resolution, assignment, duplicate, companion, provenance, preflight, and audit orchestration.
 - `inventory.py` and `sidecars.py` — authorized-root scanning, deterministic read-only video inventory, and adjacent companion discovery.
 - `filename_parser.py`, `extra_classifier.py`, and `extra_naming.py` — pure filename/path evidence, fail-closed extra classification, and extra display identity.
@@ -35,8 +34,8 @@ There is currently no `apply` command.
 - `models.py` and `overrides.py` — typed cross-stage contracts and versioned local decisions.
 - `reconciliation.py`, `review.py`, and `reports.py` — complete terminal accounting, review references/stubs, and atomic audit-bundle serialization.
 - `decision_hash.py`, `schema.py`, and `run_provenance.py` — versioned manifest validation, stable plan/decision identity, and path-free run context.
-- `preflight.py` — whole-plan safety validation before any future mutation stage.
-- `apply_contract.py` and `apply_validation.py` — non-mutating approval, operation-group, journal-replay, and live-state validation foundations for the still-gated apply milestone.
+- `preflight.py` — whole-plan safety validation before review or mutation.
+- `apply_contract.py`, `apply_validation.py`, and `apply_execution.py` — exact approval binding, status-gated operation groups, live-state validation, atomic no-overwrite moves, durable journaling, rollback, resume, and final verification.
 - `data/` — versioned JSON/TOML contracts and synthetic default override examples.
 
 ## Determinism

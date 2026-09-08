@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Jellyfin Media Organizer has not published a release yet. Security fixes are made on the current `main` branch while the product remains plan-only.
+Jellyfin Media Organizer has not published a release yet. Security fixes are made on the current `main` branch while the apply executor remains explicitly gated and unreleased.
 
 ## Reporting a vulnerability
 

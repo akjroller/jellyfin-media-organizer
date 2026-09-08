@@ -1,72 +1,100 @@
-# Apply safety contract foundation
+# Apply safety contract
 
-The repository still has **no enabled media-mutating apply command**. Issue #15 remains blocked by fresh release-candidate approval. This document describes the apply-safety primitives that can be implemented and tested before that gate is cleared.
+`jmo apply` is the only media-mutating command. It consumes one immutable reviewed plan and never reruns parsing, provider resolution, episode matching, duplicate selection, destination construction, or held-source review.
 
-## Exact approval context
+Planning, review, and `jmo apply --check-only` remain non-mutating. A ready plan is necessary but is not permission to move media.
 
-A future apply executor must consume one already-generated immutable plan. It must not rerun parsing, provider resolution, episode matching, duplicate selection, destination construction, or source-hold review.
+## Exact approval boundary
 
-Before an executor may perform any filesystem operation, the apply contract requires all of the following to agree exactly:
+Apply requires all of the following to agree exactly:
 
-- the current supported plan schema version;
-- the canonical SHA-256 of `plan.json`;
-- the approved tool version;
-- the approved configuration snapshot;
-- the approved override snapshot;
-- the complete provider/cache snapshot context;
-- a `preflight.json` for the same plan hash with `ready = true`, no blocked groups, and no findings.
+- supported plan schema and canonical `plan.json` SHA-256;
+- complete review-session SHA-256;
+- clean 40-character source revision recorded by the reviewed plan;
+- tool, configuration, override, and provider-cache snapshot context;
+- matching `run-provenance.json` and ready `preflight.json` with zero findings;
+- the complete derived operation-group scope;
+- explicit source and destination roots;
+- an exact confirmation token bound to both hashes, the revision, and both resolved roots.
 
-Any mismatch fails closed before filesystem access.
+Any mismatch fails before mutation. A partial review, dirty planning revision, provider failure, stale source fingerprint, existing destination, changed candidate set, or unsupported artifact fails closed.
 
-## Operation groups
+The executor must itself run from the exact clean Git commit recorded by the reviewed plan. If the running revision is dirty, different, or unavailable, apply refuses to run; a package installation without verifiable revision identity cannot bypass this gate.
 
-The contract derives immutable operation groups from the approved manifest. One group contains exactly one moving video and any associated moving companions that share its `operation_group_id`. Duplicate losers, explicitly held videos, and explicitly ignored companions are non-moving. Unresolved or suspicious videos/companions are rejected at the apply boundary.
+After executor code changes, generate and review a fresh plan on the final clean commit. An older green plan is development evidence, not authority for a newer executable.
 
-A held video is an audited plan decision to leave one exact source untouched. It has no destination and is excluded from apply mutation groups; its associated companions are non-moving with it. Apply never reinterprets a held source as matched media or invents a destination for it.
+## Movement eligibility
 
-A group is retained when at least one member would change path. This allows a video no-op and a companion rename to remain one indivisible operation group instead of splitting sidecar handling from the video decision.
+Only video records with status `matched` or `extra` enter apply operation groups. Only `associated` companions belonging to those exact video groups join them.
 
-The contract stores only approved source-relative paths, destination-relative paths, and source fingerprints. It does not invent or recalculate destinations.
+The following never move:
 
-## Live read-only revalidation
+- `duplicate` video records, including losers whose audit row retains a collided destination;
+- `held` video records;
+- `ignored` or `duplicate` companions;
+- any unresolved or suspicious item.
 
-`apply_validation` now provides the live-state checks that a future executor must run immediately before each move. These checks are deliberately read-only and perform no directory creation or media mutation.
+Eligibility is determined by terminal status and the validated operation-group contract, never by `destination != null`.
 
-For every moving member they require:
+## Required check-only pass
 
-- source and destination roots to already exist as real directories rather than symlinks or junctions;
-- source and destination identities to remain safe relative paths with no drive qualification, absolute paths, empty segments, or traversal segments;
-- every existing source/destination parent component to remain a real directory rather than a symlink or junction;
-- the source to still exist as a regular file;
-- source size and nanosecond modification time to match the approved fingerprint;
-- SHA-256 to match when the approved plan contains one, including a second stat check to detect changes during hashing;
-- the exact destination path to remain absent, including broken symlinks;
-- the source and nearest existing destination parent to be on the same filesystem/device.
+Use fabricated paths in documentation and public reports. On a private machine, supply the exact local artifacts and approval values:
 
-A missing destination parent is allowed during validation but is **not created**. This keeps directory creation behind the later journaled apply executor while still proving the target filesystem before mutation.
+```text
+jmo apply LocalState/reviewed/plan.json \
+  --preflight LocalState/reviewed/preflight.json \
+  --run-provenance LocalState/reviewed/run-provenance.json \
+  --source-root ExampleMedia/Shows \
+  --destination-root ExampleMedia/OrganizedShows \
+  --approve-plan-sha256 <64-hex-plan-hash> \
+  --approve-review-session-sha256 <64-hex-session-hash> \
+  --approve-source-revision <40-hex-clean-revision> \
+  --check-only
+```
 
-## Journal replay foundation
+Check-only performs full live revalidation, creates no destination directories, writes no journal, and moves nothing. It prints the exact root-bound confirmation token required by an actual apply.
 
-The append-only journal model records ordered events tied to one exact plan hash:
+## Actual apply
 
-- group started;
-- member completed;
-- group failed;
-- group completed.
+An actual run uses the same artifacts, hashes, revision, and roots, plus a new journal outside all media roots and the exact token printed by check-only:
 
-Replay rejects non-contiguous sequence numbers, events for another plan, unknown groups, member paths outside the approved group, duplicate member completion, and group completion before every moving member is recorded.
+```text
+jmo apply LocalState/reviewed/plan.json \
+  --preflight LocalState/reviewed/preflight.json \
+  --run-provenance LocalState/reviewed/run-provenance.json \
+  --source-root ExampleMedia/Shows \
+  --destination-root ExampleMedia/OrganizedShows \
+  --journal LocalState/apply-001.jsonl \
+  --approve-plan-sha256 <64-hex-plan-hash> \
+  --approve-review-session-sha256 <64-hex-session-hash> \
+  --approve-source-revision <40-hex-clean-revision> \
+  --confirm-apply '<exact-token-from-check-only>'
+```
 
-A failed group may be started again during recovery. Previously completed members remain recorded, so a future executor can revalidate reality and avoid blindly repeating an already-completed move.
+If `--confirm-apply` is omitted, a real interactive terminal must type the complete displayed token. Non-interactive execution cannot bypass this confirmation.
 
-## Still blocked
+## Filesystem rules
 
-This foundation does **not** implement or expose:
+- Source and destination roots must already exist as real directories, not links or junctions.
+- Every source is rechecked against its approved size and nanosecond mtime immediately before moving. SHA-256 is also checked when present in the plan.
+- Every destination is rechecked as absent immediately before moving.
+- Existing parent chains must remain real directories. Apply creates only missing approved destination parents.
+- Source and target must be on the same filesystem/device.
+- The move primitive is an atomic no-overwrite rename: native non-replacing rename on Windows, `renameat2(RENAME_NOREPLACE)` on Linux, or `renamex_np(RENAME_EXCL)` on macOS. Unsupported hosts fail closed.
+- Cross-filesystem copy-and-delete, overwrite, source-directory cleanup, duplicate deletion, and quarantine execution are unavailable.
 
-- `jmo apply`;
-- directory creation;
-- rename/move operations;
-- append/fsync journal persistence;
-- verification after moves;
-- rollback or recovery writes.
+## Journal and group recovery
 
-Those operations remain gated until a fresh exact immutable plan is approved and the later #15 implementation adds platform-safe no-overwrite filesystem operations plus fault-injection coverage. Cross-filesystem copy+delete remains explicitly out of scope for the first apply release.
+The JSON Lines journal is append-only and fsynced after every event. Every event carries the exact plan hash, review-session hash, source revision, sequence, result, and relevant group/member paths. Member start entries include the planned fingerprint pre-state and recovery identity.
+
+One moving video and all deterministic companions form one operation group. If a later member fails, already-moved members in that group are verified and atomically restored in reverse order. Empty destination directories are intentionally left in place.
+
+The persistent adjacent lock file uses an operating-system advisory lock. A crash releases the lock automatically; its presence alone does not block recovery.
+
+Resume uses the exact same command and approval context plus `--resume`. It validates the existing journal. Completed groups are verified and skipped. If a crash occurred after an atomic rename but before its completion event, resume accepts it only when the source is absent and the exact destination fingerprint matches; otherwise it stops with recovery guidance.
+
+If automatic rollback cannot prove the source/destination state, JMO refuses to guess and reports the exact member requiring manual inspection.
+
+## Final verification
+
+Before reporting success, apply verifies every approved moving member at its destination with its source absent. Keep the journal with the approved plan, preflight, provenance, review session, and override artifacts. Do not publish those private artifacts.

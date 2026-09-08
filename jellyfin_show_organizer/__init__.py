@@ -1,4 +1,4 @@
-"""Read-only Jellyfin show organizer subsystem."""
+"""Plan-first Jellyfin show organizer with an explicitly gated executor."""
 
 __version__ = "0.1.0"
 

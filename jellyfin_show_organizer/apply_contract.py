@@ -497,27 +497,9 @@ def _companion_member(
     )
 
 
-def build_apply_contract(
-    manifest: object,
-    preflight: object,
-    approval: ApplyApproval,
-    *,
-    run_provenance: object | None = None,
-) -> ApplyContract:
-    """Validate an approved immutable plan and derive non-mutating operation groups.
-
-    This function deliberately performs no filesystem access and no media mutation.
-    A future apply executor must consume this contract rather than rerunning matching
-    or inventing destinations. Reviewed schema-5 plans additionally require exact
-    complete-review provenance; approved-partial review state is never apply authority.
-    """
-
-    validate_manifest(manifest)
-    root = cast(Mapping[str, object], manifest)
-    plan_hash = _validate_approval(root, approval)
-    _validate_review_boundary(root, approval, run_provenance, plan_hash)
-    _validate_preflight(preflight, plan_hash)
-
+def _derive_operation_groups(
+    root: Mapping[str, object],
+) -> tuple[ApplyOperationGroup, ...]:
     raw_records = root["records"]
     raw_companions = root["companions"]
     assert isinstance(raw_records, list | tuple)
@@ -578,12 +560,45 @@ def build_apply_contract(
         if group.moving_members:
             operation_groups.append(group)
 
+    return tuple(operation_groups)
+
+
+def derive_apply_group_ids(manifest: object) -> tuple[str, ...]:
+    """Return the exact moving group scope without authorizing or touching files."""
+
+    validate_manifest(manifest)
+    root = cast(Mapping[str, object], manifest)
+    return tuple(group.group_id for group in _derive_operation_groups(root))
+
+
+def build_apply_contract(
+    manifest: object,
+    preflight: object,
+    approval: ApplyApproval,
+    *,
+    run_provenance: object | None = None,
+) -> ApplyContract:
+    """Validate an approved immutable plan and derive non-mutating operation groups.
+
+    This function deliberately performs no filesystem access and no media mutation.
+    An apply executor must consume this contract rather than rerunning matching or
+    inventing destinations. Reviewed schema-5 plans additionally require exact
+    complete-review provenance; approved-partial review state is never apply authority.
+    """
+
+    validate_manifest(manifest)
+    root = cast(Mapping[str, object], manifest)
+    plan_hash = _validate_approval(root, approval)
+    _validate_review_boundary(root, approval, run_provenance, plan_hash)
+    _validate_preflight(preflight, plan_hash)
+    operation_groups = _derive_operation_groups(root)
+
     authorized_group_ids = tuple(group.group_id for group in operation_groups)
     if approval.authorized_group_ids != authorized_group_ids:
         raise ApplyContractError(
             "approved operation-group scope does not match the derived apply outcome"
         )
-    return ApplyContract(plan_sha256=plan_hash, groups=tuple(operation_groups))
+    return ApplyContract(plan_sha256=plan_hash, groups=operation_groups)
 
 
 def replay_journal(

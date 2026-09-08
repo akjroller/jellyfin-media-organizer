@@ -42,7 +42,7 @@ def test_runbook_makes_shows_only_boundary_explicit():
     assert "Do not point it at a Movies directory" in text
 
 
-def test_runbook_separates_operational_stages_and_has_no_apply_command():
+def test_runbook_separates_operational_stages_and_gates_apply():
     text = RUNBOOK.read_text(encoding="utf-8")
 
     for heading in (
@@ -56,7 +56,9 @@ def test_runbook_separates_operational_stages_and_has_no_apply_command():
     ):
         assert heading in text
 
-    assert "There is intentionally no organizer `apply` command" in text
+    assert "--check-only" in text
+    assert "--confirm-apply" in text
+    assert "Only `matched` and `extra`" in text
 
 
 def test_operational_plan_is_documented_as_non_mutating_and_auditable():
@@ -109,7 +111,7 @@ def test_docs_keep_privacy_and_data_driven_extension_rules_explicit():
     assert "overrides-v1.toml" in runbook
     assert "cache/provider boundary" in runbook
     assert "standalone Python package" in architecture
-    assert "There is currently no `apply` command" in architecture
+    assert "apply_execution.py" in architecture
     assert "private library should be reduced" in architecture
 
 
@@ -120,7 +122,9 @@ def test_contributor_guide_matches_current_extension_boundaries():
     assert "ProviderIdentity" in text
     assert "MetadataProvider" in text
     assert "Adding a second provider should require an adapter" in text
-    assert "There is currently no `apply` command" in text
+    assert (
+        "Apply changes must preserve exact plan/review/revision/root approval" in text
+    )
     assert "python -m mypy jellyfin_show_organizer tests" in text
     assert r".\.venv\Scripts\python.exe -m pytest" in text
 

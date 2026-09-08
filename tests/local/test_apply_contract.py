@@ -1,7 +1,12 @@
+import copy
+import json
 from dataclasses import replace
+from pathlib import Path
+from typing import cast
 
 import pytest
 
+import jellyfin_show_organizer.apply_execution as apply_execution
 from jellyfin_show_organizer.apply_contract import (
     ApplyApproval,
     ApplyContractError,
@@ -11,13 +16,18 @@ from jellyfin_show_organizer.apply_contract import (
     ApplyReviewMode,
     JournalEvent,
     build_apply_contract,
+    derive_apply_group_ids,
+    manifest_plan_hash,
     replay_journal,
 )
+from jellyfin_show_organizer.apply_execution import ApplyExecutionError, prepare_apply
 from jellyfin_show_organizer.models import (
     CacheSnapshot,
     CanonicalShow,
     CompanionPlanRecord,
     CompanionStatus,
+    DuplicateCollisionClass,
+    DuplicateDecision,
     MatchEvidence,
     NumberingMode,
     OrganizerPlan,
@@ -188,6 +198,231 @@ def test_approved_ready_plan_derives_one_indivisible_operation_group():
         ApplyMemberRole.COMPANION,
     ]
     assert len(group.moving_members) == 2
+
+
+def test_duplicate_loser_with_destination_never_enters_apply_scope():
+    plan = _plan()
+    winner = plan.records[0]
+    loser_source = replace(
+        winner.source,
+        relative_path="Example Series/release-b.mkv",
+    )
+    candidates = (winner.source.relative_path, loser_source.relative_path)
+    decision = DuplicateDecision(
+        destination_key=winner.destination or "",
+        candidates=candidates,
+        winner=winner.source.relative_path,
+        losers=(loser_source.relative_path,),
+        confidence=1.0,
+        evidence=("synthetic reviewed winner",),
+        collision_class=DuplicateCollisionClass.SAME_LOGICAL_IDENTITY,
+    )
+    winner = replace(winner, duplicate=decision)
+    loser = replace(
+        winner,
+        source=loser_source,
+        status=TerminalStatus.DUPLICATE,
+        duplicate=decision,
+        operation_group_id="op-loser",
+        reason="duplicate loser",
+    )
+    changed = replace(plan, records=(winner, loser))
+
+    assert derive_apply_group_ids(plan_to_manifest(changed)) == ("op-example",)
+
+
+def test_prepare_apply_binds_clean_revision_and_complete_review(tmp_path: Path):
+    plan = _plan(overrides_version=5)
+    manifest = plan_to_manifest(plan)
+    provenance = _review_provenance(plan, scope_state=ApplyReviewMode.COMPLETE)
+    provenance.update(
+        {
+            "source_revision": {
+                "state": "git",
+                "commit": "9" * 40,
+                "dirty": False,
+            },
+            "provider": {"failure": False},
+            "preflight": {"ready": True, "finding_count": 0},
+        }
+    )
+    plan_path = tmp_path / "plan.json"
+    preflight_path = tmp_path / "preflight.json"
+    provenance_path = tmp_path / "run-provenance.json"
+    plan_path.write_text(json.dumps(manifest), encoding="utf-8")
+    preflight_path.write_text(json.dumps(_preflight(plan)), encoding="utf-8")
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+
+    prepared = prepare_apply(
+        plan_path,
+        preflight_path,
+        provenance_path,
+        approved_plan_sha256=stable_plan_hash(plan),
+        approved_review_session_sha256="c" * 64,
+        approved_source_revision="9" * 40,
+    )
+
+    assert prepared.contract.plan_sha256 == stable_plan_hash(plan)
+    assert [group.group_id for group in prepared.contract.groups] == ["op-example"]
+
+    provenance["source_revision"] = {
+        "state": "git",
+        "commit": "9" * 40,
+        "dirty": True,
+    }
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+    with pytest.raises(ApplyExecutionError, match="clean revision"):
+        prepare_apply(
+            plan_path,
+            preflight_path,
+            provenance_path,
+            approved_plan_sha256=stable_plan_hash(plan),
+            approved_review_session_sha256="c" * 64,
+            approved_source_revision="9" * 40,
+        )
+
+
+def test_prepare_apply_rejects_each_changed_approval_artifact(tmp_path: Path):
+    plan = _plan(overrides_version=5)
+    manifest = plan_to_manifest(plan)
+    plan_hash = stable_plan_hash(plan)
+    provenance = _review_provenance(plan, scope_state=ApplyReviewMode.COMPLETE)
+    provenance.update(
+        {
+            "source_revision": {
+                "state": "git",
+                "commit": "9" * 40,
+                "dirty": False,
+            },
+            "provider": {"failure": False},
+            "preflight": {"ready": True, "finding_count": 0},
+        }
+    )
+    plan_path = tmp_path / "plan.json"
+    preflight_path = tmp_path / "preflight.json"
+    provenance_path = tmp_path / "run-provenance.json"
+    plan_path.write_text(json.dumps(manifest), encoding="utf-8")
+    preflight_path.write_text(json.dumps(_preflight(plan)), encoding="utf-8")
+
+    def attempt(
+        changed: dict[str, object],
+        *,
+        approved_plan: str = plan_hash,
+        approved_session: str = "c" * 64,
+        approved_revision: str = "9" * 40,
+    ) -> None:
+        provenance_path.write_text(json.dumps(changed), encoding="utf-8")
+        prepare_apply(
+            plan_path,
+            preflight_path,
+            provenance_path,
+            approved_plan_sha256=approved_plan,
+            approved_review_session_sha256=approved_session,
+            approved_source_revision=approved_revision,
+        )
+
+    with pytest.raises(ApplyExecutionError, match="invalid format"):
+        attempt(provenance, approved_plan="short")
+    with pytest.raises(ApplyExecutionError, match="does not match plan.json"):
+        attempt(provenance, approved_plan="0" * 64)
+
+    changed = copy.deepcopy(provenance)
+    changed["plan_sha256"] = "0" * 64
+    with pytest.raises(ApplyExecutionError, match="provenance does not match"):
+        attempt(changed)
+
+    changed = copy.deepcopy(provenance)
+    changed["preflight"] = {"ready": False, "finding_count": 1}
+    with pytest.raises(ApplyExecutionError, match="ready plan"):
+        attempt(changed)
+
+    changed = copy.deepcopy(provenance)
+    changed["provider"] = {"failure": True}
+    with pytest.raises(ApplyExecutionError, match="provider failure"):
+        attempt(changed)
+
+    changed = copy.deepcopy(provenance)
+    review = cast(dict[str, object], changed["review"])
+    review["session_sha256"] = "0" * 64
+    with pytest.raises(ApplyExecutionError, match="review-session"):
+        attempt(changed)
+
+    changed = copy.deepcopy(provenance)
+    review = cast(dict[str, object], changed["review"])
+    review["scope_state"] = ApplyReviewMode.APPROVED_PARTIAL.value
+    with pytest.raises(ApplyExecutionError, match="complete review"):
+        attempt(changed)
+
+    changed = copy.deepcopy(provenance)
+    review = cast(dict[str, object], changed["review"])
+    review["approved_scope_refs"] = ["held-0123456789abcdef"]
+    with pytest.raises(ApplyExecutionError, match="partial review scope"):
+        attempt(changed)
+
+
+def test_prepare_apply_rejects_malformed_and_unbuildable_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    plan = _plan(overrides_version=5)
+    manifest = plan_to_manifest(plan)
+    provenance = _review_provenance(plan, scope_state=ApplyReviewMode.COMPLETE)
+    provenance.update(
+        {
+            "source_revision": {
+                "state": "git",
+                "commit": "9" * 40,
+                "dirty": False,
+            },
+            "provider": {"failure": False},
+            "preflight": {"ready": True, "finding_count": 0},
+        }
+    )
+    plan_path = tmp_path / "plan.json"
+    preflight_path = tmp_path / "preflight.json"
+    provenance_path = tmp_path / "run-provenance.json"
+
+    def write_artifacts(changed_manifest: object) -> str:
+        changed_hash = manifest_plan_hash(changed_manifest)
+        changed_preflight = _preflight(plan)
+        changed_preflight["plan_hash"] = changed_hash
+        changed_provenance = copy.deepcopy(provenance)
+        changed_provenance["plan_sha256"] = changed_hash
+        plan_path.write_text(json.dumps(changed_manifest), encoding="utf-8")
+        preflight_path.write_text(json.dumps(changed_preflight), encoding="utf-8")
+        provenance_path.write_text(json.dumps(changed_provenance), encoding="utf-8")
+        return changed_hash
+
+    plan_path.write_text("not JSON", encoding="utf-8")
+    preflight_path.write_text("{}", encoding="utf-8")
+    provenance_path.write_text("{}", encoding="utf-8")
+    with pytest.raises(ApplyExecutionError, match="valid plan manifest"):
+        prepare_apply(
+            plan_path,
+            preflight_path,
+            provenance_path,
+            approved_plan_sha256="a" * 64,
+            approved_review_session_sha256="c" * 64,
+            approved_source_revision="9" * 40,
+        )
+
+    changed_hash = write_artifacts(manifest)
+    monkeypatch.setattr(
+        apply_execution,
+        "build_apply_contract",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ApplyContractError("synthetic contract refusal")
+        ),
+    )
+    with pytest.raises(ApplyExecutionError, match="synthetic contract refusal"):
+        prepare_apply(
+            plan_path,
+            preflight_path,
+            provenance_path,
+            approved_plan_sha256=changed_hash,
+            approved_review_session_sha256="c" * 64,
+            approved_source_revision="9" * 40,
+        )
 
 
 def test_hash_snapshot_and_preflight_mismatches_fail_closed():

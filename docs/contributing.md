@@ -86,14 +86,14 @@ Planning and preflight do not move, copy, rename, overwrite, or delete media and
 
 ## Apply boundary
 
-There is currently no `apply` command. Media mutation must not appear incidentally in parser, provider, report, documentation, or cleanup work.
+Media mutation must remain isolated in `apply_execution.py` and the explicit `apply` CLI path; it must never appear incidentally in parser, provider, report, documentation, or cleanup work.
 
-Future apply work belongs only to its explicitly gated issue and must consume an exact approved immutable plan hash, revalidate reality, refuse overwrites, journal operations, and use conservative recovery semantics.
+Apply changes must preserve exact plan/review/revision/root approval, status-gated operation groups, immediate live revalidation, no-overwrite atomic renames, durable journal events, conservative rollback/resume, and synthetic fault-injection coverage.
 
 ## Documentation and releases
 
 Keep examples copy/pasteable and platform-neutral. Windows examples should invoke the virtual environment executables directly rather than requiring PowerShell activation or execution-policy changes.
 
-Normal pull-request CI verifies installable artifacts but does not publish packages. The repository currently has no JMO release/tag by design; the first public release is a separate deliberate decision after the plan-only milestone is considered ready.
+Normal pull-request CI verifies installable artifacts but does not publish packages. The repository currently has no JMO release/tag by design; the first public release is a separate deliberate decision after the apply milestone is validated.
 
 See `docs/releasing.md` for version, tag, and artifact rules.
