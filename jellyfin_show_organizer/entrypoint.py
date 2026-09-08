@@ -115,9 +115,7 @@ def _run_rollback(args: argparse.Namespace) -> int:
             approved_review_session_sha256=cast(
                 str, args.approve_review_session_sha256
             ).casefold(),
-            approved_source_revision=cast(
-                str, args.approve_source_revision
-            ).casefold(),
+            approved_source_revision=cast(str, args.approve_source_revision).casefold(),
         )
         current_revision = detect_source_revision()
         if current_revision.state != "git":
