@@ -91,7 +91,7 @@ def test_jmo_and_organizer_commands_share_the_same_entrypoint():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     scripts = project["project"]["scripts"]
 
-    assert scripts["jmo"] == "jellyfin_show_organizer.cli:main"
+    assert scripts["jmo"] == "jellyfin_show_organizer.entrypoint:main"
     assert scripts["organizer"] == scripts["jmo"]
 
 
