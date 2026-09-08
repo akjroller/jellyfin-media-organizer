@@ -98,7 +98,10 @@ class QuarantineGroup:
             raise ValueError("duplicate destination key cannot be empty")
         if not self.members:
             raise ValueError("quarantine groups require at least one member")
-        if sum(member.role is QuarantineMemberRole.VIDEO for member in self.members) != 1:
+        if (
+            sum(member.role is QuarantineMemberRole.VIDEO for member in self.members)
+            != 1
+        ):
             raise ValueError("quarantine groups require exactly one loser video")
         paths = [_path_key(member.source_relative_path) for member in self.members]
         if len(paths) != len(set(paths)):
@@ -164,7 +167,9 @@ class QuarantinePlan:
         return hashlib.sha256(self.canonical_bytes).hexdigest()
 
 
-def _record_source(record: Mapping[str, object], index: int) -> tuple[str, SourceFingerprint]:
+def _record_source(
+    record: Mapping[str, object], index: int
+) -> tuple[str, SourceFingerprint]:
     source = _mapping(record.get("source"), f"records[{index}].source")
     return (
         _string(source.get("relative_path"), f"records[{index}].source.relative_path"),
@@ -214,7 +219,9 @@ def _duplicate_strings(
     if len(candidate_keys) != len(candidates) or len(loser_keys) != len(losers):
         raise QuarantineContractError("duplicate candidate/loser paths must be unique")
     if winner_key not in candidate_keys or winner_key in loser_keys:
-        raise QuarantineContractError("duplicate winner/candidate state is inconsistent")
+        raise QuarantineContractError(
+            "duplicate winner/candidate state is inconsistent"
+        )
     if loser_keys != candidate_keys - {winner_key}:
         raise QuarantineContractError(
             "duplicate loser set must equal every non-winner candidate"
@@ -309,9 +316,7 @@ def derive_quarantine_plan(
             raise QuarantineContractError(
                 "duplicate winner must be an approved matched record"
             )
-        winner_source, winner_fingerprint = _record_source(
-            winner_record, winner_index
-        )
+        winner_source, winner_fingerprint = _record_source(winner_record, winner_index)
         winner_destination = _string(
             winner_record.get("destination"),
             f"records[{winner_index}].destination",
@@ -455,9 +460,7 @@ def load_quarantine_plan(payload: bytes) -> QuarantinePlan:
                 raw_member, f"groups[{group_index}].members[{member_index}]"
             )
             if set(member) != {"role", "source_relative_path", "fingerprint"}:
-                raise QuarantineContractError(
-                    "quarantine member has unexpected fields"
-                )
+                raise QuarantineContractError("quarantine member has unexpected fields")
             try:
                 role = QuarantineMemberRole(
                     _string(member.get("role"), "quarantine member role")
@@ -539,5 +542,7 @@ def quarantine_plan_from_paths(
     try:
         manifest = json.loads(open(plan_path, encoding="utf-8").read())
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ApplyExecutionError("could not load plan for quarantine derivation") from exc
+        raise ApplyExecutionError(
+            "could not load plan for quarantine derivation"
+        ) from exc
     return derive_quarantine_plan(manifest, prepared_apply)
