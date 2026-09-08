@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from importlib.resources import files
 from typing import Any, cast
 
@@ -14,14 +14,6 @@ _PLAN_SCHEMA_RESOURCES = {
     LEGACY_PLAN_SCHEMA_VERSION: "data/plan-schema-v2.json",
     PLAN_SCHEMA_VERSION: PLAN_SCHEMA_RESOURCE,
 }
-
-# The implementation core is the v3 serializer/validator from the review branch.
-# Bind its globals explicitly so the duplicate validator has Sequence available and
-# current plan serialization emits/validates schema v3. Legacy v2 validation is
-# intentionally separate below and never invents collision_class.
-setattr(_impl, "Sequence", Sequence)
-setattr(_impl, "PLAN_SCHEMA_VERSION", PLAN_SCHEMA_VERSION)
-setattr(_impl, "PLAN_SCHEMA_RESOURCE", PLAN_SCHEMA_RESOURCE)
 
 ManifestValidationError = _impl.ManifestValidationError
 canonical_records = _impl.canonical_records
