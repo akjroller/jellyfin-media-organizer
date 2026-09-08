@@ -338,9 +338,7 @@ def test_tampered_quarantine_journal_fields_are_rejected(
     value: object,
     message: str,
 ) -> None:
-    _source, _organized, _quarantine, prepared, journal = _complete_quarantine(
-        tmp_path
-    )
+    _source, _organized, _quarantine, prepared, journal = _complete_quarantine(tmp_path)
     lines = journal.read_text(encoding="utf-8").splitlines()
     lines[0] = _tamper(lines[0], field, value)
     tampered = tmp_path / "tampered.jsonl"
@@ -419,7 +417,9 @@ def test_restore_guards_tamper_and_completed_reentry(tmp_path: Path) -> None:
     assert again.members_restored == 0
 
     journal.write_bytes(journal.read_bytes() + b" \n")
-    with pytest.raises(QuarantineExecutionError, match="changed after restore approval"):
+    with pytest.raises(
+        QuarantineExecutionError, match="changed after restore approval"
+    ):
         execute_quarantine_restore(
             restore,
             source,
