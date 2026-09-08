@@ -8,9 +8,13 @@ from io import StringIO
 import pytest
 
 from jellyfin_show_organizer.models import (
+    CanonicalShow,
     DuplicateCollisionClass,
     DuplicateDecision,
+    MatchEvidence,
+    NumberingMode,
     OrganizerPlan,
+    ParseResult,
     PlanRecord,
     SourceFile,
     SourceFingerprint,
@@ -53,6 +57,14 @@ DESTINATION = "Fabricated Series/Season 01/Fabricated Series S01E01.mkv"
 FIRST = "Fabricated Series/A.mkv"
 SECOND = "Fabricated Series/B.mkv"
 CANDIDATES = (FIRST, SECOND)
+PARSE = ParseResult(series_hint="Fabricated Series", season=1, episodes=(1,))
+SHOW = CanonicalShow(
+    source_key="Fabricated Series",
+    tvmaze_id=4242,
+    title="Fabricated Series",
+    numbering_mode=NumberingMode.AIRED,
+)
+EVIDENCE = MatchEvidence(method="fabricated-test", confidence=1.0)
 
 
 def _source(path: str, *, size: int = 100, sha: str = "a" * 64) -> SourceFile:
@@ -81,29 +93,36 @@ def _decision(*, winner: str | None = FIRST) -> DuplicateDecision:
 
 def _plan(*, winner: str | None = FIRST, changed_second: bool = False) -> OrganizerPlan:
     decision = _decision(winner=winner)
-    first = PlanRecord(
-        source=_source(FIRST),
-        status=TerminalStatus.MATCHED if winner == FIRST else TerminalStatus.DUPLICATE,
-        destination=DESTINATION if winner == FIRST else None,
-        duplicate=decision,
-        reason=None if winner == FIRST else "non-destructive duplicate loser",
+
+    def record(path: str, *, changed: bool = False) -> PlanRecord:
+        is_winner = winner == path
+        status = (
+            TerminalStatus.MATCHED
+            if is_winner
+            else TerminalStatus.SUSPICIOUS
+            if winner is None
+            else TerminalStatus.DUPLICATE
+        )
+        return PlanRecord(
+            source=_source(
+                path,
+                size=101 if changed else 100,
+                sha="b" * 64 if changed else "a" * 64,
+            ),
+            status=status,
+            parse=PARSE if is_winner else None,
+            show=SHOW if is_winner else None,
+            evidence=EVIDENCE if is_winner else None,
+            destination=DESTINATION if is_winner else None,
+            duplicate=decision,
+            reason=None if is_winner else "fabricated duplicate state",
+        )
+
+    return OrganizerPlan(
+        schema_version=3,
+        overrides_version=5,
+        records=(record(FIRST), record(SECOND, changed=changed_second)),
     )
-    second = PlanRecord(
-        source=_source(
-            SECOND,
-            size=101 if changed_second else 100,
-            sha="b" * 64 if changed_second else "a" * 64,
-        ),
-        status=TerminalStatus.MATCHED
-        if winner == SECOND
-        else (
-            TerminalStatus.SUSPICIOUS if winner is None else TerminalStatus.DUPLICATE
-        ),
-        destination=DESTINATION if winner == SECOND else None,
-        duplicate=decision,
-        reason=None if winner == SECOND else "fabricated duplicate state",
-    )
-    return OrganizerPlan(schema_version=3, overrides_version=5, records=(first, second))
 
 
 def _catalog(
@@ -181,7 +200,7 @@ def test_reviewed_duplicate_rejects_changed_candidate_fingerprint() -> None:
 def test_reviewed_duplicate_rejects_disappeared_candidate_set() -> None:
     plan = _plan(winner=FIRST)
     catalog = _catalog(plan, action=DuplicateGroupAction.SELECT_WINNER, winner=FIRST)
-    current = replace(plan, records=(plan.records[0],))
+    current = replace(plan, records=())
 
     with pytest.raises(PlanningConfigurationError, match="no longer exists"):
         _apply_duplicate_group_contract(current, catalog)
@@ -454,7 +473,13 @@ def _answers_payload(entries: object) -> dict[str, object]:
             "review_ref must be a string",
         ),
         (
-            [{"review_ref": "r", "action": "", "expected_identity_sha256": "d" * 64}],
+            [
+                {
+                    "review_ref": "r",
+                    "action": "",
+                    "expected_identity_sha256": "d" * 64,
+                }
+            ],
             "action must be a string",
         ),
         (
