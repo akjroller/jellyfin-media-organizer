@@ -3,15 +3,15 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from importlib.resources import files
 from typing import Any, cast
 
 from .models import CompanionPlanRecord, OrganizerPlan, PlanRecord
 
-PLAN_SCHEMA_VERSION = 2
-PLAN_SCHEMA_RESOURCE = "data/plan-schema-v2.json"
+PLAN_SCHEMA_VERSION = 3
+PLAN_SCHEMA_RESOURCE = "data/plan-schema-v3.json"
 
 
 class ManifestValidationError(ValueError):
