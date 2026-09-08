@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Safety coverage for quarantine CLI approval and provenance guards.
+
 import argparse
 from pathlib import Path
 
