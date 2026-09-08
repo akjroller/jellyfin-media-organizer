@@ -199,7 +199,10 @@ def test_complete_quarantine_and_restore_is_byte_for_byte_reversible(
     assert result.members_moved == 4
     for relative in originals:
         assert not source.joinpath(*relative.split("/")).exists()
-        assert quarantine.joinpath(*relative.split("/")).read_bytes() == originals[relative]
+        assert (
+            quarantine.joinpath(*relative.split("/")).read_bytes()
+            == originals[relative]
+        )
 
     restore = prepare_quarantine_restore(prepared, journal)
     checked = execute_quarantine_restore(
