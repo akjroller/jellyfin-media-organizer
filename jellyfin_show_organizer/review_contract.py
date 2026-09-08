@@ -386,8 +386,6 @@ class _PayloadPathAdapter:
 
 
 def _load_legacy_payload(payload: bytes) -> OverrideCatalog:
-    # The existing loader remains the single authority for schemas 1-4.
-    # It currently requires a Path-like object and only calls read_bytes().
     adapter = cast(Path, _PayloadPathAdapter(payload))
     return _base.load_overrides(adapter)
 
@@ -612,30 +610,7 @@ def _compile_duplicate_item(raw: dict[str, Any], item: Any) -> None:
     groups.append(group)
 
 
-def _compile_held_item(raw: dict[str, Any], item: Any) -> None:
-    assert item.source is not None
-    assert item.source_binding_sha256 is not None
-    if item.action == "keep_held":
-        return
-    if item.action not in {"episode", "special", "extra"}:
-        raise ValueError("answered held item has an invalid stored action")
-
-    data = item.data
-    if item.action in {"episode", "special"}:
-        reviewed_episode = data.get("reviewed_episode")
-        if not isinstance(reviewed_episode, Mapping):
-            raise ValueError("reviewed held episode has no episode decision")
-        decision = copy.deepcopy(dict(reviewed_episode))
-        decision["source_binding_sha256"] = item.source_binding_sha256
-        target_table = "reviewed_episode_decisions"
-    else:
-        extra = data.get("extra")
-        if not isinstance(extra, Mapping):
-            raise ValueError("reviewed held extra has no extra decision")
-        decision = copy.deepcopy(dict(extra))
-        decision["source_binding_sha256"] = item.source_binding_sha256
-        target_table = "extra_decisions"
-
+def _clear_source_dispositions(raw: dict[str, Any], source: str) -> None:
     for table in (
         "source_holds",
         "episode_decisions",
@@ -643,12 +618,61 @@ def _compile_held_item(raw: dict[str, Any], item: Any) -> None:
         "extra_decisions",
         "duplicate_preferences",
     ):
-        _remove_source(raw, table, item.source)
+        _remove_source(raw, table, source)
+
+
+def _compile_held_item(raw: dict[str, Any], item: Any) -> None:
+    assert item.source is not None
+    assert item.source_binding_sha256 is not None
+    if item.action == "keep_held":
+        _clear_source_dispositions(raw, item.source)
+        cast(list[dict[str, Any]], raw["source_holds"]).append(
+            {
+                "source": item.source,
+                "reasons": ["human review chose to leave source untouched"],
+            }
+        )
+        return
+    if item.action not in {"episode", "multi_episode", "special", "extra"}:
+        raise ValueError("answered held item has an invalid stored action")
+
+    data = item.data
+    decisions: list[dict[str, Any]]
+    if item.action in {"episode", "special"}:
+        reviewed_episode = data.get("reviewed_episode")
+        if not isinstance(reviewed_episode, Mapping):
+            raise ValueError("reviewed held episode has no episode decision")
+        decision = copy.deepcopy(dict(reviewed_episode))
+        decision["source_binding_sha256"] = item.source_binding_sha256
+        decisions = [decision]
+        target_table = "reviewed_episode_decisions"
+    elif item.action == "multi_episode":
+        reviewed_episodes = data.get("reviewed_episodes")
+        if not isinstance(reviewed_episodes, list) or len(reviewed_episodes) < 2:
+            raise ValueError("reviewed compound source has no provider episode set")
+        decisions = []
+        for reviewed_episode in reviewed_episodes:
+            if not isinstance(reviewed_episode, Mapping):
+                raise ValueError("reviewed compound episode entry is invalid")
+            decision = copy.deepcopy(dict(reviewed_episode))
+            decision["source_binding_sha256"] = item.source_binding_sha256
+            decisions.append(decision)
+        target_table = "reviewed_episode_decisions"
+    else:
+        extra = data.get("extra")
+        if not isinstance(extra, Mapping):
+            raise ValueError("reviewed held extra has no extra decision")
+        decision = copy.deepcopy(dict(extra))
+        decision["source_binding_sha256"] = item.source_binding_sha256
+        decisions = [decision]
+        target_table = "extra_decisions"
+
+    _clear_source_dispositions(raw, item.source)
     show = data.get("show")
     if not isinstance(show, Mapping):
         raise ValueError("reviewed held decision is missing show metadata")
     _upsert_show(raw, cast(Mapping[str, object], show))
-    cast(list[dict[str, Any]], raw[target_table]).append(decision)
+    cast(list[dict[str, Any]], raw[target_table]).extend(decisions)
 
 
 def compile_active_overrides(session: ReviewSession) -> bytes:
@@ -677,7 +701,6 @@ def compile_active_overrides(session: ReviewSession) -> bytes:
     raw["review_base_plan_sha256"] = session.plan_sha256
     raw["review_base_override_snapshot"] = session.base_override_snapshot
     payload = render_active_overrides(raw)
-    # Compiler output must itself satisfy the active schema before publication.
     loaded = load_review_contract_payload(payload)
     if not isinstance(loaded, ReviewContractCatalog):
         raise ValueError("compiled review session did not produce schema 5")
