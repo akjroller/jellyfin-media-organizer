@@ -41,7 +41,7 @@ reasons = ["reviewed preferred source"]
 
 A preference may be supplied for only the intended winner. Missing preference entries on the other candidates are not treated as implicit quality evidence. If more than one candidate has the same highest explicit rank, the group remains suspicious. If no unique highest explicit rank exists, planning does not invent a winner.
 
-The planner also rejects stale or unsafe preference entries. A configured source must exist as a movable plan candidate and must actually participate in a duplicate collision. This prevents a preference file from silently drifting away from the plan it was reviewed against.
+The planner also rejects stale or unsafe preference entries. A configured source must exist in the current inventory. When that source is movable, it must actually participate in a duplicate collision. If an independent blocking finding temporarily makes the source non-movable, the preference remains dormant and the original finding stays visible; it cannot turn the blocked source into a match or hide the blocker. This preserves reviewed duplicate evidence across a fail-closed reclassification without allowing an unknown or unrelated source preference to drift into the plan.
 
 ## Determinism and audit evidence
 

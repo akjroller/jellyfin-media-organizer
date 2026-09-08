@@ -333,6 +333,25 @@ def test_multiple_sources_cannot_collapse_to_same_provider_episode() -> None:
     assert not analysis.one_to_one
 
 
+def test_duplicate_releases_of_same_coordinate_do_not_poison_group_proof() -> None:
+    parses = (
+        *_parses(),
+        ParseResult(
+            series_hint="Example Series",
+            season=1,
+            episodes=(5,),
+            title_hint="Fifth Story AAC2 0",
+        ),
+    )
+
+    analysis = analyze_segment_counted_titles(parses, _correct_catalog())
+
+    assert analysis.proven
+    assert analysis.eligible_count == 4
+    assert analysis.exact_match_count == 4
+    assert analysis.one_to_one
+
+
 def test_provider_episode_duplicate_guard_runs_after_title_remap() -> None:
     sources = (
         *_sources(),

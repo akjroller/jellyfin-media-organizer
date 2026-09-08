@@ -73,7 +73,7 @@ Supported numbering policies are explicit:
 - `absolute` and `parenthesized-absolute` map through deterministic regular-episode catalog order while leaving specials outside that sequence;
 - `segment-title` preserves segment hints and requires exact normalized catalog-title evidence.
 
-Multi-episode sources preserve every requested episode in deterministic source order and remain one source assignment. A missing member prevents a partial match. Mixed numbering evidence, configured-policy conflicts, conflicting provider identities, malformed or duplicate catalog entries, and distinct segments that collapse to the same provider episode fail closed as suspicious or unresolved with stable reasons.
+Multi-episode sources preserve every requested episode in deterministic source order and remain one source assignment. A missing member prevents a partial match. For a single parsed aired coordinate, a meaningful filename title that uniquely or strongly identifies a different catalog episode, or that contains multiple independent catalog episode titles, blocks the coordinate match. Technical-only labels and uncataloged release text do not create a contradiction, and an explicit exact-source episode decision remains authoritative. Mixed numbering evidence, configured-policy conflicts, conflicting provider identities, malformed or duplicate catalog entries, and distinct segments that collapse to the same provider episode fail closed as suspicious or unresolved with stable reasons.
 
 Assignment evidence records the active numbering policy, cached catalog request identity, and provider episode mappings so later immutable plans and audit reports can explain the decision without rerunning provider discovery.
 

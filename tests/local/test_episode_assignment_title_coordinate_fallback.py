@@ -168,3 +168,194 @@ def test_multi_episode_source_does_not_use_single_title_fallback() -> None:
     assert result.status is AssignmentStatus.UNRESOLVED
     assert assignment.status is AssignmentStatus.UNRESOLVED
     assert "missing-aired-catalog-entry:S02E05" in assignment.evidence.reasons
+
+
+def test_existing_coordinate_with_contradictory_title_fails_closed() -> None:
+    provider = FixtureProvider(
+        (
+            _episode("wrong-coordinate", 2, 5, "Unrelated Episode"),
+            _episode("title-match", 2024, 11, "A Unique Episode Title"),
+        )
+    )
+
+    result = assign_episode_group_with_provider(
+        _show(),
+        (
+            SourceEpisodeInput(
+                "episode.mkv",
+                ParseResult(
+                    season=2,
+                    episodes=(5,),
+                    title_hint="A Unique Episode Title",
+                ),
+            ),
+        ),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert result.status is AssignmentStatus.SUSPICIOUS
+    assert assignment.status is AssignmentStatus.SUSPICIOUS
+    assert not assignment.episodes
+    assert (
+        "catalog-coordinate-title-conflict:unique-exact-title-elsewhere"
+        in assignment.evidence.reasons
+    )
+
+
+def test_release_metadata_only_hint_does_not_create_title_conflict() -> None:
+    provider = FixtureProvider((_episode("target", 2, 5, "Provider Episode"),))
+
+    result = assign_episode_group_with_provider(
+        _show(),
+        (
+            SourceEpisodeInput(
+                "episode.mkv",
+                ParseResult(
+                    season=2,
+                    episodes=(5,),
+                    title_hint="English Dub CR",
+                ),
+            ),
+        ),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].identity.value == "target"
+
+
+def test_unrelated_title_without_catalog_support_does_not_create_conflict() -> None:
+    provider = FixtureProvider((_episode("target", 2, 5, "Provider Episode"),))
+
+    result = assign_episode_group_with_provider(
+        _show(),
+        (
+            SourceEpisodeInput(
+                "episode.mkv",
+                ParseResult(
+                    season=2,
+                    episodes=(5,),
+                    title_hint="Uncataloged Release Label",
+                ),
+            ),
+        ),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].identity.value == "target"
+
+
+def test_compound_catalog_titles_do_not_collapse_to_one_episode() -> None:
+    provider = FixtureProvider(
+        (
+            _episode("first", 2, 5, "First Story"),
+            _episode("second", 2, 6, "Second Story"),
+        )
+    )
+
+    result = assign_episode_group_with_provider(
+        _show(),
+        (
+            SourceEpisodeInput(
+                "episode.mkv",
+                ParseResult(
+                    season=2,
+                    episodes=(5,),
+                    title_hint="First Story - Second Story",
+                ),
+            ),
+        ),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.SUSPICIOUS
+    assert not assignment.episodes
+    assert (
+        "catalog-coordinate-title-conflict:contained-catalog-titles:2"
+        in assignment.evidence.reasons
+    )
+
+
+def test_selected_full_title_is_not_confused_with_nested_catalog_title() -> None:
+    provider = FixtureProvider(
+        (
+            _episode("target", 2, 5, "King of the Stone World"),
+            _episode("nested-title", 2, 6, "Stone World"),
+        )
+    )
+
+    result = assign_episode_group_with_provider(
+        _show(),
+        (
+            SourceEpisodeInput(
+                "episode.mkv",
+                ParseResult(
+                    season=2,
+                    episodes=(5,),
+                    title_hint="King of the Stone World",
+                ),
+            ),
+        ),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].identity.value == "target"
+
+
+def test_selected_title_with_release_suffix_is_not_a_conflict() -> None:
+    provider = FixtureProvider(
+        (
+            _episode("target", 2, 5, "Provider Episode"),
+            _episode("other", 2, 6, "Different Episode"),
+        )
+    )
+
+    result = assign_episode_group_with_provider(
+        _show(),
+        (
+            SourceEpisodeInput(
+                "episode.mkv",
+                ParseResult(
+                    season=2,
+                    episodes=(5,),
+                    title_hint="Provider Episode BR HDR10",
+                ),
+            ),
+        ),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].identity.value == "target"
+
+
+def test_explicit_episode_decision_is_not_rejected_by_title_hint() -> None:
+    provider = FixtureProvider((_episode("target", 2, 5, "Provider Episode"),))
+
+    result = assign_episode_group_with_provider(
+        _show(),
+        (
+            SourceEpisodeInput(
+                "episode.mkv",
+                ParseResult(
+                    season=2,
+                    episodes=(5,),
+                    title_hint="Alternate Release Title",
+                ),
+                explicit_decision=True,
+            ),
+        ),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].identity.value == "target"
