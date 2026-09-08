@@ -9,9 +9,9 @@ The release-candidate gates use fabricated files created beneath temporary test 
 The ready corpus contains 15 video records and four companion records. Its approved plan-only context is:
 
 - tool version: `0.1.0`;
-- plan schema: `2`;
+- plan schema: `3`;
 - provider cache: ten successful synthetic snapshots;
-- immutable plan hash: `0a3574b94ef9ba0b6bbfa115678ada2b9cf82291bdd23cdeae7df4015b36beff`.
+- immutable plan hash: `f7b6a0a8db1d676f35fadd6f24001eb40b268639065ad7d10682f1be38d2dd7b`.
 
 The test fixes all synthetic timestamps and the cache clock, regenerates the exact approved hash, and then repeats the plan against the warmed cache in offline mode. Offline replay must make zero provider calls and reproduce identical plan JSON, summary output, provenance, and plan hash. Both source snapshots remain unchanged and the destination roots remain empty.
 
