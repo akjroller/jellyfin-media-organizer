@@ -181,7 +181,9 @@ def _validate_roots(
     organized = _validated_root(organized_root, "organized")
     quarantine = _validated_root(quarantine_root, "quarantine")
     if quarantine == source or quarantine.is_relative_to(source):
-        raise QuarantineExecutionError("quarantine root must be outside the source root")
+        raise QuarantineExecutionError(
+            "quarantine root must be outside the source root"
+        )
     if quarantine == organized or quarantine.is_relative_to(organized):
         raise QuarantineExecutionError(
             "quarantine root must be outside the organized library root"
@@ -253,7 +255,9 @@ def _member_state(
     source_root: Path,
     quarantine_root: Path,
 ) -> str:
-    source = _candidate_path(source_root, member.source_relative_path, require_parent=False)
+    source = _candidate_path(
+        source_root, member.source_relative_path, require_parent=False
+    )
     quarantined = _candidate_path(
         quarantine_root, member.source_relative_path, require_parent=False
     )
@@ -320,9 +324,7 @@ def quarantine_token(
         source_root, organized_root, quarantine_root
     )
     roots = hashlib.sha256(
-        (str(source) + "\0" + str(organized) + "\0" + str(quarantine)).encode(
-            "utf-8"
-        )
+        (str(source) + "\0" + str(organized) + "\0" + str(quarantine)).encode("utf-8")
     ).hexdigest()
     return ":".join(
         (
@@ -346,9 +348,7 @@ def quarantine_restore_token(
         source_root, organized_root, quarantine_root
     )
     roots = hashlib.sha256(
-        (str(source) + "\0" + str(organized) + "\0" + str(quarantine)).encode(
-            "utf-8"
-        )
+        (str(source) + "\0" + str(organized) + "\0" + str(quarantine)).encode("utf-8")
     ).hexdigest()
     return ":".join(
         (
@@ -395,7 +395,9 @@ class _QuarantineJournal:
         self.entries: list[dict[str, object]] = []
         if resume:
             if not path.is_file():
-                raise QuarantineExecutionError("resume quarantine journal does not exist")
+                raise QuarantineExecutionError(
+                    "resume quarantine journal does not exist"
+                )
             self.entries = self._read()
         elif os.path.lexists(path):
             raise QuarantineExecutionError(
@@ -430,7 +432,9 @@ class _QuarantineJournal:
                     "quarantine journal belongs to another quarantine plan"
                 )
             if entry.get("plan_sha256") != self.prepared.plan.plan_sha256:
-                raise QuarantineExecutionError("quarantine journal belongs to another plan")
+                raise QuarantineExecutionError(
+                    "quarantine journal belongs to another plan"
+                )
             if (
                 entry.get("review_session_sha256")
                 != self.prepared.plan.review_session_sha256
@@ -523,7 +527,9 @@ class _RestoreJournal:
                 raise QuarantineExecutionError("resume restore journal does not exist")
             self.entries = self._read()
         elif os.path.lexists(path):
-            raise QuarantineExecutionError("restore journal already exists; use --resume")
+            raise QuarantineExecutionError(
+                "restore journal already exists; use --resume"
+            )
 
     def _read(self) -> list[dict[str, object]]:
         try:
@@ -541,9 +547,13 @@ class _RestoreJournal:
             if entry.get("schema_version") != QUARANTINE_RESTORE_JOURNAL_SCHEMA_VERSION:
                 raise QuarantineExecutionError("unsupported restore journal schema")
             if entry.get("sequence") != sequence:
-                raise QuarantineExecutionError("restore journal sequence is not contiguous")
+                raise QuarantineExecutionError(
+                    "restore journal sequence is not contiguous"
+                )
             if entry.get("event") not in _RESTORE_EVENTS:
-                raise QuarantineExecutionError("restore journal contains an unknown event")
+                raise QuarantineExecutionError(
+                    "restore journal contains an unknown event"
+                )
             if (
                 entry.get("quarantine_plan_sha256")
                 != self.prepared.prepared.plan.sha256
@@ -686,7 +696,9 @@ def _validate_pending_member(
 ) -> None:
     if _member_state(member, source_root, quarantine_root) != "pending":
         raise QuarantineExecutionError("duplicate loser is not in pending source state")
-    source = _candidate_path(source_root, member.source_relative_path, require_parent=True)
+    source = _candidate_path(
+        source_root, member.source_relative_path, require_parent=True
+    )
     parent = quarantine_root
     for part in _parts(member.source_relative_path)[:-1]:
         candidate = parent / part
@@ -778,7 +790,9 @@ def execute_quarantine(
     members_total = sum(len(group.members) for group in prepared.plan.groups)
     if check_only:
         if resume:
-            raise QuarantineExecutionError("--check-only cannot be combined with --resume")
+            raise QuarantineExecutionError(
+                "--check-only cannot be combined with --resume"
+            )
         preapply, organized = _validate_check(
             prepared, source_root, organized_root, quarantine_root
         )
@@ -818,7 +832,9 @@ def execute_quarantine(
                     "at its approved organized destination"
                 )
             if organized != len(prepared.plan.groups):
-                raise QuarantineExecutionError("not every duplicate winner is organized")
+                raise QuarantineExecutionError(
+                    "not every duplicate winner is organized"
+                )
             journal.append("run-started", result="started")
         state = journal.state()
         if state.run_completed:
@@ -828,7 +844,10 @@ def execute_quarantine(
                         "completed quarantine winner state no longer matches"
                     )
                 for member in group.members:
-                    if _member_state(member, source_root, quarantine_root) != "quarantined":
+                    if (
+                        _member_state(member, source_root, quarantine_root)
+                        != "quarantined"
+                    ):
                         raise QuarantineExecutionError(
                             "completed quarantine member state no longer matches"
                         )
@@ -855,7 +874,10 @@ def execute_quarantine(
                         "reviewed winner changed after duplicate quarantine"
                     )
                 for member in group.members:
-                    if _member_state(member, source_root, quarantine_root) != "quarantined":
+                    if (
+                        _member_state(member, source_root, quarantine_root)
+                        != "quarantined"
+                    ):
                         raise QuarantineExecutionError(
                             "completed quarantine group no longer matches filesystem"
                         )
@@ -920,10 +942,15 @@ def execute_quarantine(
                         source_root, member.source_relative_path, require_parent=True
                     )
                     quarantined = _candidate_path(
-                        quarantine_root, member.source_relative_path, require_parent=True
+                        quarantine_root,
+                        member.source_relative_path,
+                        require_parent=True,
                     )
                     _atomic_rename_no_replace(source, quarantined)
-                    if _member_state(member, source_root, quarantine_root) != "quarantined":
+                    if (
+                        _member_state(member, source_root, quarantine_root)
+                        != "quarantined"
+                    ):
                         raise QuarantineExecutionError(
                             "quarantine destination verification failed"
                         )
@@ -961,7 +988,11 @@ def execute_quarantine(
                         result="incomplete",
                         detail=(
                             f"{type(exc).__name__}: {exc}; rollback_failures="
-                            + (" | ".join(rollback_failures) if rollback_failures else "none")
+                            + (
+                                " | ".join(rollback_failures)
+                                if rollback_failures
+                                else "none"
+                            )
                         ),
                         recovery=recovery,
                     )
@@ -1084,7 +1115,9 @@ def execute_quarantine_restore(
         )
     if check_only:
         if resume:
-            raise QuarantineExecutionError("--check-only cannot be combined with --resume")
+            raise QuarantineExecutionError(
+                "--check-only cannot be combined with --resume"
+            )
         _restore_all_state(prepared, source_root, quarantine_root, "pending")
         return QuarantineRestoreResult(
             quarantine_plan_sha256=prepared.prepared.plan.sha256,
@@ -1132,7 +1165,10 @@ def execute_quarantine_restore(
         for group in reversed(prepared.prepared.plan.groups):
             if group.group_id in completed_groups:
                 for member in group.members:
-                    if _restore_state(member, source_root, quarantine_root) != "restored":
+                    if (
+                        _restore_state(member, source_root, quarantine_root)
+                        != "restored"
+                    ):
                         raise QuarantineExecutionError(
                             "completed restore group no longer matches filesystem"
                         )
@@ -1176,9 +1212,14 @@ def execute_quarantine_restore(
                         source_root, member.source_relative_path, require_parent=True
                     )
                     quarantined = _candidate_path(
-                        quarantine_root, member.source_relative_path, require_parent=True
+                        quarantine_root,
+                        member.source_relative_path,
+                        require_parent=True,
                     )
-                    if _restore_state(member, source_root, quarantine_root) != "pending":
+                    if (
+                        _restore_state(member, source_root, quarantine_root)
+                        != "pending"
+                    ):
                         raise QuarantineExecutionError(
                             "restore member changed immediately before restore"
                         )
@@ -1189,7 +1230,10 @@ def execute_quarantine_restore(
                         result="started",
                     )
                     _atomic_rename_no_replace(quarantined, source)
-                    if _restore_state(member, source_root, quarantine_root) != "restored":
+                    if (
+                        _restore_state(member, source_root, quarantine_root)
+                        != "restored"
+                    ):
                         raise QuarantineExecutionError(
                             "restored duplicate loser fingerprint is invalid"
                         )
