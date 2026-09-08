@@ -32,7 +32,7 @@ from jellyfin_show_organizer.review_execution import (
     PlanningConfigurationError,
     _reviewed_episode_record,
 )
-from jellyfin_show_organizer.review_session import ReviewItemKind
+from jellyfin_show_organizer.review_session import ReviewItemKind, ReviewSession
 from jellyfin_show_organizer.review_system import run_review_system
 from jellyfin_show_organizer.schema import PLAN_SCHEMA_VERSION, plan_to_manifest
 
@@ -139,7 +139,7 @@ def _base_snapshot() -> str:
     return load_review_contract_payload(EMPTY_BASE).snapshot_id
 
 
-def _review_compound(tmp_path: Path) -> tuple[object, bytes, OrganizerPlan]:
+def _review_compound(tmp_path: Path) -> tuple[ReviewSession, bytes, OrganizerPlan]:
     plan = _plan()
     manifest = plan_to_manifest(plan)
     session_path = tmp_path / "session.json"
