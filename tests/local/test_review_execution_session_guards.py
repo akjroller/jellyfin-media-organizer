@@ -291,7 +291,9 @@ def test_reviewed_plan_rejects_existing_or_uncreatable_output(tmp_path: Path) ->
     existing = tmp_path / "existing-output"
     existing.mkdir()
 
-    with pytest.raises(PlanningConfigurationError, match="output directory already exists"):
+    with pytest.raises(
+        PlanningConfigurationError, match="output directory already exists"
+    ):
         execute_plan(
             PlanningConfig(
                 shows_root=shows,
