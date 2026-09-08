@@ -66,7 +66,11 @@ def _decision(*, winner: str | None = FIRST) -> DuplicateDecision:
         destination_key=DESTINATION,
         candidates=CANDIDATES,
         winner=winner,
-        losers=(() if winner is None else tuple(item for item in CANDIDATES if item != winner)),
+        losers=(
+            ()
+            if winner is None
+            else tuple(item for item in CANDIDATES if item != winner)
+        ),
         confidence=0.9 if winner is not None else 0.5,
         evidence=("fabricated duplicate review evidence",),
         collision_class=DuplicateCollisionClass.SAME_LOGICAL_IDENTITY,
@@ -88,7 +92,9 @@ def _plan(*, winner: str | None = FIRST, changed_second: bool = False) -> Organi
             size=101 if changed_second else 100,
             sha="b" * 64 if changed_second else "a" * 64,
         ),
-        status=TerminalStatus.MATCHED if winner == SECOND else (
+        status=TerminalStatus.MATCHED
+        if winner == SECOND
+        else (
             TerminalStatus.SUSPICIOUS if winner is None else TerminalStatus.DUPLICATE
         ),
         destination=DESTINATION if winner == SECOND else None,
@@ -98,7 +104,9 @@ def _plan(*, winner: str | None = FIRST, changed_second: bool = False) -> Organi
     return OrganizerPlan(schema_version=3, overrides_version=5, records=(first, second))
 
 
-def _catalog(plan: OrganizerPlan, *, action: DuplicateGroupAction, winner: str | None) -> ReviewContractCatalog:
+def _catalog(
+    plan: OrganizerPlan, *, action: DuplicateGroupAction, winner: str | None
+) -> ReviewContractCatalog:
     decision = plan.records[0].duplicate
     assert decision is not None
     ref = stable_duplicate_ref(decision.destination_key, decision.candidates)
@@ -139,9 +147,16 @@ def test_reviewed_duplicate_keep_all_makes_every_candidate_nonmoving() -> None:
 
     assert updated is not plan
     assert {record.status for record in updated.records} == {TerminalStatus.DUPLICATE}
-    assert all(record.destination is None or record.source.relative_path == FIRST for record in updated.records)
+    assert all(
+        record.destination is None or record.source.relative_path == FIRST
+        for record in updated.records
+    )
     assert all(record.duplicate is not None for record in updated.records)
-    assert all(record.duplicate.winner is None for record in updated.records if record.duplicate)
+    assert all(
+        record.duplicate.winner is None
+        for record in updated.records
+        if record.duplicate
+    )
     assert all("keep-all" in (record.reason or "") for record in updated.records)
 
 
@@ -183,7 +198,10 @@ def test_reviewed_duplicate_rejects_different_planner_winner() -> None:
         _apply_duplicate_group_contract(current, catalog)
 
 
-def _review_session(*, collision_class: ReviewCollisionClass = ReviewCollisionClass.SAME_LOGICAL_IDENTITY) -> ReviewSession:
+def _review_session(
+    *,
+    collision_class: ReviewCollisionClass = ReviewCollisionClass.SAME_LOGICAL_IDENTITY,
+) -> ReviewSession:
     ref = stable_duplicate_ref(DESTINATION, CANDIDATES)
     return ReviewSession(
         schema_version=REVIEW_SESSION_SCHEMA_VERSION,
@@ -214,7 +232,11 @@ def _review_group(
         destination_key=DESTINATION,
         candidates=CANDIDATES,
         recommended_winner=recommended,
-        losers=(() if recommended is None else tuple(item for item in CANDIDATES if item != recommended)),
+        losers=(
+            ()
+            if recommended is None
+            else tuple(item for item in CANDIDATES if item != recommended)
+        ),
         evidence=("fabricated duplicate evidence",),
         collision_class=collision_class,
     )
@@ -234,17 +256,6 @@ def _manifest_record(path: str) -> dict[str, object]:
             "reasons": ["fabricated evidence"],
         },
     }
-
-
-def _answer(action: str, *, winner: str | None = None, responses: tuple[str, ...] = ()) -> ReviewAnswer:
-    session = _review_session()
-    return ReviewAnswer(
-        review_ref=session.items[0].review_ref,
-        action=action,
-        expected_identity_sha256=session.items[0].identity_sha256,
-        winner=winner,
-        responses=responses,
-    )
 
 
 @pytest.mark.parametrize(
@@ -405,15 +416,68 @@ def _answers_payload(entries: object) -> dict[str, object]:
     [
         ({}, "answers must be an array"),
         (["bad"], "answer entries must be objects"),
-        ([{"review_ref": "r", "action": "defer", "expected_identity_sha256": "d" * 64, "bogus": True}], "unsupported fields"),
-        ([{"review_ref": "", "action": "defer", "expected_identity_sha256": "d" * 64}], "review_ref must be a string"),
-        ([{"review_ref": "r", "action": "", "expected_identity_sha256": "d" * 64}], "action must be a string"),
-        ([{"review_ref": "r", "action": "defer", "expected_identity_sha256": "d" * 64, "winner": 4}], "winner must be a string"),
-        ([{"review_ref": "r", "action": "defer", "expected_identity_sha256": "d" * 64, "responses": [1]}], "responses must be strings"),
-        ([{"review_ref": "r", "action": "defer", "expected_identity_sha256": "short"}], "64 hex characters"),
+        (
+            [
+                {
+                    "review_ref": "r",
+                    "action": "defer",
+                    "expected_identity_sha256": "d" * 64,
+                    "bogus": True,
+                }
+            ],
+            "unsupported fields",
+        ),
+        (
+            [
+                {
+                    "review_ref": "",
+                    "action": "defer",
+                    "expected_identity_sha256": "d" * 64,
+                }
+            ],
+            "review_ref must be a string",
+        ),
+        (
+            [{"review_ref": "r", "action": "", "expected_identity_sha256": "d" * 64}],
+            "action must be a string",
+        ),
+        (
+            [
+                {
+                    "review_ref": "r",
+                    "action": "defer",
+                    "expected_identity_sha256": "d" * 64,
+                    "winner": 4,
+                }
+            ],
+            "winner must be a string",
+        ),
+        (
+            [
+                {
+                    "review_ref": "r",
+                    "action": "defer",
+                    "expected_identity_sha256": "d" * 64,
+                    "responses": [1],
+                }
+            ],
+            "responses must be strings",
+        ),
+        (
+            [
+                {
+                    "review_ref": "r",
+                    "action": "defer",
+                    "expected_identity_sha256": "short",
+                }
+            ],
+            "64 hex characters",
+        ),
     ],
 )
-def test_review_answer_file_rejects_invalid_entries(entries: object, message: str) -> None:
+def test_review_answer_file_rejects_invalid_entries(
+    entries: object, message: str
+) -> None:
     with pytest.raises(ReviewConfigurationError, match=message):
         load_review_answers(json.dumps(_answers_payload(entries)).encode())
 
