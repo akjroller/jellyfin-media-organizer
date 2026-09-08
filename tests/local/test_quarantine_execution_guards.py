@@ -237,7 +237,7 @@ def test_loser_ambiguities_are_rejected(tmp_path: Path) -> None:
     (source / "Release" / "loser.mkv").unlink()
     quarantined = quarantine / "Release" / "loser.mkv"
     quarantined.parent.mkdir()
-    quarantined.write_bytes(b"wrong")
+    quarantined.write_bytes(b"definitely-wrong")
     with pytest.raises(QuarantineExecutionError, match="fingerprint is invalid"):
         execute_quarantine(
             prepared,
