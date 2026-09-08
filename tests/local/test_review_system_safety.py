@@ -111,9 +111,7 @@ def _duplicate_manifest(
     second = _candidate(
         "B",
         logical_identity=(
-            "tvmaze:4242:episode:9002"
-            if cross_identity
-            else "tvmaze:4242:episode:9001"
+            "tvmaze:4242:episode:9002" if cross_identity else "tvmaze:4242:episode:9001"
         ),
         sha256="a" * 64 if winner else None,
     )
@@ -237,8 +235,7 @@ def test_automatic_duplicate_winner_record_order_does_not_break_session_creation
     ]
     assert len(duplicate_items) == 1
     assert (
-        duplicate_items[0].collision_class
-        is ReviewCollisionClass.SAME_LOGICAL_IDENTITY
+        duplicate_items[0].collision_class is ReviewCollisionClass.SAME_LOGICAL_IDENTITY
     )
 
 
