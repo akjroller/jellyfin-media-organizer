@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
+from dataclasses import asdict
 from importlib.resources import files
 from typing import Any, cast
 
 from . import _schema_v3_impl as _impl
+from .models import OrganizerPlan
 
 PLAN_SCHEMA_VERSION = 3
 LEGACY_PLAN_SCHEMA_VERSION = 2
@@ -18,9 +21,57 @@ _PLAN_SCHEMA_RESOURCES = {
 ManifestValidationError = _impl.ManifestValidationError
 canonical_records = _impl.canonical_records
 canonical_companions = _impl.canonical_companions
-plan_to_manifest = _impl.plan_to_manifest
-canonical_manifest_bytes = _impl.canonical_manifest_bytes
-stable_plan_hash = _impl.stable_plan_hash
+
+
+def plan_to_manifest(plan: OrganizerPlan) -> dict[str, Any]:
+    """Serialize one plan using its declared immutable schema version."""
+
+    provenance = asdict(plan.provenance) if plan.provenance is not None else None
+    if provenance is not None:
+        provenance["cache_snapshots"] = sorted(
+            provenance["cache_snapshots"],
+            key=lambda item: (
+                item["provider"],
+                item["kind"],
+                item["request_key"],
+                item["snapshot_id"],
+            ),
+        )
+    payload = cast(
+        dict[str, Any],
+        json.loads(
+            json.dumps(
+                {
+                    "schema_version": plan.schema_version,
+                    "overrides_version": plan.overrides_version,
+                    "provenance": provenance,
+                    "records": [
+                        _impl._serialize_record_v1(record)
+                        for record in canonical_records(plan)
+                    ],
+                    "companions": [
+                        asdict(record) for record in canonical_companions(plan)
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        ),
+    )
+    validate_manifest(payload)
+    return payload
+
+
+def canonical_manifest_bytes(plan: OrganizerPlan) -> bytes:
+    return json.dumps(
+        plan_to_manifest(plan),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def stable_plan_hash(plan: OrganizerPlan) -> str:
+    return hashlib.sha256(canonical_manifest_bytes(plan)).hexdigest()
 
 
 def load_plan_schema(version: int = PLAN_SCHEMA_VERSION) -> dict[str, Any]:
