@@ -39,6 +39,7 @@ def _write(root: Path, relative: str, payload: bytes) -> Path:
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, PreparedQuarantine]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     source = tmp_path / "source"
     organized = tmp_path / "organized"
     quarantine = tmp_path / "quarantine"
@@ -140,14 +141,8 @@ def test_check_only_supports_preapply_then_requires_organized_winners_for_mutati
     tmp_path: Path,
 ) -> None:
     source, organized, quarantine, prepared = _fixture(tmp_path)
-
     checked = execute_quarantine(
-        prepared,
-        source,
-        organized,
-        quarantine,
-        journal_path=None,
-        check_only=True,
+        prepared, source, organized, quarantine, journal_path=None, check_only=True
     )
     assert checked.winners_preapply == 3
     assert checked.winners_organized == 0
@@ -163,12 +158,7 @@ def test_check_only_supports_preapply_then_requires_organized_winners_for_mutati
 
     _organize_winners(source, organized, prepared)
     checked = execute_quarantine(
-        prepared,
-        source,
-        organized,
-        quarantine,
-        journal_path=None,
-        check_only=True,
+        prepared, source, organized, quarantine, journal_path=None, check_only=True
     )
     assert checked.winners_preapply == 0
     assert checked.winners_organized == 3
@@ -189,11 +179,7 @@ def test_complete_quarantine_and_restore_is_byte_for_byte_reversible(
     journal = tmp_path / "quarantine.jsonl"
 
     result = execute_quarantine(
-        prepared,
-        source,
-        organized,
-        quarantine,
-        journal_path=journal,
+        prepared, source, organized, quarantine, journal_path=journal
     )
     assert result.groups_completed == 3
     assert result.members_moved == 4
@@ -236,44 +222,28 @@ def test_missing_winner_changed_loser_and_quarantine_collision_fail_closed(
     source.joinpath("Show", "release-winner.mkv").unlink()
     with pytest.raises(QuarantineExecutionError, match="winner is missing"):
         execute_quarantine(
-            prepared,
-            source,
-            organized,
-            quarantine,
-            journal_path=None,
-            check_only=True,
+            prepared, source, organized, quarantine, journal_path=None, check_only=True
         )
 
     source, organized, quarantine, prepared = _fixture(tmp_path / "changed")
     source.joinpath("Show", "release-loser-a.mkv").write_bytes(b"changed loser")
     with pytest.raises(QuarantineExecutionError, match="fingerprint"):
         execute_quarantine(
-            prepared,
-            source,
-            organized,
-            quarantine,
-            journal_path=None,
-            check_only=True,
+            prepared, source, organized, quarantine, journal_path=None, check_only=True
         )
 
     source, organized, quarantine, prepared = _fixture(tmp_path / "collision")
     _write(quarantine, "Show/release-loser-a.mkv", b"occupied")
     with pytest.raises(QuarantineExecutionError, match="both source and quarantine"):
         execute_quarantine(
-            prepared,
-            source,
-            organized,
-            quarantine,
-            journal_path=None,
-            check_only=True,
+            prepared, source, organized, quarantine, journal_path=None, check_only=True
         )
 
 
 def test_changed_companion_blocks_group_before_video_moves(tmp_path: Path) -> None:
     source, organized, quarantine, prepared = _fixture(tmp_path)
     _organize_winners(source, organized, prepared)
-    companion = source.joinpath("Show", "release-loser-a.en.srt")
-    companion.write_bytes(b"changed companion")
+    source.joinpath("Show", "release-loser-a.en.srt").write_bytes(b"changed companion")
 
     with pytest.raises(QuarantineExecutionError, match="fingerprint"):
         execute_quarantine(
@@ -283,7 +253,6 @@ def test_changed_companion_blocks_group_before_video_moves(tmp_path: Path) -> No
             quarantine,
             journal_path=tmp_path / "quarantine.jsonl",
         )
-
     assert source.joinpath("Show", "release-loser-a.mkv").is_file()
     assert not quarantine.joinpath("Show", "release-loser-a.mkv").exists()
 
@@ -309,11 +278,7 @@ def test_quarantine_crash_after_atomic_move_is_adopted_on_resume(
     )
     with pytest.raises(QuarantineExecutionError, match="interrupted safely"):
         execute_quarantine(
-            prepared,
-            source,
-            organized,
-            quarantine,
-            journal_path=journal,
+            prepared, source, organized, quarantine, journal_path=journal
         )
 
     monkeypatch.setattr(quarantine_execution, "_atomic_rename_no_replace", original)
@@ -336,11 +301,7 @@ def test_restore_crash_after_atomic_move_is_adopted_on_resume(
     _organize_winners(source, organized, prepared)
     quarantine_journal = tmp_path / "quarantine.jsonl"
     execute_quarantine(
-        prepared,
-        source,
-        organized,
-        quarantine,
-        journal_path=quarantine_journal,
+        prepared, source, organized, quarantine, journal_path=quarantine_journal
     )
     restore = prepare_quarantine_restore(prepared, quarantine_journal)
     restore_journal = tmp_path / "restore.jsonl"
