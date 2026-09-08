@@ -112,13 +112,21 @@ def test_item_rejects_missing_identity_and_invalid_kind_fields() -> None:
         replace(HELD_PENDING, review_ref="")
     with pytest.raises(ValueError, match="require review_ref and show_key"):
         replace(HELD_PENDING, show_key="")
-    with pytest.raises(ValueError, match="held review item has invalid identity fields"):
+    with pytest.raises(
+        ValueError, match="held review item has invalid identity fields"
+    ):
         replace(HELD_PENDING, source=None)
-    with pytest.raises(ValueError, match="held review item has invalid identity fields"):
+    with pytest.raises(
+        ValueError, match="held review item has invalid identity fields"
+    ):
         replace(HELD_PENDING, duplicate_ref=DUP_REF)
-    with pytest.raises(ValueError, match="duplicate review item has invalid identity fields"):
+    with pytest.raises(
+        ValueError, match="duplicate review item has invalid identity fields"
+    ):
         replace(DUP_PENDING, source=FIRST)
-    with pytest.raises(ValueError, match="duplicate review item has invalid identity fields"):
+    with pytest.raises(
+        ValueError, match="duplicate review item has invalid identity fields"
+    ):
         replace(DUP_PENDING, candidates=(FIRST,))
     with pytest.raises(ValueError, match="candidate_set_sha256 must contain 64 hex"):
         replace(DUP_PENDING, candidate_set_sha256="short")
@@ -131,11 +139,15 @@ def test_item_rejects_invalid_json_and_state_payloads() -> None:
         replace(HELD_PENDING, data_json="[]")
     with pytest.raises(ValueError, match="pending review items cannot carry an action"):
         replace(HELD_PENDING, action="keep_held")
-    with pytest.raises(ValueError, match="pending review items cannot carry decision data"):
+    with pytest.raises(
+        ValueError, match="pending review items cannot carry decision data"
+    ):
         replace(HELD_PENDING, data_json='{"x":1}')
     with pytest.raises(ValueError, match="must carry action='defer'"):
         replace(HELD_PENDING, state=ReviewItemState.DEFERRED, action="keep_held")
-    with pytest.raises(ValueError, match="deferred review items cannot carry decision data"):
+    with pytest.raises(
+        ValueError, match="deferred review items cannot carry decision data"
+    ):
         replace(
             HELD_PENDING,
             state=ReviewItemState.DEFERRED,
@@ -374,7 +386,10 @@ def test_session_loader_rejects_malformed_item_fields() -> None:
             "collision_class is invalid",
         ),
         (lambda item: item.__setitem__("data", []), "data must be an object"),
-        (lambda item: item.__setitem__("candidates", [1]), "candidates must be strings"),
+        (
+            lambda item: item.__setitem__("candidates", [1]),
+            "candidates must be strings",
+        ),
     ):
         payload = _session_payload()
         items = payload["items"]
@@ -407,7 +422,9 @@ def _held_manifest() -> dict[str, object]:
     )
 
 
-def test_build_review_session_rejects_invalid_base_payload_and_bad_manifest_identity() -> None:
+def test_build_review_session_rejects_invalid_base_payload_and_bad_manifest_identity() -> (
+    None
+):
     manifest = _held_manifest()
     with pytest.raises(ValueError, match="valid UTF-8"):
         build_review_session(
