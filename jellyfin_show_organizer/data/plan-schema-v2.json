@@ -331,8 +331,7 @@
         "winner",
         "losers",
         "confidence",
-        "evidence",
-        "collision_class"
+        "evidence"
       ],
       "properties": {
         "destination_key": {
@@ -368,12 +367,6 @@
           "items": {
             "type": "string"
           }
-        },
-        "collision_class": {
-          "enum": [
-            "same-logical-identity",
-            "destination-conflict"
-          ]
         }
       }
     },
