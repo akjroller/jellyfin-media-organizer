@@ -2,7 +2,7 @@
 
 A plan-first Python CLI for organizing media into Jellyfin-friendly layouts. The current implementation is deliberately focused on **TV shows** while the planning and safety model is built out.
 
-JMO is intentionally conservative: planning, parsing, inventory, reconciliation, provider-cache handling, and manifest contracts are developed separately from filesystem mutation. There is currently **no apply command**, so the tool cannot move, rename, copy, overwrite, or delete media.
+JMO is intentionally conservative: planning, parsing, inventory, reconciliation, provider-cache handling, review, and manifest contracts are developed separately from filesystem mutation. There is currently **no apply command**, so the tool cannot move, rename, copy, overwrite, delete, or quarantine media.
 
 ## Current capabilities
 
@@ -10,7 +10,7 @@ JMO is intentionally conservative: planning, parsing, inventory, reconciliation,
 - read-only inventory scanning for `.mkv`, `.mp4`, and `.avi` files;
 - explicit handling of samples, unreadable entries, blocked links, extras, and ambiguous evidence;
 - deterministic inventory reconciliation;
-- versioned organizer plan models and JSON schema validation;
+- versioned organizer plan models and immutable JSON schema contracts;
 - data-driven aliases and numbering policies;
 - persistent TVMaze cache primitives for deterministic/offline replay;
 - canonical TVMaze show resolution with fail-closed ambiguity handling;
@@ -19,9 +19,12 @@ JMO is intentionally conservative: planning, parsing, inventory, reconciliation,
 - companion subtitle planning and duplicate-safe operation groups;
 - immutable JSON/CSV/text audit bundles with provenance and stable hashes;
 - whole-plan preflight that blocks unresolved, colliding, or unsafe plans;
+- session-bound, resumable **non-mutating review** for duplicate groups and held sources;
 - synthetic regression fixtures for ambiguous and adversarial cases.
 
 `jmo plan` is operational and remains strictly non-mutating. It inventories one explicit Shows root, resolves each show through the persistent provider cache, constructs destinations, classifies duplicates and companions, runs preflight, and writes an immutable audit bundle. It never moves, copies, renames, overwrites, or deletes media.
+
+`jmo review` consumes a fresh plan-schema-v3 manifest and records explicit review decisions into a resumable session plus a new reviewed override contract. Review can resolve duplicate decisions and held sources as provider-confirmed episodes/specials or explicit extras, but it is also strictly non-mutating: quarantine choices are markers only, and review never moves, deletes, or quarantines media. See the [non-mutating review workflow](docs/review-workflow.md) before using it.
 
 ## Requirements
 
@@ -92,13 +95,14 @@ python -m jellyfin_show_organizer plan --help
 
 The current implementation is **Shows-only**. Do not point it at a Movies directory, a mixed media root, or a parent directory containing unrelated media.
 
-Planning and preflight are read-only with respect to media. A successful plan is not authorization to mutate files, and there is intentionally no `apply` command today.
+Planning, review, and preflight are read-only with respect to media. A successful plan or completed review is not authorization to mutate files, and there is intentionally no `apply` command today.
 
 Repository examples and tests use synthetic paths and fixtures. Real library inventories, provider caches, manifests, reports, media files, deployment-specific overrides, machine-specific paths, and other environment-specific data should remain local and untracked.
 
 ## Documentation
 
 - [Operational runbook](docs/jellyfin-show-organizer-runbook.md)
+- [Non-mutating review workflow](docs/review-workflow.md)
 - [Troubleshooting safely](docs/troubleshooting.md)
 - [Contributor workflow](docs/contributing.md)
 - [Architecture](docs/jellyfin-show-organizer-architecture.md)
