@@ -172,20 +172,42 @@ class ReviewOverrideCatalog(OverrideCatalog):
             _base._source_reference_key(decision.source)
             for decision in self.episode_decisions
         }
-        reviewed_sources: dict[str, str] = {}
+        reviewed_sources: dict[str, list[ReviewedEpisodeOverride]] = {}
         for reviewed_decision in self.reviewed_episode_decisions:
             normalized = _base._source_reference_key(reviewed_decision.source)
-            owner = reviewed_sources.get(normalized)
-            if owner is not None:
-                raise ValueError(
-                    "reviewed episode source is configured more than once: "
-                    f"{reviewed_decision.source!r} conflicts with {owner!r}"
-                )
             if normalized in hold_keys or normalized in legacy_decision_keys:
                 raise ValueError(
                     "reviewed episode cannot overlap a source hold or legacy episode decision"
                 )
-            reviewed_sources[normalized] = reviewed_decision.source
+            siblings = reviewed_sources.setdefault(normalized, [])
+            if siblings:
+                first = siblings[0]
+                if (
+                    reviewed_decision.source_binding_sha256
+                    != first.source_binding_sha256
+                    or reviewed_decision.show_provider_identity
+                    != first.show_provider_identity
+                ):
+                    raise ValueError(
+                        "reviewed episode set must share one source binding and show identity"
+                    )
+                if any(
+                    item.episode_provider_identity
+                    == reviewed_decision.episode_provider_identity
+                    for item in siblings
+                ):
+                    raise ValueError(
+                        "reviewed episode set cannot repeat one provider episode identity"
+                    )
+                if any(
+                    (item.season, item.number)
+                    == (reviewed_decision.season, reviewed_decision.number)
+                    for item in siblings
+                ):
+                    raise ValueError(
+                        "reviewed episode set cannot repeat one provider coordinate"
+                    )
+            siblings.append(reviewed_decision)
 
         extra_sources: dict[str, str] = {}
         for extra_decision in self.extra_decisions:
@@ -224,18 +246,31 @@ class ReviewOverrideCatalog(OverrideCatalog):
                 )
             identifier_keys[normalized] = metadata.show_key
 
+    def reviewed_episodes_for(
+        self, source_relative_path: str
+    ) -> tuple[ReviewedEpisodeOverride, ...]:
+        normalized = _base._source_reference_key(source_relative_path)
+        matches = tuple(
+            decision
+            for decision in self.reviewed_episode_decisions
+            if _base._source_reference_key(decision.source) == normalized
+        )
+        return tuple(
+            sorted(
+                matches,
+                key=lambda decision: (
+                    decision.season,
+                    decision.number,
+                    decision.episode_provider_identity.key,
+                ),
+            )
+        )
+
     def reviewed_episode_for(
         self, source_relative_path: str
     ) -> ReviewedEpisodeOverride | None:
-        normalized = _base._source_reference_key(source_relative_path)
-        return next(
-            (
-                decision
-                for decision in self.reviewed_episode_decisions
-                if _base._source_reference_key(decision.source) == normalized
-            ),
-            None,
-        )
+        matches = self.reviewed_episodes_for(source_relative_path)
+        return matches[0] if len(matches) == 1 else None
 
     def extra_decision_for(
         self, source_relative_path: str
@@ -299,7 +334,9 @@ class ReviewOverrideCatalog(OverrideCatalog):
                 self.reviewed_episode_decisions,
                 key=lambda item: (
                     _base._source_reference_key(item.source),
-                    item.source,
+                    item.season,
+                    item.number,
+                    item.episode_provider_identity.key,
                 ),
             )
         ]
