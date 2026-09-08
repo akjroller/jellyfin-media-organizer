@@ -634,7 +634,7 @@ def test_schema5_contract_rejects_wrong_review_session(tmp_path: Path) -> None:
     stale_session = tmp_path / "stale-session.json"
     stale_session.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(PlanningConfigurationError, match="session base plan"):
+    with pytest.raises(PlanningConfigurationError, match="session hash"):
         execute_reviewed_plan(
             PlanningConfig(
                 shows_root=shows,
