@@ -61,9 +61,7 @@ def _prepared(source_root: Path) -> tuple[PreparedApply, tuple[ApplyMember, ...]
         PreparedApply(
             contract=ApplyContract(
                 plan_sha256="a" * 64,
-                groups=(
-                    ApplyOperationGroup(group_id="op-example", members=members),
-                ),
+                groups=(ApplyOperationGroup(group_id="op-example", members=members),),
             ),
             review_session_sha256="b" * 64,
             source_revision="c" * 40,
@@ -94,9 +92,7 @@ def _path(root: Path, relative: str) -> Path:
 def test_completed_apply_can_be_checked_and_rolled_back_byte_for_byte(
     tmp_path: Path,
 ) -> None:
-    source_root, destination_root, prepared, members, apply_journal = _applied(
-        tmp_path
-    )
+    source_root, destination_root, prepared, members, apply_journal = _applied(tmp_path)
     rollback = prepare_rollback(prepared, apply_journal)
 
     checked = execute_rollback(
@@ -121,8 +117,14 @@ def test_completed_apply_can_be_checked_and_rolled_back_byte_for_byte(
     assert result.groups_completed == 1
     assert result.members_restored == 2
     assert result.members_recovered == 0
-    assert _path(source_root, members[0].source_relative_path).read_bytes() == b"synthetic-video"
-    assert _path(source_root, members[1].source_relative_path).read_bytes() == b"synthetic-subtitle"
+    assert (
+        _path(source_root, members[0].source_relative_path).read_bytes()
+        == b"synthetic-video"
+    )
+    assert (
+        _path(source_root, members[1].source_relative_path).read_bytes()
+        == b"synthetic-subtitle"
+    )
     for member in members:
         assert not _path(destination_root, member.destination_relative_path).exists()
     assert (destination_root / "Example (2026)" / "Season 01").is_dir()
@@ -137,9 +139,7 @@ def test_completed_apply_can_be_checked_and_rolled_back_byte_for_byte(
 def test_rollback_resume_recovers_move_between_started_and_completed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source_root, destination_root, prepared, members, apply_journal = _applied(
-        tmp_path
-    )
+    source_root, destination_root, prepared, members, apply_journal = _applied(tmp_path)
     rollback = prepare_rollback(prepared, apply_journal)
     rollback_journal = tmp_path / "rollback.jsonl"
     original_append = rollback_execution._RollbackJournal.append
@@ -186,9 +186,7 @@ def test_rollback_resume_recovers_move_between_started_and_completed(
 
 
 def test_changed_destination_blocks_rollback_before_mutation(tmp_path: Path) -> None:
-    source_root, destination_root, prepared, members, apply_journal = _applied(
-        tmp_path
-    )
+    source_root, destination_root, prepared, members, apply_journal = _applied(tmp_path)
     target = _path(destination_root, members[0].destination_relative_path)
     target.write_bytes(b"changed-destination")
     rollback = prepare_rollback(prepared, apply_journal)
@@ -207,9 +205,7 @@ def test_changed_destination_blocks_rollback_before_mutation(tmp_path: Path) -> 
 
 
 def test_recreated_source_collision_blocks_rollback(tmp_path: Path) -> None:
-    source_root, destination_root, prepared, members, apply_journal = _applied(
-        tmp_path
-    )
+    source_root, destination_root, prepared, members, apply_journal = _applied(tmp_path)
     source = _path(source_root, members[0].source_relative_path)
     source.write_bytes(b"new-file")
     rollback = prepare_rollback(prepared, apply_journal)
@@ -228,13 +224,13 @@ def test_recreated_source_collision_blocks_rollback(tmp_path: Path) -> None:
 
 
 def test_missing_destination_blocks_rollback(tmp_path: Path) -> None:
-    source_root, destination_root, prepared, members, apply_journal = _applied(
-        tmp_path
-    )
+    source_root, destination_root, prepared, members, apply_journal = _applied(tmp_path)
     _path(destination_root, members[0].destination_relative_path).unlink()
     rollback = prepare_rollback(prepared, apply_journal)
 
-    with pytest.raises(RollbackExecutionError, match="both the original source.*missing"):
+    with pytest.raises(
+        RollbackExecutionError, match="both the original source.*missing"
+    ):
         execute_rollback(
             rollback,
             source_root,
