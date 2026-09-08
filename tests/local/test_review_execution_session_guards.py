@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from jellyfin_show_organizer.models import TerminalStatus
 from jellyfin_show_organizer.review_contract import (
     compile_active_overrides,
     load_review_contract_payload,
@@ -26,7 +27,12 @@ from jellyfin_show_organizer.review_session import (
 
 pytestmark = pytest.mark.local
 
-BASE = b"schema_version = 4\n"
+BASE = (
+    b"schema_version = 4\n\n"
+    b"[[source_holds]]\n"
+    b'source = "Fabricated Series/Held.mkv"\n'
+    b'reasons = ["fabricated reviewed hold"]\n'
+)
 
 
 def _reject_network(
@@ -39,7 +45,9 @@ def _reject_network(
 def _roots(tmp_path: Path) -> tuple[Path, Path]:
     shows = tmp_path / "Shows"
     destination = tmp_path / "Organized"
-    shows.mkdir()
+    video = shows / "Fabricated Series" / "Held.mkv"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"fabricated-video")
     destination.mkdir()
     return shows, destination
 
@@ -102,7 +110,7 @@ def _config(
     )
 
 
-def test_empty_schema5_reviewed_plan_executes_without_network(tmp_path: Path) -> None:
+def test_schema5_reviewed_held_plan_executes_without_network(tmp_path: Path) -> None:
     shows, destination = _roots(tmp_path)
     session = _session()
     session_path, override_path = _write_review_state(tmp_path, session)
@@ -119,7 +127,7 @@ def test_empty_schema5_reviewed_plan_executes_without_network(tmp_path: Path) ->
         review_session_path=session_path,
     )
 
-    assert not outcome.plan.records
+    assert [record.status for record in outcome.plan.records] == [TerminalStatus.HELD]
     assert not outcome.plan.companions
     assert outcome.preflight.ready
     assert not outcome.provider_failure
@@ -251,7 +259,12 @@ def test_schema5_review_rejects_stale_base_override_payload(tmp_path: Path) -> N
     shows, destination = _roots(tmp_path)
     original_snapshot = load_review_contract_payload(BASE).snapshot_id
     stale = _session(
-        base_payload=b"schema_version = 4\n\n[[source_holds]]\nsource = \"Other/Held.mkv\"\nreasons = [\"fabricated\"]\n",
+        base_payload=(
+            b"schema_version = 4\n\n"
+            b"[[source_holds]]\n"
+            b'source = "Other/Held.mkv"\n'
+            b'reasons = ["fabricated"]\n'
+        ),
         base_snapshot=original_snapshot,
     )
     session_path, override_path = _write_review_state(tmp_path, stale)
