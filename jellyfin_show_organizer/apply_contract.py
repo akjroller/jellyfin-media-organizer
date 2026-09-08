@@ -15,6 +15,7 @@ from .schema import PLAN_SCHEMA_VERSION, validate_manifest
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _PREFLIGHT_SCHEMA_VERSION = 1
+_REVIEW_OVERRIDE_SCHEMA_VERSION = 5
 
 
 class ApplyContractError(ValueError):
@@ -26,11 +27,35 @@ class ApplyMemberRole(StrEnum):
     COMPANION = "companion"
 
 
+class ApplyReviewMode(StrEnum):
+    COMPLETE = "complete"
+    APPROVED_PARTIAL = "approved-partial"
+
+
 class JournalEvent(StrEnum):
     GROUP_STARTED = "group-started"
     MEMBER_COMPLETED = "member-completed"
     GROUP_COMPLETED = "group-completed"
     GROUP_FAILED = "group-failed"
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyReviewApproval:
+    """Approval binding for the exact review ledger that produced a reviewed plan."""
+
+    session_sha256: str
+    mode: ApplyReviewMode
+    approved_scope_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _validate_hash(self.session_sha256, "review session_sha256")
+        ordered = tuple(sorted(self.approved_scope_refs))
+        if ordered != self.approved_scope_refs or len(ordered) != len(set(ordered)):
+            raise ValueError("approved review scope refs must be unique and sorted")
+        if any(not ref for ref in ordered):
+            raise ValueError("approved review scope refs cannot be empty")
+        if self.mode is ApplyReviewMode.APPROVED_PARTIAL and not ordered:
+            raise ValueError("partial review approval requires an explicit scope")
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +68,8 @@ class ApplyApproval:
     config_snapshot_id: str
     overrides_snapshot_id: str
     cache_snapshots: tuple[CacheSnapshot, ...]
+    authorized_group_ids: tuple[str, ...] = ()
+    review: ApplyReviewApproval | None = None
 
     def __post_init__(self) -> None:
         for field_name, value in (
@@ -59,6 +86,12 @@ class ApplyApproval:
         if len(ordered) != len({_cache_snapshot_key(item) for item in ordered}):
             raise ValueError("approval cache snapshots must be unique")
         object.__setattr__(self, "cache_snapshots", ordered)
+        group_ids = tuple(
+            sorted(self.authorized_group_ids, key=lambda value: (value.casefold(), value))
+        )
+        if len(group_ids) != len(set(group_ids)) or any(not value for value in group_ids):
+            raise ValueError("authorized apply group ids must be unique and non-empty")
+        object.__setattr__(self, "authorized_group_ids", group_ids)
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +320,104 @@ def _validate_approval(manifest: Mapping[str, object], approval: ApplyApproval) 
     return plan_hash
 
 
+def _validate_review_boundary(
+    manifest: Mapping[str, object],
+    approval: ApplyApproval,
+    run_provenance: object | None,
+    plan_hash: str,
+) -> None:
+    overrides_version = manifest.get("overrides_version")
+    if isinstance(overrides_version, bool) or not isinstance(overrides_version, int):
+        raise ApplyContractError("plan overrides_version must be an integer")
+    reviewed_plan = overrides_version >= _REVIEW_OVERRIDE_SCHEMA_VERSION
+    if not reviewed_plan:
+        if approval.review is not None:
+            raise ApplyContractError(
+                "non-reviewed plan cannot carry reviewed apply approval"
+            )
+        if isinstance(run_provenance, Mapping) and run_provenance.get("review") is not None:
+            raise ApplyContractError(
+                "non-reviewed plan cannot use reviewed run provenance"
+            )
+        return
+
+    if run_provenance is None:
+        raise ApplyContractError(
+            "schema-5 reviewed plan requires exact review run provenance"
+        )
+    provenance = _mapping(run_provenance, "run_provenance")
+    if provenance.get("plan_sha256") != plan_hash:
+        raise ApplyContractError(
+            "review run provenance plan hash does not match the approved plan"
+        )
+    review = _mapping(provenance.get("review"), "run_provenance.review")
+    expected = {
+        "session_sha256",
+        "base_plan_sha256",
+        "base_override_snapshot",
+        "scope_state",
+        "approved_scope_refs",
+        "authorization",
+        "movement_authorized",
+        "full_plan_approval_required",
+    }
+    if set(review) != expected:
+        raise ApplyContractError("review run provenance has unexpected fields")
+    session_sha256 = _string(
+        review.get("session_sha256"), "run_provenance.review.session_sha256"
+    )
+    try:
+        _validate_hash(session_sha256, "run_provenance.review.session_sha256")
+        _validate_hash(
+            _string(
+                review.get("base_plan_sha256"),
+                "run_provenance.review.base_plan_sha256",
+            ),
+            "run_provenance.review.base_plan_sha256",
+        )
+        _validate_hash(
+            _string(
+                review.get("base_override_snapshot"),
+                "run_provenance.review.base_override_snapshot",
+            ),
+            "run_provenance.review.base_override_snapshot",
+        )
+    except ValueError as exc:
+        raise ApplyContractError(str(exc)) from exc
+    raw_scope = review.get("approved_scope_refs")
+    if not isinstance(raw_scope, list | tuple) or not all(
+        isinstance(ref, str) and ref for ref in raw_scope
+    ):
+        raise ApplyContractError("review approved_scope_refs must contain strings")
+    scope_refs = tuple(sorted(cast(Iterable[str], raw_scope)))
+    if len(scope_refs) != len(set(scope_refs)):
+        raise ApplyContractError("review approved_scope_refs must be unique")
+    scope_state = review.get("scope_state")
+    if scope_state not in {mode.value for mode in ApplyReviewMode}:
+        raise ApplyContractError("review scope_state is invalid")
+    if review.get("authorization") != "review-state-only":
+        raise ApplyContractError("review provenance authorization is invalid")
+    if review.get("movement_authorized") is not False:
+        raise ApplyContractError("review provenance must not authorize movement")
+    if review.get("full_plan_approval_required") is not True:
+        raise ApplyContractError("review provenance must require full-plan approval")
+    if scope_state == ApplyReviewMode.APPROVED_PARTIAL.value:
+        raise ApplyContractError(
+            "partial-review provenance cannot authorize a media apply contract"
+        )
+    review_approval = approval.review
+    if review_approval is None:
+        raise ApplyContractError(
+            "reviewed plan requires approval bound to the exact review session"
+        )
+    if review_approval.mode is not ApplyReviewMode.COMPLETE:
+        raise ApplyContractError("reviewed plan requires complete review approval")
+    if review_approval.session_sha256 != session_sha256:
+        raise ApplyContractError("approved review session hash does not match")
+    if review_approval.approved_scope_refs != scope_refs:
+        raise ApplyContractError("approved review scope does not match")
+
+
 def _validate_preflight(preflight: object, plan_hash: str) -> None:
     raw = _mapping(preflight, "preflight")
     expected = {
@@ -363,17 +494,21 @@ def build_apply_contract(
     manifest: object,
     preflight: object,
     approval: ApplyApproval,
+    *,
+    run_provenance: object | None = None,
 ) -> ApplyContract:
     """Validate an approved immutable plan and derive non-mutating operation groups.
 
     This function deliberately performs no filesystem access and no media mutation.
     A future apply executor must consume this contract rather than rerunning matching
-    or inventing destinations.
+    or inventing destinations. Reviewed schema-5 plans additionally require exact
+    complete-review provenance; approved-partial review state is never apply authority.
     """
 
     validate_manifest(manifest)
     root = cast(Mapping[str, object], manifest)
     plan_hash = _validate_approval(root, approval)
+    _validate_review_boundary(root, approval, run_provenance, plan_hash)
     _validate_preflight(preflight, plan_hash)
 
     raw_records = root["records"]
@@ -436,6 +571,11 @@ def build_apply_contract(
         if group.moving_members:
             operation_groups.append(group)
 
+    authorized_group_ids = tuple(group.group_id for group in operation_groups)
+    if approval.authorized_group_ids != authorized_group_ids:
+        raise ApplyContractError(
+            "approved operation-group scope does not match the derived apply outcome"
+        )
     return ApplyContract(plan_sha256=plan_hash, groups=tuple(operation_groups))
 
 
