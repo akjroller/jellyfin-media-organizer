@@ -20,7 +20,7 @@ from .review_identity import (
     source_binding_hash,
     stable_duplicate_ref,
 )
-from .schema import validate_manifest
+from .schema import PLAN_SCHEMA_VERSION, validate_manifest
 
 REVIEW_SESSION_SCHEMA_VERSION = 3
 
@@ -58,8 +58,19 @@ def _require_sha256(value: str, label: str) -> str:
     return digest
 
 
-def manifest_sha256(manifest: object) -> str:
+def _require_reviewable_plan_schema(manifest: object) -> Mapping[str, object]:
     validate_manifest(manifest)
+    root = cast(Mapping[str, object], manifest)
+    if root.get("schema_version") != PLAN_SCHEMA_VERSION:
+        raise ValueError(
+            f"review requires plan schema v{PLAN_SCHEMA_VERSION}; regenerate the plan "
+            "with the current `jmo plan` before review"
+        )
+    return root
+
+
+def manifest_sha256(manifest: object) -> str:
+    _require_reviewable_plan_schema(manifest)
     return _sha256_bytes(
         json.dumps(
             manifest,
@@ -73,8 +84,7 @@ def manifest_sha256(manifest: object) -> str:
 def manifest_override_snapshot(manifest: object) -> str:
     """Return the exact override snapshot recorded by a reviewable plan."""
 
-    validate_manifest(manifest)
-    root = cast(Mapping[str, object], manifest)
+    root = _require_reviewable_plan_schema(manifest)
     provenance = root.get("provenance")
     if not isinstance(provenance, Mapping):
         raise ValueError("review requires plan provenance")
@@ -556,12 +566,11 @@ def build_review_session(
     base_override_snapshot: str,
     base_override_payload: bytes,
 ) -> ReviewSession:
-    validate_manifest(manifest)
+    root = _require_reviewable_plan_schema(manifest)
     try:
         base_override_toml = base_override_payload.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ValueError("base override payload must be valid UTF-8") from exc
-    root = cast(Mapping[str, object], manifest)
     raw_records = root.get("records")
     raw_companions = root.get("companions")
     assert isinstance(raw_records, list | tuple)
