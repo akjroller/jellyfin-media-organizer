@@ -39,9 +39,7 @@ class ReviewItemState(StrEnum):
 ReviewCollisionClass = DuplicateCollisionClass
 
 
-_HELD_ACTIONS = frozenset(
-    {"keep_held", "episode", "multi_episode", "special", "extra"}
-)
+_HELD_ACTIONS = frozenset({"keep_held", "episode", "multi_episode", "special", "extra"})
 _DUPLICATE_ACTIONS = frozenset({"select_winner", "keep_all", "quarantine_candidate"})
 
 
