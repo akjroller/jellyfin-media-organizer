@@ -145,7 +145,9 @@ def test_quarantine_plan_creates_new_immutable_artifact(
     )
     monkeypatch.setattr(quarantine_cli, "_load_manifest", lambda _path: {})
     monkeypatch.setattr(
-        quarantine_cli, "derive_quarantine_plan", lambda _manifest, _apply: prepared.plan
+        quarantine_cli,
+        "derive_quarantine_plan",
+        lambda _manifest, _apply: prepared.plan,
     )
 
     args = [
@@ -263,7 +265,12 @@ def test_quarantine_restore_check_only_and_exact_confirmation(
             check_only=bool(kwargs["check_only"]), journal=restore_journal
         ),
     )
-    common = ["quarantine-restore", *args, "--quarantine-journal", str(quarantine_journal)]
+    common = [
+        "quarantine-restore",
+        *args,
+        "--quarantine-journal",
+        str(quarantine_journal),
+    ]
 
     assert entrypoint.main([*common, "--check-only", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
