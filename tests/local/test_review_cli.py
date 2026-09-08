@@ -33,7 +33,7 @@ from jellyfin_show_organizer.review_session import (
     build_review_session,
     load_review_session,
 )
-from jellyfin_show_organizer.schema import plan_to_manifest
+from jellyfin_show_organizer.schema import PLAN_SCHEMA_VERSION, plan_to_manifest
 
 pytestmark = pytest.mark.local
 
@@ -107,7 +107,7 @@ def _review_fixture(
         for record in _duplicate_records(show_name, show_id)
     )
     plan = OrganizerPlan(
-        schema_version=2,
+        schema_version=PLAN_SCHEMA_VERSION,
         overrides_version=4,
         records=records,
         provenance=PlanProvenance(
