@@ -145,18 +145,34 @@ def analyze_segment_counted_titles(
             )
         )
 
+    # Multiple releases of the same parsed coordinate and title are one proof unit.
+    # They may legitimately resolve to the same provider episode and are handled by
+    # duplicate selection later. The same title attached to different source
+    # coordinates remains a collision and must not prove a remap.
+    proof_units: dict[
+        tuple[int, tuple[int, ...], str], SegmentCountedTitleObservation
+    ] = {}
+    for observation in observations:
+        parse = parses[observation.parse_index]
+        assert parse.season is not None
+        proof_units.setdefault(
+            (parse.season, parse.episodes, observation.normalized_title), observation
+        )
+
     exact = tuple(
-        observation for observation in observations if observation.episode is not None
+        observation
+        for observation in proof_units.values()
+        if observation.episode is not None
     )
     identities = tuple(
         observation.episode.identity for observation in exact if observation.episode
     )
     one_to_one = len(identities) == len(set(identities))
-    eligible_count = len(observations)
+    eligible_count = len(proof_units)
     exact_match_count = len(exact)
-    ambiguous_count = sum(observation.ambiguous for observation in observations)
+    ambiguous_count = sum(observation.ambiguous for observation in proof_units.values())
     disagreement_count = sum(
-        observation.coordinate_disagrees for observation in observations
+        observation.coordinate_disagrees for observation in proof_units.values()
     )
     triggered = (
         exact_match_count >= _MIN_EXACT_MATCHES

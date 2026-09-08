@@ -84,6 +84,39 @@ _SEGMENT_TRAILING_BRACKET_TAG = re.compile(
 _SEGMENT_SOURCE_TRAILING_BRACKET_TAG = re.compile(
     r"\[([^\]\r\n]{0,48}\d[^\]\r\n]{0,48})\](?=\.[A-Za-z0-9]{1,12}$|$)"
 )
+_NON_TITLE_HINT_TOKENS = frozenset(
+    {
+        "aac",
+        "audio",
+        "bd",
+        "bluray",
+        "cr",
+        "dl",
+        "dub",
+        "dual",
+        "dvd",
+        "eac3",
+        "english",
+        "flac",
+        "h264",
+        "h265",
+        "hevc",
+        "nf",
+        "ntsc",
+        "opus",
+        "proper",
+        "repack",
+        "remux",
+        "v2",
+        "web",
+        "webrip",
+        "x264",
+        "x265",
+    }
+)
+_COORDINATE_TITLE_COMPATIBILITY = 0.75
+_COORDINATE_NEAR_TITLE_THRESHOLD = 0.92
+_COORDINATE_NEAR_TITLE_GAP = 0.08
 
 
 def _segment_source_title(value: str, source_key: str) -> tuple[str, tuple[str, ...]]:
@@ -113,6 +146,142 @@ def _segment_source_title(value: str, source_key: str) -> tuple[str, tuple[str, 
 
     normalized_title = " ".join(title_tokens[: -len(tag_tokens)])
     return normalized_title, (f"segment-title-source-bracket-tag:{normalized_tag}",)
+
+
+def _meaningful_title_hint(value: str) -> str | None:
+    normalized = clean_episode_title_hint(value)
+    tokens = normalized.split()
+    if len(tokens) < 2 or not any(token.isalpha() for token in tokens):
+        return None
+    if all(token in _NON_TITLE_HINT_TOKENS or token.isdigit() for token in tokens):
+        return None
+    return normalized
+
+
+def _coordinate_title_conflict_reasons(
+    source: SourceEpisodeInput,
+    selected: ProviderEpisode,
+    catalog: ProviderEpisodeCatalog,
+) -> tuple[str, ...]:
+    parse = source.parse
+    if source.explicit_decision or parse.title_hint is None or len(parse.episodes) != 1:
+        return ()
+
+    normalized_source = _meaningful_title_hint(parse.title_hint)
+    if normalized_source is None:
+        return ()
+    normalized_selected = normalize_episode_title(selected.title)
+    compatibility = SequenceMatcher(
+        None, normalized_source, normalized_selected, autojunk=False
+    ).ratio()
+    if compatibility >= _COORDINATE_TITLE_COMPATIBILITY:
+        selected_is_compatible = True
+    else:
+        selected_is_compatible = False
+
+    exact_elsewhere = tuple(
+        episode
+        for episode in catalog.episodes
+        if episode.number is not None
+        and episode.identity != selected.identity
+        and normalize_episode_title(episode.title) == normalized_source
+    )
+    normalized_candidates = tuple(
+        (episode, normalize_episode_title(episode.title))
+        for episode in catalog.episodes
+        if episode.number is not None
+    )
+    contained_candidates = tuple(
+        (episode, normalized_title)
+        for episode, normalized_title in normalized_candidates
+        if len(normalized_title) >= 8
+        and len(normalized_title.split()) >= 2
+        and f" {normalized_title} " in f" {normalized_source} "
+    )
+    contained = tuple(
+        (episode, normalized_title)
+        for episode, normalized_title in contained_candidates
+        if not any(
+            normalized_title != other_title
+            and f" {normalized_title} " in f" {other_title} "
+            for _, other_title in contained_candidates
+        )
+    )
+    contained_titles = {normalized_title for _, normalized_title in contained}
+    selected_is_contained = any(
+        episode.identity == selected.identity for episode, _ in contained
+    )
+    compound_conflict = len(contained_titles) > 1
+
+    scored = [
+        (
+            max(
+                SequenceMatcher(
+                    None, normalized_source, normalized_title, autojunk=False
+                ).ratio(),
+                SequenceMatcher(
+                    None,
+                    " ".join(sorted(normalized_source.split())),
+                    " ".join(sorted(normalized_title.split())),
+                    autojunk=False,
+                ).ratio(),
+            ),
+            episode,
+        )
+        for episode, normalized_title in normalized_candidates
+        if episode.identity != selected.identity
+        and len(normalized_source) >= 12
+        and len(normalized_source.split()) >= 3
+    ]
+    scored.sort(key=lambda item: (-item[0], item[1].identity.key))
+    near_alternative = None
+    if scored:
+        top_score, top_episode = scored[0]
+        runner_score = scored[1][0] if len(scored) > 1 else 0.0
+        if (
+            top_score >= _COORDINATE_NEAR_TITLE_THRESHOLD
+            and top_score - runner_score >= _COORDINATE_NEAR_TITLE_GAP
+        ):
+            near_alternative = (top_score, top_episode)
+
+    if (selected_is_compatible or selected_is_contained) and not compound_conflict:
+        return ()
+    if not exact_elsewhere and not contained and near_alternative is None:
+        return ()
+
+    reasons = [
+        f"catalog-coordinate-title-conflict:{normalized_source}",
+        f"catalog-coordinate-title-score:{compatibility:.3f}",
+        f"catalog-coordinate-title-selected:{normalize_episode_title(selected.title)}",
+    ]
+    if len(exact_elsewhere) == 1:
+        reasons.extend(
+            (
+                "catalog-coordinate-title-conflict:unique-exact-title-elsewhere",
+                "catalog-coordinate-title-alternative:"
+                f"{_episode_identity_reason(exact_elsewhere[0])}",
+            )
+        )
+    elif len(exact_elsewhere) > 1:
+        reasons.append(
+            "catalog-coordinate-title-conflict:ambiguous-exact-title-elsewhere"
+        )
+    if contained:
+        reasons.append(
+            "catalog-coordinate-title-conflict:contained-catalog-titles:"
+            f"{len(contained_titles)}"
+        )
+    if near_alternative is not None:
+        near_score, near_episode = near_alternative
+        reasons.extend(
+            (
+                "catalog-coordinate-title-conflict:unique-near-title-elsewhere",
+                f"catalog-coordinate-title-near-score:{near_score:.3f}",
+                "catalog-coordinate-title-alternative:"
+                f"{_episode_identity_reason(near_episode)}",
+            )
+        )
+    return tuple(reasons)
 
 
 def _segment_equivalence_key(normalized_title: str) -> str:
@@ -340,6 +509,16 @@ def _aired_assignment(
                     *reasons,
                     f"missing-aired-catalog-entry:{coordinate}",
                 )
+        conflict_reasons = _coordinate_title_conflict_reasons(source, episode, catalog)
+        if conflict_reasons:
+            return _assignment(
+                source.source_key,
+                AssignmentStatus.SUSPICIOUS,
+                "episode-catalog",
+                *reasons,
+                f"catalog-match:{coordinate}->{_episode_identity_reason(episode)}",
+                *conflict_reasons,
+            )
         matches.append(episode)
         if by_coordinate.get((parse.season, number)) is episode:
             reasons.append(

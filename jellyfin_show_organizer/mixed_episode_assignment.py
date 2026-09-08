@@ -618,6 +618,15 @@ def _has_duplicate_provider_reason(assignment: SourceEpisodeAssignment) -> bool:
     )
 
 
+def _has_coordinate_title_conflict(
+    assignment: SourceEpisodeAssignment,
+) -> bool:
+    return any(
+        reason.startswith("catalog-coordinate-title-conflict:")
+        for reason in assignment.evidence.reasons
+    )
+
+
 def _nonregular_title_quarantine_assignment(
     source: SourceEpisodeInput,
     assignment: SourceEpisodeAssignment,
@@ -625,7 +634,10 @@ def _nonregular_title_quarantine_assignment(
 ) -> SourceEpisodeAssignment | None:
     parse = source.parse
     if (
-        not _has_duplicate_provider_reason(assignment)
+        not (
+            _has_duplicate_provider_reason(assignment)
+            or _has_coordinate_title_conflict(assignment)
+        )
         or parse.title_hint is None
         or parse.season is None
         or len(parse.episodes) != 1
@@ -677,6 +689,66 @@ def _nonregular_title_quarantine_assignment(
             ),
         ),
     )
+
+
+def _protect_coordinate_title_conflict_peers(
+    sources: tuple[SourceEpisodeInput, ...],
+    assignments: tuple[SourceEpisodeAssignment, ...],
+) -> tuple[SourceEpisodeAssignment, ...]:
+    source_by_key = {source.source_key: source for source in sources}
+    blocked_coordinates: set[tuple[int, int]] = set()
+    for assignment in assignments:
+        if (
+            assignment.status is not AssignmentStatus.SUSPICIOUS
+            or not _has_coordinate_title_conflict(assignment)
+        ):
+            continue
+        source = source_by_key.get(assignment.source_key)
+        if (
+            source is None
+            or source.parse.season is None
+            or len(source.parse.episodes) != 1
+        ):
+            continue
+        blocked_coordinates.add((source.parse.season, source.parse.episodes[0]))
+
+    if not blocked_coordinates:
+        return assignments
+
+    protected: list[SourceEpisodeAssignment] = []
+    for assignment in assignments:
+        source = source_by_key.get(assignment.source_key)
+        coordinate = (
+            (source.parse.season, source.parse.episodes[0])
+            if source is not None
+            and source.parse.season is not None
+            and len(source.parse.episodes) == 1
+            else None
+        )
+        if (
+            coordinate not in blocked_coordinates
+            or assignment.status is not AssignmentStatus.MATCHED
+        ):
+            protected.append(assignment)
+            continue
+        assert coordinate is not None
+        protected.append(
+            replace(
+                assignment,
+                status=AssignmentStatus.SUSPICIOUS,
+                episodes=(),
+                evidence=replace(
+                    assignment.evidence,
+                    confidence=0.0,
+                    reasons=(
+                        *assignment.evidence.reasons,
+                        "catalog-coordinate-title-conflict:peer-at-"
+                        f"S{coordinate[0]:02d}E{coordinate[1]:02d}",
+                    ),
+                ),
+            )
+        )
+    return tuple(protected)
 
 
 def _is_nonregular_title_quarantine(assignment: SourceEpisodeAssignment) -> bool:
@@ -922,7 +994,10 @@ def assign_episode_group_with_provider(
         and source.parse.season is not None
         and len(source.parse.episodes) == 1
         and (assignment := original_by_source.get(source.source_key)) is not None
-        and _has_duplicate_provider_reason(assignment)
+        and (
+            _has_duplicate_provider_reason(assignment)
+            or _has_coordinate_title_conflict(assignment)
+        )
     )
     if (
         not potential_special_sources
@@ -1001,6 +1076,7 @@ def assign_episode_group_with_provider(
         ordered = _apply_segment_counted_title_remap(
             show, source_group, ordered, provider, catalog
         )
+    ordered = _protect_coordinate_title_conflict_peers(source_group, ordered)
     ordered = _protect_provider_episode_identity(ordered)
     request_key = next(iter(request_keys)) if len(request_keys) == 1 else None
     return EpisodeGroupAssignment(

@@ -157,12 +157,39 @@ def test_unknown_duplicate_preference_reference_fails_closed():
         )
     )
 
-    with pytest.raises(PlanningConfigurationError, match="unknown or non-movable"):
+    with pytest.raises(PlanningConfigurationError, match="unknown source"):
         _apply_duplicate_decisions(
             records,
             SidecarDiscovery(companions=(), unresolved=(), ignored=()),
             overrides,
         )
+
+
+def test_preference_for_present_blocked_source_does_not_hide_plan_findings():
+    source = "Example Series/blocked-source.mkv"
+    blocked = _record(source)
+    blocked = PlanRecord(
+        source=blocked.source,
+        status=TerminalStatus.SUSPICIOUS,
+        parse=blocked.parse,
+        show=blocked.show,
+        evidence=MatchEvidence(
+            method="episode-catalog",
+            confidence=0.0,
+            reasons=("catalog-coordinate-title-conflict:alternate title",),
+        ),
+        operation_group_id=blocked.operation_group_id,
+        reason="catalog coordinate title conflict",
+    )
+    overrides = _catalog(DuplicatePreferenceOverride(source=source, rank=100))
+
+    planned = _apply_duplicate_decisions(
+        [blocked],
+        SidecarDiscovery(companions=(), unresolved=(), ignored=()),
+        overrides,
+    )
+
+    assert planned == [blocked]
 
 
 def test_preference_for_non_collision_source_fails_closed():
