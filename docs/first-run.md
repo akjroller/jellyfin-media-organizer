@@ -46,9 +46,21 @@ jmo plan ExampleMedia/Shows --destination-root ExampleMedia/OrganizedShows --out
 
 For reproducibility, repeat into another new output directory using `--offline`. It must use the same overrides/session and warmed cache. Investigate any plan or decision hash differences before approval.
 
+## Read readiness honestly
+
+Every audit bundle includes `remaining.csv`. It is the authoritative list of entries that `jmo apply` deliberately leaves at the source or that still block apply. Matched videos, extras, and associated companions are excluded because they are apply-movable.
+
+`remaining.csv` marks each row as `intentional` or `blocking`:
+
+- duplicate loser videos and duplicate companions are intentional leftovers from apply; reversible quarantine is a separate approval;
+- held videos and ignored companions are intentional leftovers;
+- suspicious or unresolved videos and unresolved companions are blocking leftovers.
+
+`summary.txt` reports `readiness_state=not-evaluated|apply-ready|blocked`, `apply_safe`, `library_fully_organized`, and remaining totals. `apply_safe=true` means the approved movement subset may cross the apply boundary. It does **not** mean the source tree becomes empty. `library_fully_organized=true` is only reported when no planned leftovers remain at all.
+
 ## Check, approve, apply
 
-Read the final summary and preflight. Zero findings means the approved subset is safe to apply, not that every library file will be organized. Held videos, duplicate losers, and ignored companions remain untouched.
+Read `summary.txt`, `remaining.csv`, and preflight together. Zero preflight findings means the approved subset is safe to apply, not that every library file will be organized. Held videos, duplicate losers, and ignored companions remain untouched by apply.
 
 Take the exact plan hash from `plan.sha256`, review-session hash from `run-provenance.json` under `review.session_sha256`, and revision from `source_revision.commit`. Replace the uppercase placeholders below with those values:
 
