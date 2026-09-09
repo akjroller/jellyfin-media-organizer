@@ -17,6 +17,15 @@ from jellyfin_show_organizer.run_provenance import SourceRevision
 pytestmark = pytest.mark.local
 
 
+def test_rollback_missing_root_returns_safe_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    args, _, _ = _rollback_paths(tmp_path)
+    args[args.index("--source-root") + 1] = str(tmp_path / "missing")
+    assert entrypoint.main([*args, "--check-only"]) == entrypoint.ROLLBACK_FAILED_EXIT
+    assert "source root does not exist" in capsys.readouterr().err
+
+
 def _rollback_paths(
     tmp_path: Path,
 ) -> tuple[list[str], PreparedApply, PreparedRollback]:

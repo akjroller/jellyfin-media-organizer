@@ -145,6 +145,7 @@ def prepare_apply(
     approved_plan_sha256: str,
     approved_review_session_sha256: str,
     approved_source_revision: str,
+    separate_roots: bool = False,
 ) -> PreparedApply:
     """Bind exact approval values to one reviewed, clean, ready plan."""
 
@@ -208,7 +209,7 @@ def prepare_apply(
         raise ApplyExecutionError("partial review scope cannot authorize apply")
 
     plan_provenance = _mapping(manifest_root.get("provenance"), "plan provenance")
-    group_ids = derive_apply_group_ids(manifest)
+    group_ids = derive_apply_group_ids(manifest, separate_roots=separate_roots)
     approval = ApplyApproval(
         plan_sha256=approved_plan_sha256,
         schema_version=cast(int, manifest_root.get("schema_version")),
@@ -232,6 +233,7 @@ def prepare_apply(
             preflight,
             approval,
             run_provenance=run_provenance,
+            separate_roots=separate_roots,
         )
     except (ApplyContractError, ValueError) as exc:
         raise ApplyExecutionError(str(exc)) from exc
@@ -705,6 +707,12 @@ def execute_apply(
 
     source_root, destination_root = validate_apply_roots(source_root, destination_root)
     contract = prepared.contract
+    if contract.separate_roots is not None and contract.separate_roots != (
+        source_root != destination_root
+    ):
+        raise ApplyExecutionError(
+            "apply roots differ from the prepared operation scope"
+        )
     if check_only:
         if resume:
             raise ApplyExecutionError("--check-only cannot be combined with --resume")

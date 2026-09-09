@@ -17,6 +17,7 @@ from .apply_execution import (
     prepare_apply,
     total_moving_members,
 )
+from .apply_validation import ApplyFilesystemError, validate_apply_roots
 from .models import TerminalStatus
 from .providers import TvmazeProviderAdapter
 from .review import render_override_stub
@@ -520,9 +521,9 @@ def _run_apply(args: argparse.Namespace) -> int:
         provenance_path = (
             cast(Path, args.run_provenance).expanduser().resolve(strict=True)
         )
-        source_root = cast(Path, args.source_root).expanduser().resolve(strict=True)
-        destination_root = (
-            cast(Path, args.destination_root).expanduser().resolve(strict=True)
+        source_root, destination_root = validate_apply_roots(
+            cast(Path, args.source_root).expanduser(),
+            cast(Path, args.destination_root).expanduser(),
         )
         journal_arg = cast(Path | None, args.journal)
         journal_path = (
@@ -542,6 +543,7 @@ def _run_apply(args: argparse.Namespace) -> int:
                 str, args.approve_review_session_sha256
             ).casefold(),
             approved_source_revision=cast(str, args.approve_source_revision).casefold(),
+            separate_roots=source_root != destination_root,
         )
         current_revision = detect_source_revision()
         if current_revision.state != "git":
@@ -604,7 +606,13 @@ def _run_apply(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 130
-    except (ApplyExecutionError, OSError, UnicodeError, ValueError) as exc:
+    except (
+        ApplyExecutionError,
+        ApplyFilesystemError,
+        OSError,
+        UnicodeError,
+        ValueError,
+    ) as exc:
         print(f"Apply failed safely: {exc}", file=sys.stderr)
         return APPLY_FAILED_EXIT
 

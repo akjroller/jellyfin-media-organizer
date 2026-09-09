@@ -58,6 +58,34 @@ def _cache_snapshot() -> CacheSnapshot:
     )
 
 
+def test_unchanged_relative_name_moves_between_distinct_roots():
+    plan = _plan()
+    record = plan.records[0]
+    plan = replace(
+        plan,
+        records=(replace(record, destination=record.source.relative_path),),
+        companions=(),
+    )
+    manifest = plan_to_manifest(plan)
+    assert derive_apply_group_ids(manifest) == ()
+    assert derive_apply_group_ids(manifest, separate_roots=True) == ("op-example",)
+    contract = build_apply_contract(
+        manifest, _preflight(plan), _approval(plan), separate_roots=True
+    )
+    assert len(contract.groups[0].moving_members) == 1
+
+
+def test_case_only_destination_is_not_a_noop():
+    plan = _plan()
+    record = plan.records[0]
+    plan = replace(
+        plan,
+        records=(replace(record, destination=record.source.relative_path.upper()),),
+        companions=(),
+    )
+    assert derive_apply_group_ids(plan_to_manifest(plan)) == ("op-example",)
+
+
 def _plan(
     *,
     video_status: TerminalStatus = TerminalStatus.MATCHED,

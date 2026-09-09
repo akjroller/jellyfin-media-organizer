@@ -7,6 +7,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from .artifact_identity import IDENTITY_FILE, read_identity
 from .decision_hash import stable_decision_hash
 from .models import CompanionStatus, OrganizerPlan, TerminalStatus
 from .schema import PLAN_SCHEMA_VERSION, stable_plan_hash
@@ -119,6 +120,21 @@ def detect_source_revision(source_root: Path | None = None) -> SourceRevision:
     """Best-effort source revision detection that never exposes checkout paths."""
 
     root = source_root or Path(__file__).resolve().parent.parent
+    if source_root is None:
+        package = Path(__file__).resolve().parent
+        if (package / IDENTITY_FILE).exists():
+            identity = read_identity(package)
+            if identity is None:
+                return SourceRevision(state="unavailable", commit=None, dirty=None)
+            return SourceRevision(
+                state="git",
+                commit=str(identity["commit"]),
+                dirty=bool(identity["dirty"]),
+            )
+        # Only a real source checkout may use live Git identity. In particular,
+        # site-packages below an ignored virtualenv is not that checkout.
+        if not (root / ".git").exists():
+            return SourceRevision(state="unavailable", commit=None, dirty=None)
     inside = _run_git(root, "rev-parse", "--is-inside-work-tree")
     if inside is None or inside[0] != 0 or inside[1].strip() != "true":
         return SourceRevision(state="unavailable", commit=None, dirty=None)

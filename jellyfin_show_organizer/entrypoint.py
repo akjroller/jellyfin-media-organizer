@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from . import cli
 from .apply_execution import ApplyExecutionError, prepare_apply
+from .apply_validation import ApplyFilesystemError, validate_apply_roots
 from .quarantine_cli import register_quarantine_commands
 from .rollback_execution import (
     RollbackExecutionError,
@@ -85,9 +86,9 @@ def _run_rollback(args: argparse.Namespace) -> int:
         apply_journal_path = (
             cast(Path, args.apply_journal).expanduser().resolve(strict=True)
         )
-        source_root = cast(Path, args.source_root).expanduser().resolve(strict=True)
-        destination_root = (
-            cast(Path, args.destination_root).expanduser().resolve(strict=True)
+        source_root, destination_root = validate_apply_roots(
+            cast(Path, args.source_root).expanduser(),
+            cast(Path, args.destination_root).expanduser(),
         )
         rollback_journal_arg = cast(Path | None, args.rollback_journal)
         rollback_journal_path = (
@@ -118,6 +119,7 @@ def _run_rollback(args: argparse.Namespace) -> int:
                 str, args.approve_review_session_sha256
             ).casefold(),
             approved_source_revision=cast(str, args.approve_source_revision).casefold(),
+            separate_roots=source_root != destination_root,
         )
         current_revision = detect_source_revision()
         if current_revision.state != "git":
@@ -185,6 +187,7 @@ def _run_rollback(args: argparse.Namespace) -> int:
         return 130
     except (
         ApplyExecutionError,
+        ApplyFilesystemError,
         RollbackExecutionError,
         OSError,
         UnicodeError,

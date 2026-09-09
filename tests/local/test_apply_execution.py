@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from jellyfin_show_organizer.apply_execution import (
     approval_token,
     execute_apply,
 )
+from jellyfin_show_organizer.cli import main
 from jellyfin_show_organizer.models import SourceFingerprint
 
 pytestmark = pytest.mark.local
@@ -27,6 +29,105 @@ pytestmark = pytest.mark.local
 def _fingerprint(path: Path) -> SourceFingerprint:
     stat = path.stat()
     return SourceFingerprint(size=stat.st_size, mtime_ns=stat.st_mtime_ns)
+
+
+def test_cli_invalid_root_returns_safe_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    artifact = tmp_path / "input.json"
+    artifact.write_text("{}")
+    result = main(
+        [
+            "apply",
+            str(artifact),
+            "--preflight",
+            str(artifact),
+            "--run-provenance",
+            str(artifact),
+            "--source-root",
+            str(tmp_path / "missing"),
+            "--destination-root",
+            str(tmp_path),
+            "--approve-plan-sha256",
+            "a" * 64,
+            "--approve-review-session-sha256",
+            "b" * 64,
+            "--approve-source-revision",
+            "c" * 40,
+            "--check-only",
+        ]
+    )
+    assert result == 30
+    assert "source root does not exist" in capsys.readouterr().err
+
+
+def test_separate_roots_same_relative_names_move_video_and_companion(tmp_path: Path):
+    source, destination = _roots(tmp_path)
+    prepared, members = _prepared(source)
+    members = tuple(
+        replace(
+            m, destination_relative_path=m.source_relative_path, separate_roots=True
+        )
+        for m in members
+    )
+    contract = replace(
+        prepared.contract,
+        groups=(ApplyOperationGroup("op-example", members),),
+        separate_roots=True,
+    )
+    prepared = replace(prepared, contract=contract)
+    check = execute_apply(
+        prepared, source, destination, journal_path=None, check_only=True
+    )
+    assert check.groups_total == 1
+    journal = tmp_path / "journal.jsonl"
+    result = execute_apply(prepared, source, destination, journal_path=journal)
+    assert result.members_moved == 2
+    for member in members:
+        assert not (source / member.source_relative_path).exists()
+        assert (destination / member.destination_relative_path).is_file()
+    resumed = execute_apply(
+        prepared, source, destination, journal_path=journal, resume=True
+    )
+    assert resumed.members_moved == 0
+
+
+def test_contract_root_mode_cannot_change_after_preparation(tmp_path: Path):
+    source, destination = _roots(tmp_path)
+    prepared, _ = _prepared(source)
+    prepared = replace(
+        prepared, contract=replace(prepared.contract, separate_roots=False)
+    )
+    with pytest.raises(ApplyExecutionError, match="roots differ"):
+        execute_apply(prepared, source, destination, journal_path=None, check_only=True)
+
+
+def test_case_only_rename_moves_or_fails_closed_on_insensitive_filesystem(
+    tmp_path: Path,
+):
+    source, _ = _roots(tmp_path)
+    prepared, members = _prepared(source, companion=False)
+    member = replace(members[0], destination_relative_path="Release/Episode.mkv")
+    prepared = replace(
+        prepared,
+        contract=ApplyContract(
+            "a" * 64,
+            (ApplyOperationGroup("op-example", (member,)),),
+            separate_roots=False,
+        ),
+    )
+    target = source / member.destination_relative_path
+    if target.exists():
+        with pytest.raises(ApplyExecutionError, match="destination already exists"):
+            execute_apply(
+                prepared, source, source, journal_path=tmp_path / "journal.jsonl"
+            )
+    else:
+        result = execute_apply(
+            prepared, source, source, journal_path=tmp_path / "journal.jsonl"
+        )
+        assert result.members_moved == 1
+        assert target.is_file()
 
 
 def _prepared(

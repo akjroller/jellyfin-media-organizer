@@ -48,7 +48,7 @@ packages = ["jellyfin_show_organizer", "jellyfin_show_organizer.data"]
 version = { attr = "jellyfin_show_organizer.__version__" }
 
 [tool.setuptools.package-data]
-jellyfin_show_organizer = ["data/*.json", "data/*.toml"]
+jellyfin_show_organizer = ["data/*.json", "data/*.toml", "_build_identity.json"]
 
 [tool.ruff]
 line-length = 88

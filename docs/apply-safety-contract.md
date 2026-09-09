@@ -19,7 +19,7 @@ Apply requires all of the following to agree exactly:
 
 Any mismatch fails before mutation. A partial review, dirty planning revision, provider failure, stale source fingerprint, existing destination, changed candidate set, or unsupported artifact fails closed.
 
-The executor must itself run from the exact clean Git commit recorded by the reviewed plan. If the running revision is dirty, different, or unavailable, apply refuses to run; a package installation without verifiable revision identity cannot bypass this gate.
+The executor must identify the exact clean Git commit recorded by the reviewed plan. Source checkouts use their own Git state. Installed wheels and source distributions use embedded build metadata and verify every packaged Python/data file against that record; they never inherit an ancestor checkout's revision. Dirty builds, modified packages, unstamped installs, and different or unavailable revisions are refused. Build metadata is an integrity check, not a publisher signature.
 
 After executor code changes, generate and review a fresh plan on the final clean commit. An older green plan is development evidence, not authority for a newer executable.
 
@@ -80,8 +80,9 @@ If `--confirm-apply` is omitted, a real interactive terminal must type the compl
 - Every destination is rechecked as absent immediately before moving.
 - Existing parent chains must remain real directories. Apply creates only missing approved destination parents.
 - Source and target must be on the same filesystem/device.
+- No-op detection uses exact relative names only when the validated roots are the same. Separate-root imports retain unchanged relative names as moving operations. Case-only changes are not silently skipped; an existing destination on an insensitive filesystem remains a blocker.
 - The move primitive is an atomic no-overwrite rename: native non-replacing rename on Windows, `renameat2(RENAME_NOREPLACE)` on Linux, or `renamex_np(RENAME_EXCL)` on macOS. Unsupported hosts fail closed.
-- Cross-filesystem copy-and-delete, overwrite, source-directory cleanup, duplicate deletion, and quarantine execution are unavailable.
+- Apply does not perform cross-filesystem copy-and-delete, overwrite, source-directory cleanup, duplicate deletion, or quarantine. Separate `quarantine-plan`, `quarantine`, and `quarantine-restore` commands implement explicitly approved reversible duplicate handling; see [First run](first-run.md#recovery-and-support-boundaries).
 
 ## Journal and group recovery
 

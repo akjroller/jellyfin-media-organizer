@@ -57,6 +57,8 @@ Run development checks the same way:
 
 The installed console commands are `jmo` and the compatibility alias `organizer`. The package can also be invoked with `python -m jellyfin_show_organizer`.
 
+Use the executable from your virtual environment unless it is activated. For a complete Bash/PowerShell onboarding sequence, see [First run](first-run.md). A normal installation is a snapshot: reinstall after updating the checkout. Packaged builds verify their embedded clean build revision and file inventory, independently of any surrounding Git repository; editable source installs continue to use their own checkout state.
+
 Version reporting is available on all supported entry surfaces:
 
 ```text

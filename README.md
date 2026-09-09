@@ -33,7 +33,7 @@ JMO is intentionally conservative: planning and review remain non-mutating, whil
 ## Requirements
 
 - Python 3.12+
-- CI tests Linux on Python 3.12, 3.13, and 3.14, plus Windows on Python 3.12.
+- CI is configured for Linux on Python 3.12, 3.13, and 3.14, plus Windows and macOS on Python 3.12. Installed wheel/sdist workflows run on all three operating systems; consult the CI results for the revision you install.
 - Project metadata advertises Python 3.12, 3.13, and 3.14 support.
 
 The runtime package currently has no third-party dependencies.
@@ -71,11 +71,17 @@ py -3.12 -m venv .venv
 A minimal planning run uses separate existing source and destination roots, plus generated-state locations outside both media roots:
 
 ```bash
-jmo plan ExampleMedia/Shows \
+./.venv/bin/jmo plan ExampleMedia/Shows \
   --destination-root ExampleMedia/OrganizedShows \
   --output-dir LocalState/audit-001 \
   --cache-dir LocalState/cache
 ```
+
+In PowerShell, use `.\.venv\Scripts\jmo.exe` instead of `./.venv/bin/jmo` and put the arguments on one line (Bash backslashes are not PowerShell continuations).
+
+For a complete first-time sequence, see [First run](docs/first-run.md). Other documentation uses `jmo` as shorthand for the executable in your environment; activation is optional.
+
+Normal wheels and source distributions carry a file-verified build revision. They do not need a Git checkout at runtime. Builds made from dirty checkouts remain ineligible for apply, and altered or unstamped installations fail closed. Reinstall after pulling changes: `pip install .` installs a snapshot, not a live view of the checkout. Build metadata verifies integrity, not publisher authenticity; install artifacts only from a trusted source.
 
 Review `plan.json`, `plan.sha256`, `decision.sha256`, `run-provenance.json`, `preflight.json`, `preflight.txt`, and the CSV reports in the output directory. A ready plan exits `0`; configuration, provider, unresolved, and preflight failures use distinct nonzero exit codes.
 

@@ -6,7 +6,7 @@ import re
 import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import cast
 
@@ -104,6 +104,7 @@ class ApplyMember:
     source_relative_path: str
     destination_relative_path: str
     fingerprint: SourceFingerprint
+    separate_roots: bool = False
 
     def __post_init__(self) -> None:
         if not self.source_relative_path:
@@ -113,9 +114,10 @@ class ApplyMember:
 
     @property
     def moving(self) -> bool:
-        return _path_key(self.source_relative_path) != _path_key(
-            self.destination_relative_path
-        )
+        # Collision keys deliberately over-normalize. They are not file identity.
+        return self.separate_roots or self.source_relative_path.replace(
+            "\\", "/"
+        ) != self.destination_relative_path.replace("\\", "/")
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +153,7 @@ class ApplyOperationGroup:
 class ApplyContract:
     plan_sha256: str
     groups: tuple[ApplyOperationGroup, ...]
+    separate_roots: bool | None = None
 
     def __post_init__(self) -> None:
         _validate_hash(self.plan_sha256, "plan_sha256")
@@ -499,6 +502,8 @@ def _companion_member(
 
 def _derive_operation_groups(
     root: Mapping[str, object],
+    *,
+    separate_roots: bool = False,
 ) -> tuple[ApplyOperationGroup, ...]:
     raw_records = root["records"]
     raw_companions = root["companions"]
@@ -556,19 +561,29 @@ def _derive_operation_groups(
                 ),
             )
         )
-        group = ApplyOperationGroup(group_id=group_id, members=members)
+        group = ApplyOperationGroup(
+            group_id=group_id,
+            members=tuple(
+                replace(member, separate_roots=separate_roots) for member in members
+            ),
+        )
         if group.moving_members:
             operation_groups.append(group)
 
     return tuple(operation_groups)
 
 
-def derive_apply_group_ids(manifest: object) -> tuple[str, ...]:
+def derive_apply_group_ids(
+    manifest: object, *, separate_roots: bool = False
+) -> tuple[str, ...]:
     """Return the exact moving group scope without authorizing or touching files."""
 
     validate_manifest(manifest)
     root = cast(Mapping[str, object], manifest)
-    return tuple(group.group_id for group in _derive_operation_groups(root))
+    return tuple(
+        group.group_id
+        for group in _derive_operation_groups(root, separate_roots=separate_roots)
+    )
 
 
 def build_apply_contract(
@@ -577,6 +592,7 @@ def build_apply_contract(
     approval: ApplyApproval,
     *,
     run_provenance: object | None = None,
+    separate_roots: bool = False,
 ) -> ApplyContract:
     """Validate an approved immutable plan and derive non-mutating operation groups.
 
@@ -591,14 +607,16 @@ def build_apply_contract(
     plan_hash = _validate_approval(root, approval)
     _validate_review_boundary(root, approval, run_provenance, plan_hash)
     _validate_preflight(preflight, plan_hash)
-    operation_groups = _derive_operation_groups(root)
+    operation_groups = _derive_operation_groups(root, separate_roots=separate_roots)
 
     authorized_group_ids = tuple(group.group_id for group in operation_groups)
     if approval.authorized_group_ids != authorized_group_ids:
         raise ApplyContractError(
             "approved operation-group scope does not match the derived apply outcome"
         )
-    return ApplyContract(plan_sha256=plan_hash, groups=operation_groups)
+    return ApplyContract(
+        plan_sha256=plan_hash, groups=operation_groups, separate_roots=separate_roots
+    )
 
 
 def replay_journal(
