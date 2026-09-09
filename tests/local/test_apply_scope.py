@@ -19,7 +19,6 @@ from jellyfin_show_organizer.apply_execution import (
     execute_apply,
 )
 from jellyfin_show_organizer.apply_scope import (
-    ApplyScope,
     ApplyScopeError,
     create_apply_scope,
     load_apply_scope,
