@@ -84,6 +84,19 @@ COMPANION_CSV_HEADER = (
     "reason",
 )
 
+REMAINING_CSV_HEADER = (
+    "kind",
+    "source",
+    "review_ref",
+    "status",
+    "readiness_impact",
+    "post_apply_disposition",
+    "source_video",
+    "destination",
+    "operation_group_id",
+    "reason",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class AuditBundle:
@@ -98,6 +111,7 @@ class AuditBundle:
     extras_csv: bytes
     duplicates_csv: bytes
     sidecars_csv: bytes
+    remaining_csv: bytes
     run_provenance_json: bytes | None = None
     preflight_json: bytes | None = None
     preflight_txt: bytes | None = None
@@ -109,6 +123,7 @@ class AuditBundle:
             ("extras.csv", self.extras_csv),
             ("duplicates.csv", self.duplicates_csv),
             ("sidecars.csv", self.sidecars_csv),
+            ("remaining.csv", self.remaining_csv),
             ("summary.txt", self.summary_txt),
             ("plan.sha256", self.plan_sha256),
             ("decision.sha256", self.decision_sha256),
@@ -333,6 +348,114 @@ def render_mapping_csv(plan: OrganizerPlan) -> bytes:
     return _render_record_csv(canonical_records(plan))
 
 
+def _remaining_video_row(record: PlanRecord) -> dict[str, str] | None:
+    dispositions = {
+        TerminalStatus.DUPLICATE: (
+            "intentional",
+            "unchanged by apply; separate reversible quarantine requires approval",
+        ),
+        TerminalStatus.HELD: ("intentional", "retained intentionally"),
+        TerminalStatus.SUSPICIOUS: ("blocking", "review required before apply"),
+        TerminalStatus.UNRESOLVED: ("blocking", "resolution required before apply"),
+    }
+    disposition = dispositions.get(record.status)
+    if disposition is None:
+        return None
+    impact, post_apply = disposition
+    return {
+        "kind": "video",
+        "source": record.source.relative_path,
+        "review_ref": stable_review_ref(record.source.relative_path),
+        "status": record.status.value,
+        "readiness_impact": impact,
+        "post_apply_disposition": post_apply,
+        "source_video": "",
+        "destination": record.destination or "",
+        "operation_group_id": record.operation_group_id or "",
+        "reason": record.reason or "",
+    }
+
+
+def _remaining_companion_row(record: CompanionPlanRecord) -> dict[str, str] | None:
+    dispositions = {
+        CompanionStatus.DUPLICATE: (
+            "intentional",
+            "unchanged by apply; may move only with separately approved duplicate quarantine",
+        ),
+        CompanionStatus.IGNORED: ("intentional", "retained intentionally"),
+        CompanionStatus.UNRESOLVED: (
+            "blocking",
+            "resolution required before apply",
+        ),
+    }
+    disposition = dispositions.get(record.status)
+    if disposition is None:
+        return None
+    impact, post_apply = disposition
+    return {
+        "kind": "companion",
+        "source": record.relative_path,
+        "review_ref": stable_review_ref(record.relative_path),
+        "status": record.status.value,
+        "readiness_impact": impact,
+        "post_apply_disposition": post_apply,
+        "source_video": record.source_video or "",
+        "destination": record.destination or "",
+        "operation_group_id": record.operation_group_id or "",
+        "reason": record.reason,
+    }
+
+
+def remaining_rows(plan: OrganizerPlan) -> tuple[dict[str, str], ...]:
+    """Return deterministic records intentionally left behind or blocking apply."""
+
+    rows: list[dict[str, str]] = []
+    for record in canonical_records(plan):
+        row = _remaining_video_row(record)
+        if row is not None:
+            rows.append(row)
+    for record in canonical_companions(plan):
+        row = _remaining_companion_row(record)
+        if row is not None:
+            rows.append(row)
+    return tuple(
+        sorted(
+            rows,
+            key=lambda row: (
+                row["kind"],
+                row["source"].replace("\\", "/").casefold(),
+                row["source"],
+            ),
+        )
+    )
+
+
+def render_remaining_csv(plan: OrganizerPlan) -> bytes:
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        stream,
+        fieldnames=REMAINING_CSV_HEADER,
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    writer.writerows(remaining_rows(plan))
+    return ("\ufeff" + stream.getvalue()).encode("utf-8")
+
+
+def _readiness_summary(
+    plan: OrganizerPlan, preflight: PreflightResult | None
+) -> tuple[str, tuple[dict[str, str], ...]]:
+    remaining = remaining_rows(plan)
+    blocking = sum(row["readiness_impact"] == "blocking" for row in remaining)
+    if preflight is None:
+        state = "not-evaluated"
+    elif preflight.ready and blocking == 0:
+        state = "apply-ready"
+    else:
+        state = "blocked"
+    return state, remaining
+
+
 def render_summary(
     plan: OrganizerPlan,
     preflight: PreflightResult | None = None,
@@ -344,6 +467,13 @@ def render_summary(
         _record_review_family(record) == _DUPLICATE_REVIEW_FAMILY
         for record in plan.records
     )
+    readiness_state, remaining = _readiness_summary(plan, preflight)
+    remaining_videos = sum(row["kind"] == "video" for row in remaining)
+    remaining_companions = sum(row["kind"] == "companion" for row in remaining)
+    remaining_intentional = sum(
+        row["readiness_impact"] == "intentional" for row in remaining
+    )
+    remaining_blocking = len(remaining) - remaining_intentional
     lines = [
         f"plan_sha256={stable_plan_hash(plan)}",
         f"decision_sha256={stable_decision_hash(plan)}",
@@ -362,6 +492,18 @@ def render_summary(
     lines.extend(
         f"companion_{status.value}={companion_counts[status]}"
         for status in CompanionStatus
+    )
+    lines.extend(
+        (
+            f"readiness_state={readiness_state}",
+            f"apply_safe={str(readiness_state == 'apply-ready').lower()}",
+            f"library_fully_organized={str(len(remaining) == 0).lower()}",
+            f"remaining_total={len(remaining)}",
+            f"remaining_videos={remaining_videos}",
+            f"remaining_companions={remaining_companions}",
+            f"remaining_intentional={remaining_intentional}",
+            f"remaining_blocking={remaining_blocking}",
+        )
     )
     if preflight is not None:
         lines.append(f"preflight_ready={str(preflight.ready).lower()}")
@@ -407,6 +549,7 @@ def render_audit_bundle(
         extras_csv=_render_record_csv(extras),
         duplicates_csv=render_duplicates_csv(plan),
         sidecars_csv=render_sidecars_csv(plan),
+        remaining_csv=render_remaining_csv(plan),
         run_provenance_json=run_provenance_json,
         summary_txt=render_summary(plan, preflight),
         plan_sha256=f"{plan_hash}\n".encode("ascii"),
