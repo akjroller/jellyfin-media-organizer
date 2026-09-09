@@ -72,9 +72,31 @@ def _tracked_paths() -> tuple[Path, ...]:
     )
 
 
+def _reachable_commit_messages() -> tuple[str, ...]:
+    result = subprocess.run(
+        ["git", "log", "--format=%B%x00"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    return tuple(
+        item.decode("utf-8", errors="replace")
+        for item in result.stdout.split(b"\0")
+        if item.strip()
+    )
+
+
 def _is_synthetic_fixture(path: Path) -> bool:
     parts = path.parts
     return len(parts) >= 2 and parts[0] == "tests" and parts[1] == "fixtures"
+
+
+def _privacy_problem(text: str) -> str | None:
+    if any(pattern.search(text) for pattern in PROFILE_PATTERNS):
+        return "machine-specific user-profile path"
+    if ASSISTANT_ATTRIBUTION.search(text):
+        return "development-assistant attribution"
+    return None
 
 
 def main() -> None:
@@ -104,16 +126,15 @@ def main() -> None:
             problems.append(f"non-UTF-8 public text file: {relative.as_posix()}")
             continue
 
-        for pattern in PROFILE_PATTERNS:
-            if pattern.search(text):
-                problems.append(
-                    f"machine-specific user-profile path in public text: {relative.as_posix()}"
-                )
-                break
+        privacy_problem = _privacy_problem(text)
+        if privacy_problem is not None:
+            problems.append(f"{privacy_problem} in public text: {relative.as_posix()}")
 
-        if ASSISTANT_ATTRIBUTION.search(text):
+    for index, message in enumerate(_reachable_commit_messages(), 1):
+        privacy_problem = _privacy_problem(message)
+        if privacy_problem is not None:
             problems.append(
-                f"development-assistant attribution in public text: {relative.as_posix()}"
+                f"{privacy_problem} in reachable commit message #{index} from HEAD"
             )
 
     if problems:
