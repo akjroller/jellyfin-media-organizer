@@ -121,6 +121,7 @@ def test_end_to_end_plan_is_cached_deterministic_and_non_mutating(
         "plan.sha256",
         "preflight.json",
         "preflight.txt",
+        "remaining.csv",
         "run-provenance.json",
         "sidecars.csv",
         "summary.txt",
