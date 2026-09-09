@@ -9,6 +9,8 @@ from typing import Any, cast
 
 from . import cli
 from .apply_execution import ApplyExecutionError, prepare_apply
+from .apply_scope import ApplyScopeError
+from .apply_scope_cli import bind_optional_scope, register_apply_scope_commands
 from .apply_validation import ApplyFilesystemError, validate_apply_roots
 from .quarantine_cli import register_quarantine_commands
 from .rollback_execution import (
@@ -25,13 +27,14 @@ ROLLBACK_FAILED_EXIT = 31
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Extend the existing CLI with rollback and duplicate quarantine controls."""
+    """Extend the existing CLI with rollback, scope, and quarantine controls."""
 
     parser = cli.build_parser()
     subparsers = cast(
         Any,
         next(action for action in parser._actions if hasattr(action, "add_parser")),
     )
+    register_apply_scope_commands(subparsers)
     rollback_parser = subparsers.add_parser(
         "rollback",
         help="Reverse one completed apply journal with a separate durable journal.",
@@ -50,6 +53,15 @@ def build_parser() -> argparse.ArgumentParser:
     rollback_parser.add_argument("--approve-plan-sha256", required=True)
     rollback_parser.add_argument("--approve-review-session-sha256", required=True)
     rollback_parser.add_argument("--approve-source-revision", required=True)
+    rollback_parser.add_argument(
+        "--scope",
+        type=Path,
+        help="Same immutable apply-scope artifact used by the scoped apply journal.",
+    )
+    rollback_parser.add_argument(
+        "--approve-scope-sha256",
+        help="Exact SHA-256 of the supplied immutable apply-scope artifact.",
+    )
     rollback_parser.add_argument(
         "--confirm-rollback",
         help=(
@@ -121,6 +133,7 @@ def _run_rollback(args: argparse.Namespace) -> int:
             approved_source_revision=cast(str, args.approve_source_revision).casefold(),
             separate_roots=source_root != destination_root,
         )
+        prepared_apply = bind_optional_scope(args, prepared_apply)
         current_revision = detect_source_revision()
         if current_revision.state != "git":
             raise RollbackExecutionError(
@@ -161,13 +174,15 @@ def _run_rollback(args: argparse.Namespace) -> int:
                 )
                 print(f"Source root:       {source_root}")
                 print(f"Destination root:  {destination_root}")
+                if prepared_apply.apply_scope_sha256 is not None:
+                    print(f"Apply scope SHA:   {prepared_apply.apply_scope_sha256}")
                 print(f"Apply journal SHA: {prepared.apply_journal_sha256}")
                 print(f"Confirmation token:\n{token}")
                 supplied = input("Type the exact rollback confirmation token: ").strip()
             if supplied != token:
                 raise RollbackExecutionError(
                     "rollback confirmation does not match the exact plan, review, "
-                    "revision, apply journal, and roots"
+                    "revision, apply journal, scope, and roots"
                 )
             result = execute_rollback(
                 prepared,
@@ -188,6 +203,7 @@ def _run_rollback(args: argparse.Namespace) -> int:
     except (
         ApplyExecutionError,
         ApplyFilesystemError,
+        ApplyScopeError,
         RollbackExecutionError,
         OSError,
         UnicodeError,
@@ -197,6 +213,8 @@ def _run_rollback(args: argparse.Namespace) -> int:
         return ROLLBACK_FAILED_EXIT
 
     payload = result.to_dict()
+    if prepared_apply.apply_scope_sha256 is not None:
+        payload["apply_scope_sha256"] = prepared_apply.apply_scope_sha256
     if bool(args.json_output):
         if check_only:
             payload["confirmation_token"] = token
@@ -207,6 +225,8 @@ def _run_rollback(args: argparse.Namespace) -> int:
             f"plan={result.plan_sha256} groups={result.groups_total} "
             f"members={total_rollback_members(prepared)}"
         )
+        if prepared_apply.apply_scope_sha256 is not None:
+            print(f"Apply scope SHA-256: {prepared_apply.apply_scope_sha256}")
         print(f"Apply journal SHA-256: {prepared.apply_journal_sha256}")
         print(f"Confirmation token:\n{token}")
     else:
