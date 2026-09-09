@@ -61,6 +61,7 @@ class PreparedApply:
     contract: ApplyContract
     review_session_sha256: str
     source_revision: str
+    apply_scope_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,21 +248,22 @@ def prepare_apply(
 def approval_token(
     prepared: PreparedApply, source_root: Path, destination_root: Path
 ) -> str:
-    """Return the exact confirmation token for a plan, review, revision, and roots."""
+    """Return the exact confirmation token for a plan, review, revision, roots, and scope."""
 
     source, destination = validate_apply_roots(source_root, destination_root)
     roots = hashlib.sha256(
         (str(source) + "\0" + str(destination)).encode("utf-8")
     ).hexdigest()
-    return ":".join(
-        (
-            "APPLY",
-            prepared.contract.plan_sha256,
-            prepared.review_session_sha256,
-            prepared.source_revision,
-            roots,
-        )
-    )
+    parts = [
+        "APPLY",
+        prepared.contract.plan_sha256,
+        prepared.review_session_sha256,
+        prepared.source_revision,
+    ]
+    if prepared.apply_scope_sha256 is not None:
+        parts.extend(("SCOPE", prepared.apply_scope_sha256))
+    parts.append(roots)
+    return ":".join(parts)
 
 
 def _member_key(group_id: str, member: ApplyMember) -> tuple[str, str, str]:
@@ -362,6 +364,8 @@ class _Journal:
                 raise ApplyExecutionError("apply journal belongs to another review")
             if entry.get("source_revision") != self.prepared.source_revision:
                 raise ApplyExecutionError("apply journal belongs to another revision")
+            if entry.get("apply_scope_sha256") != self.prepared.apply_scope_sha256:
+                raise ApplyExecutionError("apply journal belongs to another apply scope")
             entries.append(entry)
         if not entries:
             raise ApplyExecutionError("resume journal is empty")
@@ -385,6 +389,7 @@ class _Journal:
             "plan_sha256": self.prepared.contract.plan_sha256,
             "review_session_sha256": self.prepared.review_session_sha256,
             "source_revision": self.prepared.source_revision,
+            "apply_scope_sha256": self.prepared.apply_scope_sha256,
             "event": event,
             "group_id": group_id,
             "role": member.role.value if member is not None else None,
