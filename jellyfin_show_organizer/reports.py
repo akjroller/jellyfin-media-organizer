@@ -414,8 +414,8 @@ def remaining_rows(plan: OrganizerPlan) -> tuple[dict[str, str], ...]:
         row = _remaining_video_row(record)
         if row is not None:
             rows.append(row)
-    for record in canonical_companions(plan):
-        row = _remaining_companion_row(record)
+    for companion in canonical_companions(plan):
+        row = _remaining_companion_row(companion)
         if row is not None:
             rows.append(row)
     return tuple(
