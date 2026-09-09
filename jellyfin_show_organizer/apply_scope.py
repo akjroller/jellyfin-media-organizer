@@ -5,6 +5,7 @@ import json
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import cast
 
 from .apply_contract import ApplyContract
 from .apply_execution import PreparedApply
@@ -37,7 +38,9 @@ class ApplyScope:
         if _HASH.fullmatch(self.plan_sha256) is None:
             raise ValueError("apply scope plan_sha256 must be a SHA-256 digest")
         if _HASH.fullmatch(self.review_session_sha256) is None:
-            raise ValueError("apply scope review_session_sha256 must be a SHA-256 digest")
+            raise ValueError(
+                "apply scope review_session_sha256 must be a SHA-256 digest"
+            )
         if _REVISION.fullmatch(self.source_revision) is None:
             raise ValueError("apply scope source_revision must be a Git commit SHA")
         if not self.group_ids:
@@ -78,7 +81,9 @@ def create_apply_scope(
     """Create a deliberate non-empty proper subset of one complete apply contract."""
 
     if prepared.apply_scope_sha256 is not None:
-        raise ApplyScopeError("cannot create an apply scope from an already scoped apply")
+        raise ApplyScopeError(
+            "cannot create an apply scope from an already scoped apply"
+        )
     if not group_ids:
         raise ApplyScopeError("apply scope creation requires explicit operation groups")
     if any(not value for value in group_ids):
@@ -126,18 +131,30 @@ def load_apply_scope(payload: bytes) -> ApplyScope:
     }
     if set(raw) != expected:
         raise ApplyScopeError("apply scope has unexpected fields")
+    schema_version = raw.get("schema_version")
+    plan_sha256 = raw.get("plan_sha256")
+    review_session_sha256 = raw.get("review_session_sha256")
+    source_revision = raw.get("source_revision")
     group_ids = raw.get("group_ids")
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        raise ApplyScopeError("apply scope schema_version must be an integer")
+    if not isinstance(plan_sha256, str):
+        raise ApplyScopeError("apply scope plan_sha256 must be a string")
+    if not isinstance(review_session_sha256, str):
+        raise ApplyScopeError("apply scope review_session_sha256 must be a string")
+    if not isinstance(source_revision, str):
+        raise ApplyScopeError("apply scope source_revision must be a string")
     if not isinstance(group_ids, list) or not all(
         isinstance(value, str) for value in group_ids
     ):
         raise ApplyScopeError("apply scope group_ids must be strings")
     try:
         return ApplyScope(
-            schema_version=raw.get("schema_version"),
-            plan_sha256=raw.get("plan_sha256"),
-            review_session_sha256=raw.get("review_session_sha256"),
-            source_revision=raw.get("source_revision"),
-            group_ids=tuple(group_ids),
+            schema_version=schema_version,
+            plan_sha256=plan_sha256,
+            review_session_sha256=review_session_sha256,
+            source_revision=source_revision,
+            group_ids=tuple(cast(list[str], group_ids)),
         )
     except (TypeError, ValueError) as exc:
         raise ApplyScopeError(str(exc)) from exc
