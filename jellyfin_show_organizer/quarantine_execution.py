@@ -274,7 +274,7 @@ def _member_state(
     if source_exists and quarantine_exists:
         reason = "both source and quarantine destination exist"
     elif not source_exists and not quarantine_exists:
-        reason = "both source and quarantine destination are missing"
+        return "already-absent"
     elif source_exists:
         reason = "source fingerprint no longer matches the reviewed plan"
     else:
@@ -726,7 +726,8 @@ def _validate_check(
         else:
             organized += 1
         for member in group.members:
-            _validate_pending_member(member, source_root, quarantine_root)
+            if _member_state(member, source_root, quarantine_root) != "already-absent":
+                _validate_pending_member(member, source_root, quarantine_root)
     return preapply, organized
 
 
@@ -844,10 +845,10 @@ def execute_quarantine(
                         "completed quarantine winner state no longer matches"
                     )
                 for member in group.members:
-                    if (
-                        _member_state(member, source_root, quarantine_root)
-                        != "quarantined"
-                    ):
+                    if _member_state(member, source_root, quarantine_root) not in {
+                        "quarantined",
+                        "already-absent",
+                    }:
                         raise QuarantineExecutionError(
                             "completed quarantine member state no longer matches"
                         )
@@ -893,7 +894,7 @@ def execute_quarantine(
                 key = _member_key(group.group_id, member)
                 member_state = _member_state(member, source_root, quarantine_root)
                 if key in current.completed_members:
-                    if member_state != "quarantined":
+                    if member_state not in {"quarantined", "already-absent"}:
                         raise QuarantineExecutionError(
                             "quarantine journal and filesystem disagree"
                         )
@@ -908,6 +909,14 @@ def execute_quarantine(
                     )
                     recovered.append(member)
                     recovered_count += 1
+                    continue
+                if member_state == "already-absent":
+                    journal.append(
+                        "member-completed",
+                        group_id=group.group_id,
+                        member=member,
+                        result="already-absent-with-winner-present",
+                    )
                     continue
                 if member_state != "pending":
                     raise QuarantineExecutionError(

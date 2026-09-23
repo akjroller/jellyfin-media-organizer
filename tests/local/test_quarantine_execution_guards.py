@@ -220,18 +220,20 @@ def test_winner_ambiguities_are_rejected(tmp_path: Path) -> None:
         )
 
 
-def test_loser_ambiguities_are_rejected(tmp_path: Path) -> None:
+def test_loser_missing_is_reconciled_but_invalid_quarantine_is_rejected(
+    tmp_path: Path,
+) -> None:
     source, organized, quarantine, prepared = _case(tmp_path / "missing")
     (source / "Release" / "loser.mkv").unlink()
-    with pytest.raises(QuarantineExecutionError, match="both source and quarantine"):
-        execute_quarantine(
-            prepared,
-            source,
-            organized,
-            quarantine,
-            journal_path=None,
-            check_only=True,
-        )
+    result = execute_quarantine(
+        prepared,
+        source,
+        organized,
+        quarantine,
+        journal_path=None,
+        check_only=True,
+    )
+    assert result.check_only is True
 
     source, organized, quarantine, prepared = _case(tmp_path / "bad-quarantine")
     (source / "Release" / "loser.mkv").unlink()

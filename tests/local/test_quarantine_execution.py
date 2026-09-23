@@ -239,6 +239,13 @@ def test_missing_winner_changed_loser_and_quarantine_collision_fail_closed(
             prepared, source, organized, quarantine, journal_path=None, check_only=True
         )
 
+    source, organized, quarantine, prepared = _fixture(tmp_path / "already-absent")
+    source.joinpath("Show", "release-loser-a.mkv").unlink()
+    result = execute_quarantine(
+        prepared, source, organized, quarantine, journal_path=None, check_only=True
+    )
+    assert result.check_only is True
+
 
 def test_changed_companion_blocks_group_before_video_moves(tmp_path: Path) -> None:
     source, organized, quarantine, prepared = _fixture(tmp_path)
