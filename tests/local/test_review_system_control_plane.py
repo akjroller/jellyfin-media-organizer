@@ -80,13 +80,22 @@ class NoProvider:
 PROVIDER = NoProvider()
 
 
-def _duplicate_records(*, winner: bool) -> tuple[PlanRecord, PlanRecord]:
+def _duplicate_records(
+    *,
+    winner: bool,
+    show_title: str = DUP_SHOW,
+    first: str = FIRST,
+    second: str = SECOND,
+    evidence_method: str = "fabricated-control-plane",
+    destination: str = DESTINATION,
+    logical_identity: str = "tvmaze:4242:episode:9001",
+) -> tuple[PlanRecord, PlanRecord]:
     candidates = (
         DuplicateCandidate(
-            operation_key=FIRST,
-            members=(FIRST,),
-            destination=DESTINATION,
-            logical_identity="tvmaze:4242:episode:9001",
+            operation_key=first,
+            members=(first,),
+            destination=destination,
+            logical_identity=logical_identity,
             fingerprint=SourceFingerprint(
                 size=100,
                 mtime_ns=200,
@@ -94,10 +103,10 @@ def _duplicate_records(*, winner: bool) -> tuple[PlanRecord, PlanRecord]:
             ),
         ),
         DuplicateCandidate(
-            operation_key=SECOND,
-            members=(SECOND,),
-            destination=DESTINATION,
-            logical_identity="tvmaze:4242:episode:9001",
+            operation_key=second,
+            members=(second,),
+            destination=destination,
+            logical_identity=logical_identity,
             fingerprint=SourceFingerprint(
                 size=100,
                 mtime_ns=201,
@@ -106,14 +115,14 @@ def _duplicate_records(*, winner: bool) -> tuple[PlanRecord, PlanRecord]:
         ),
     )
     decision = classify_duplicate_candidates(candidates)[0].decision
-    parse = ParseResult(series_hint=DUP_SHOW, season=1, episodes=(1,))
+    parse = ParseResult(series_hint=show_title, season=1, episodes=(1,))
     show = CanonicalShow(
-        source_key=DUP_SHOW,
+        source_key=show_title,
         tvmaze_id=4242,
-        title=DUP_SHOW,
+        title=show_title,
         numbering_mode=NumberingMode.AIRED,
     )
-    evidence = MatchEvidence(method="fabricated-control-plane", confidence=1.0)
+    evidence = MatchEvidence(method=evidence_method, confidence=1.0)
     records: list[PlanRecord] = []
     for candidate in candidates:
         selected = decision.winner == candidate.operation_key
@@ -253,6 +262,116 @@ def test_batch_accept_recommended_completes_duplicate_review(tmp_path: Path) -> 
     assert active_path.read_bytes() == active
 
 
+def test_batch_accept_recommended_resume_keeps_bound_answer(tmp_path: Path) -> None:
+    manifest = _manifest()
+    base_payload, base_snapshot = _base()
+    session_path, active_path = _paths(tmp_path, "batch-resume")
+
+    first, _ = run_review_system(
+        manifest,
+        base_payload,
+        base_override_snapshot=base_snapshot,
+        provider=PROVIDER,
+        session_path=session_path,
+        output_override_path=active_path,
+        resume=False,
+        input_fn=_input("yes"),
+        output=StringIO(),
+        batch_accept_recommended=True,
+    )
+    second, _ = run_review_system(
+        manifest,
+        base_payload,
+        base_override_snapshot=base_snapshot,
+        provider=PROVIDER,
+        session_path=session_path,
+        output_override_path=tmp_path / "batch-resume-replayed-active.toml",
+        resume=True,
+        input_fn=lambda _prompt: pytest.fail("bound answer should not prompt"),
+        output=StringIO(),
+        batch_accept_recommended=True,
+    )
+
+    assert first.sha256 == second.sha256
+    assert second.complete
+
+
+def test_resume_skips_already_answered_item_before_remaining_review(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest(include_held=True)
+    base_payload, base_snapshot = _base()
+    session_path, active_path = _paths(tmp_path, "batch-partial-resume")
+
+    run_review_system(
+        manifest,
+        base_payload,
+        base_override_snapshot=base_snapshot,
+        provider=PROVIDER,
+        session_path=session_path,
+        output_override_path=active_path,
+        resume=False,
+        input_fn=_input("yes"),
+        output=StringIO(),
+        batch_accept_recommended=True,
+        kind_filter="duplicate",
+    )
+    resumed, _ = run_review_system(
+        manifest,
+        base_payload,
+        base_override_snapshot=base_snapshot,
+        provider=PROVIDER,
+        session_path=session_path,
+        output_override_path=tmp_path / "batch-partial-resume-replayed-active.toml",
+        resume=True,
+        input_fn=_input("d"),
+        output=StringIO(),
+    )
+
+    assert resumed.item(resumed.items[0].review_ref).state is ReviewItemState.ANSWERED
+    assert resumed.item(resumed.items[1].review_ref).action == "defer"
+
+
+def test_batch_accept_recommended_confirms_each_evidence_group(
+    tmp_path: Path,
+) -> None:
+    first_group = _duplicate_records(winner=True)
+    second_group = _duplicate_records(
+        winner=True,
+        show_title="Another Fabricated Series",
+        first="Another Fabricated Series/A.mkv",
+        second="Another Fabricated Series/B.mkv",
+        evidence_method="different-fabricated-evidence",
+        destination="Another Fabricated Series/Season 01/episode.mkv",
+        logical_identity="tvmaze:5252:episode:9101",
+    )
+    manifest = plan_to_manifest(
+        OrganizerPlan(
+            schema_version=PLAN_SCHEMA_VERSION,
+            overrides_version=4,
+            records=first_group + second_group,
+        )
+    )
+    base_payload, base_snapshot = _base()
+    output = StringIO()
+
+    session, _ = run_review_system(
+        manifest,
+        base_payload,
+        base_override_snapshot=base_snapshot,
+        provider=PROVIDER,
+        session_path=tmp_path / "session.json",
+        output_override_path=tmp_path / "active.toml",
+        resume=False,
+        input_fn=_input("yes", "yes"),
+        output=output,
+        batch_accept_recommended=True,
+    )
+
+    assert session.complete
+    assert output.getvalue().count("Evidence group ") == 2
+
+
 def test_batch_rejection_falls_through_to_interactive_defer(tmp_path: Path) -> None:
     manifest = _manifest()
     base_payload, base_snapshot = _base()
@@ -274,6 +393,79 @@ def test_batch_rejection_falls_through_to_interactive_defer(tmp_path: Path) -> N
     assert not session.complete
     assert session.items[0].state is ReviewItemState.DEFERRED
     assert session.items[0].action == "defer"
+
+
+def test_batch_accept_recommended_skips_scope_without_duplicates(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest(duplicate_winner=None, include_held=True)
+    base_payload, base_snapshot = _base()
+
+    session, _ = run_review_system(
+        manifest,
+        base_payload,
+        base_override_snapshot=base_snapshot,
+        provider=PROVIDER,
+        session_path=tmp_path / "session.json",
+        output_override_path=tmp_path / "active.toml",
+        resume=False,
+        input_fn=_input("d"),
+        output=StringIO(),
+        batch_accept_recommended=True,
+        kind_filter="held",
+    )
+
+    assert not session.complete
+    assert session.items[0].action == "defer"
+
+
+def test_batch_keep_held_skips_scope_without_held_items(tmp_path: Path) -> None:
+    manifest = _manifest()
+    base_payload, base_snapshot = _base()
+
+    session, _ = run_review_system(
+        manifest,
+        base_payload,
+        base_override_snapshot=base_snapshot,
+        provider=PROVIDER,
+        session_path=tmp_path / "session.json",
+        output_override_path=tmp_path / "active.toml",
+        resume=False,
+        input_fn=_input("d"),
+        output=StringIO(),
+        batch_keep_held=True,
+        kind_filter="duplicate",
+    )
+
+    assert not session.complete
+    assert session.items[0].action == "defer"
+
+
+def test_batch_keep_held_fails_closed_when_source_disappears(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jellyfin_show_organizer.review_system as review_system
+
+    monkeypatch.setattr(review_system, "_collect_held_records", lambda _manifest: ())
+    manifest = _manifest(duplicate_winner=None, include_held=True)
+    base_payload, base_snapshot = _base()
+
+    with pytest.raises(
+        ReviewConfigurationError, match="source review item disappeared from plan"
+    ):
+        run_review_system(
+            manifest,
+            base_payload,
+            base_override_snapshot=base_snapshot,
+            provider=PROVIDER,
+            session_path=tmp_path / "session.json",
+            output_override_path=tmp_path / "active.toml",
+            resume=False,
+            input_fn=lambda _prompt: pytest.fail("missing source should not prompt"),
+            output=StringIO(),
+            batch_keep_held=True,
+            kind_filter="held",
+        )
 
 
 def test_batch_accept_requires_recommended_winner(tmp_path: Path) -> None:
