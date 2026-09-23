@@ -43,6 +43,7 @@ from .user_commands import (
     run_doctor,
     run_init,
     run_inspect,
+    run_report,
     run_review_status,
     write_example,
 )
@@ -256,6 +257,19 @@ def build_parser() -> argparse.ArgumentParser:
     review_status_parser.add_argument("session", type=Path)
     review_status_parser.add_argument("--json", action="store_true", dest="json_output")
     review_status_parser.set_defaults(handler=_run_review_status)
+
+    report_parser = subparsers.add_parser(
+        "report",
+        help="Write a sanitized, shareable audit report bundle.",
+        description=(
+            "Export counts, readiness, version, platform, and failure categories "
+            "without copying private paths, filenames, caches, credentials, tokens, "
+            "or journals."
+        ),
+    )
+    report_parser.add_argument("run_dir", type=Path)
+    report_parser.add_argument("--output", type=Path, required=True)
+    report_parser.set_defaults(handler=_run_report)
 
     apply_parser = subparsers.add_parser(
         "apply",
@@ -646,6 +660,14 @@ def _run_review_status(args: argparse.Namespace) -> int:
         )
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         print(f"Review status failed safely: {exc}", file=sys.stderr)
+        return 2
+
+
+def _run_report(args: argparse.Namespace) -> int:
+    try:
+        return run_report(cast(Path, args.run_dir), cast(Path, args.output))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        print(f"Report failed safely: {exc}", file=sys.stderr)
         return 2
 
 

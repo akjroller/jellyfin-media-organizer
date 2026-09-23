@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import textwrap
 from collections import Counter
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
+from . import __version__
 from .planner import PlanningConfig
 from .review_session import ReviewItemKind, ReviewItemState, load_review_session
 
@@ -359,6 +361,107 @@ def run_review_status(session_path: Path, *, json_output: bool = False) -> int:
         )
     else:
         print("Next step: resume the review session with jmo review --resume.")
+    return 0
+
+
+def run_report(run_dir: Path, output_dir: Path) -> int:
+    """Write a path-free, shareable report bundle from one audit directory."""
+
+    root = run_dir.expanduser().resolve(strict=True)
+    summary_path = root / "summary.txt"
+    if not summary_path.is_file():
+        raise ValueError("audit bundle does not contain summary.txt")
+    output = output_dir.expanduser().resolve(strict=False)
+    if output.exists():
+        raise ValueError("report output directory already exists")
+    if not output.parent.is_dir():
+        raise ValueError("report output parent directory does not exist")
+
+    values: dict[str, str] = {}
+    for line in summary_path.read_text(encoding="utf-8-sig").splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value
+
+    def number(key: str) -> int:
+        try:
+            return int(values.get(key, "0"))
+        except ValueError as exc:
+            raise ValueError(f"audit summary has invalid {key}") from exc
+
+    records = number("records")
+    counts = {
+        key: number(key)
+        for key in (
+            "matched",
+            "extra",
+            "duplicate",
+            "held",
+            "suspicious",
+            "unresolved",
+            "companions",
+            "associated_companions",
+            "ignored_companions",
+            "duplicate_companions",
+        )
+    }
+    blockers = {key: counts[key] for key in ("suspicious", "unresolved") if counts[key]}
+    untouched = (
+        counts["duplicate"]
+        + counts["held"]
+        + counts["suspicious"]
+        + counts["unresolved"]
+    )
+    percentages = {
+        key: round((value / records) * 100, 2) if records else 0.0
+        for key, value in counts.items()
+        if key in {"matched", "extra", "duplicate", "held", "suspicious", "unresolved"}
+    }
+    payload = {
+        "schema_version": 1,
+        "tool_version": __version__,
+        "platform": platform.platform(aliased=True),
+        "python": platform.python_version(),
+        "records": records,
+        "counts": counts,
+        "percentages": percentages,
+        "movable_videos": counts["matched"] + counts["extra"],
+        "untouched_videos": untouched,
+        "readiness_state": values.get("readiness_state", "not-evaluated"),
+        "preflight_ready": values.get("preflight_ready", "unknown"),
+        "failure_categories": blockers,
+        "plan_sha256": values.get("plan_sha256"),
+    }
+    output.mkdir(parents=True)
+    (output / "report.json").write_text(
+        json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+    lines = [
+        "JMO sanitized audit report",
+        f"tool_version={__version__}",
+        f"platform={payload['platform']}",
+        f"python={payload['python']}",
+        f"records={records}",
+        f"matched={counts['matched']} ({percentages['matched']}%)",
+        f"extra={counts['extra']} ({percentages['extra']}%)",
+        f"duplicate={counts['duplicate']} ({percentages['duplicate']}%)",
+        f"held={counts['held']} ({percentages['held']}%)",
+        f"suspicious={counts['suspicious']} ({percentages['suspicious']}%)",
+        f"unresolved={counts['unresolved']} ({percentages['unresolved']}%)",
+        f"movable_videos={counts['matched'] + counts['extra']}",
+        f"untouched_videos={untouched}",
+        f"readiness_state={values.get('readiness_state', 'not-evaluated')}",
+        f"preflight_ready={values.get('preflight_ready', 'unknown')}",
+        f"failure_categories={json.dumps(blockers, sort_keys=True)}",
+        f"plan_sha256={values.get('plan_sha256')}",
+        "private_paths=excluded",
+        "provider_cache=excluded",
+        "credentials=excluded",
+        "approval_tokens=excluded",
+        "journals=excluded",
+    ]
+    (output / "report.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Sanitized report written: {output}")
     return 0
 
 

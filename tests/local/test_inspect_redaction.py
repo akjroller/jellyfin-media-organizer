@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from jellyfin_show_organizer.user_commands import run_inspect
+from jellyfin_show_organizer.user_commands import run_inspect, run_report
 
 pytestmark = pytest.mark.local
 
@@ -48,3 +48,19 @@ def test_inspect_json_keeps_path_for_local_use(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["run_dir"] == str(run.resolve())
+
+
+def test_report_bundle_excludes_private_path_and_sensitive_artifacts(tmp_path, capsys):
+    run = _bundle(tmp_path)
+    output = tmp_path / "shareable-report"
+
+    assert run_report(run, output) == 0
+    capsys.readouterr()
+    report_json = (output / "report.json").read_text(encoding="utf-8")
+    report_text = (output / "report.txt").read_text(encoding="utf-8")
+
+    assert str(run) not in report_json
+    assert str(run) not in report_text
+    assert "private_paths=excluded" in report_text
+    assert "approval_tokens=excluded" in report_text
+    assert "provider_cache=excluded" in report_text
