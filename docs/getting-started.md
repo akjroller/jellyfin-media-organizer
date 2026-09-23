@@ -40,6 +40,31 @@ The commands below use `jmo`. If the virtual environment is not activated,
 replace it with `.\.venv\Scripts\jmo.exe` on PowerShell or
 `./.venv/bin/jmo` on Linux/macOS.
 
+## Five-minute disposable walkthrough
+
+Learn the workflow without pointing JMO at real media:
+
+```text
+jmo demo --output JMO-demo
+jmo inspect JMO-demo/State/runs/demo-run --json
+```
+
+`demo` creates fabricated files, an offline cache, and a ready audit bundle.
+It never reads or changes an existing directory and refuses to overwrite its
+output. Because the demo already includes its own state and audit, do not run
+`jmo init` against `JMO-demo`; use `init` for a separate library instead.
+
+For a new library, initialize a separate state directory and run the read-only
+doctor check before planning:
+
+```text
+jmo init /path/to/Shows --destination-root /path/to/OrganizedShows --state-dir LocalState
+jmo doctor /path/to/Shows --destination-root /path/to/OrganizedShows --output-dir LocalState/runs/initial --cache-dir LocalState/cache
+```
+
+Every path is an example. Replace it with paths appropriate to your operating
+system; keep state, cache, and audit output outside both media roots.
+
 ## Configure once, then reuse
 
 For an existing library, `jmo init` creates the state directory, cache,

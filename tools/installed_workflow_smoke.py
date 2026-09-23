@@ -222,6 +222,52 @@ def smoke(root: Path, *, duplicate: bool = False) -> None:
         assert not (destination / companion["destination"]).exists()
 
 
+def first_run_smoke(root: Path) -> None:
+    """Exercise the documented first-run commands in a clean workspace."""
+    fresh = root / "fresh"
+    shows = fresh / "Shows"
+    shows.mkdir(parents=True)
+    state = fresh / "State"
+    init_output = cli(
+        [
+            "init",
+            str(shows),
+            "--destination-root",
+            str(shows),
+            "--state-dir",
+            str(state),
+            "--provider-mode",
+            "offline",
+        ]
+    )
+    assert "Initialized JMO state" in init_output
+    doctor = json.loads(
+        cli(
+            [
+                "doctor",
+                str(shows),
+                "--destination-root",
+                str(shows),
+                "--output-dir",
+                str(state / "runs" / "initial"),
+                "--cache-dir",
+                str(state / "cache"),
+                "--json",
+            ]
+        )
+    )
+    assert doctor["ready"] is True
+
+    demo = root / "demo"
+    demo_output = cli(["demo", "--output", str(demo)])
+    assert "Created disposable demo workspace" in demo_output
+    inspected = json.loads(
+        cli(["inspect", str(demo / "State" / "runs" / "demo-run"), "--json"])
+    )
+    assert inspected["readiness_state"] == "apply-ready"
+    assert inspected["records"] >= 1
+
+
 def quarantine_workflow(root: Path, apply_args: list[str], loser: Path) -> None:
     shared = [apply_args[1]]
     for flag in (
@@ -294,6 +340,8 @@ def quarantine_workflow(root: Path, apply_args: list[str], loser: Path) -> None:
 
 
 if __name__ == "__main__":
+    with tempfile.TemporaryDirectory(prefix="jmo-first-run-smoke-") as temporary:
+        first_run_smoke(Path(temporary))
     with tempfile.TemporaryDirectory(prefix="jmo-smoke-") as temporary:
         smoke(Path(temporary))
     with tempfile.TemporaryDirectory(prefix="jmo-quarantine-smoke-") as temporary:
