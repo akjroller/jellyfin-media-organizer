@@ -17,7 +17,7 @@ def test_package_version_has_one_source_of_truth():
 
     assert 'dynamic = ["version"]' in project
     assert 'version = { attr = "jellyfin_show_organizer.__version__" }' in project
-    assert '__version__ = "0.1.1"' in package_init
+    assert '__version__ = "0.2.0"' in package_init
 
 
 def test_project_metadata_documents_supported_python_versions():
@@ -45,7 +45,7 @@ def test_release_policy_keeps_gated_apply_and_private_data_boundaries_explicit()
     text = RELEASE_DOC.read_text(encoding="utf-8")
 
     assert "Semantic Versioning" in text
-    assert "The `v0.1.0` version tag is the first verified JMO version tag" in text
+    assert "The `v0.1.0` version tag was the first verified JMO version tag" in text
     assert "exact reviewed-artifact approval" in text
     assert "no copy/delete/quarantine/source cleanup" in text
     assert "There is currently no automatic PyPI" in text

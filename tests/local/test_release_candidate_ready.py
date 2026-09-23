@@ -234,7 +234,7 @@ def test_complete_ready_candidate_has_stable_approved_hash_and_zero_mutation(
     assert first.preflight.plan_hash == APPROVED_PLAN_SHA256
     assert first.plan.schema_version == PLAN_SCHEMA_VERSION
     assert first.plan.provenance is not None
-    assert first.plan.provenance.tool_version == "0.1.1"
+    assert first.plan.provenance.tool_version == "0.2.0"
     assert len(first.plan.provenance.cache_snapshots) == 10
     assert all(
         snapshot.state == "ok" for snapshot in first.plan.provenance.cache_snapshots
