@@ -45,6 +45,31 @@ class DuplicateReviewGroup:
         return self.collision_class is ReviewCollisionClass.SAME_LOGICAL_IDENTITY
 
 
+def _duplicate_batch_key(group: DuplicateReviewGroup) -> tuple[object, ...]:
+    """Return the immutable evidence identity used for safe batch grouping."""
+
+    return (
+        group.collision_class.value,
+        group.evidence,
+        len(group.candidates),
+    )
+
+
+def _held_batch_key(record: Mapping[str, object]) -> str:
+    """Canonicalize held-record evidence without including its private source path."""
+
+    return json.dumps(
+        {
+            "status": record.get("status"),
+            "reason": record.get("reason"),
+            "evidence": record.get("evidence"),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ReviewAnswer:
     review_ref: str
@@ -981,18 +1006,29 @@ def run_review_system(
                 raise ReviewConfigurationError(
                     "batch recommended acceptance requires a winner for every selected group"
                 )
-            output.write("Batch recommended winners:\n")
+            batches: dict[tuple[object, ...], list[str]] = {}
             for ref in duplicate_refs:
-                batch_group = duplicate_by_ref[ref]
+                batches.setdefault(
+                    _duplicate_batch_key(duplicate_by_ref[ref]), []
+                ).append(ref)
+            accepted_duplicate: set[str] = set()
+            for batch_index, batch_refs in enumerate(batches.values(), start=1):
+                output.write("Batch recommended winners:\n")
                 output.write(
-                    f"  {ref}: {batch_group.recommended_winner} -> "
-                    f"{batch_group.destination_key}\n"
+                    f"  Evidence group {batch_index} ({len(batch_refs)} items):\n"
                 )
-            if input_fn(
-                "Accept every displayed recommended winner? [y/N]: "
-            ).strip().casefold() in {"y", "yes"}:
-                accepted = set(duplicate_refs)
-                for ref in duplicate_refs:
+                for ref in batch_refs:
+                    batch_group = duplicate_by_ref[ref]
+                    output.write(
+                        f"  {ref}: {batch_group.recommended_winner} -> "
+                        f"{batch_group.destination_key}\n"
+                    )
+                if input_fn(
+                    "Accept this evidence-identical group? [y/N]: "
+                ).strip().casefold() not in {"y", "yes"}:
+                    continue
+                accepted_duplicate.update(batch_refs)
+                for ref in batch_refs:
                     batch_group = duplicate_by_ref[ref]
                     assert batch_group.recommended_winner is not None
                     session = session.with_answer(
@@ -1005,7 +1041,7 @@ def run_review_system(
                         },
                     )
                     atomic_replace(session_path, render_review_session(session))
-                selected = tuple(ref for ref in selected if ref not in accepted)
+            selected = tuple(ref for ref in selected if ref not in accepted_duplicate)
 
     if batch_keep_held:
         if answers is not None:
@@ -1019,7 +1055,7 @@ def run_review_system(
             and session.item(ref).state is not ReviewItemState.ANSWERED
         ]
         if held_refs:
-            output.write("Batch leave-untouched sources:\n")
+            held_batches: dict[str, list[tuple[str, Mapping[str, object]]]] = {}
             for ref in held_refs:
                 item = session.item(ref)
                 assert item.source is not None
@@ -1028,22 +1064,32 @@ def run_review_system(
                     raise ReviewConfigurationError(
                         "source review item disappeared from plan"
                     )
-                status = record.get("status")
-                reason = record.get("reason")
-                reason_text = f"; reason={reason}" if isinstance(reason, str) else ""
-                output.write(f"  {ref}: {item.source} [{status}]{reason_text}\n")
-            if input_fn(
-                "Leave every displayed source untouched / held? [y/N]: "
-            ).strip().casefold() in {"y", "yes"}:
-                accepted = set(held_refs)
-                for ref in held_refs:
+                held_batches.setdefault(_held_batch_key(record), []).append(
+                    (ref, record)
+                )
+            accepted_held: set[str] = set()
+            for batch_index, batch in enumerate(held_batches.values(), start=1):
+                output.write("Batch leave-untouched sources:\n")
+                output.write(f"  Evidence group {batch_index} ({len(batch)} items):\n")
+                for ref, record in batch:
+                    item = session.item(ref)
+                    status = record.get("status")
+                    reason = record.get("reason")
+                    reason_text = (
+                        f"; reason={reason}" if isinstance(reason, str) else ""
+                    )
+                    output.write(f"  {ref}: {item.source} [{status}]{reason_text}\n")
+                if input_fn(
+                    "Leave this evidence-identical group untouched / held? [y/N]: "
+                ).strip().casefold() not in {"y", "yes"}:
+                    continue
+                for ref, _record in batch:
+                    accepted_held.add(ref)
                     session = session.with_answer(
-                        ref,
-                        state=ReviewItemState.ANSWERED,
-                        action="keep_held",
+                        ref, state=ReviewItemState.ANSWERED, action="keep_held"
                     )
                     atomic_replace(session_path, render_review_session(session))
-                selected = tuple(ref for ref in selected if ref not in accepted)
+            selected = tuple(ref for ref in selected if ref not in accepted_held)
 
     for ref in selected:
         item = session.item(ref)

@@ -242,17 +242,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "For the selected duplicate subset only, offer one explicit confirmation "
-            "to accept each displayed recommended winner while persisting one bound "
-            "decision per group."
+            "per evidence-identical group to accept its displayed recommended winners "
+            "while persisting one bound decision per item."
         ),
     )
     review_parser.add_argument(
         "--batch-keep-held",
         action="store_true",
         help=(
-            "For selected source-review items only, list every source and offer one "
-            "explicit confirmation to leave them held and untouched. This makes no "
-            "episode inference and authorizes no media movement."
+            "For selected source-review items only, group identical immutable evidence "
+            "and offer one confirmation per group to leave them held and untouched. "
+            "This makes no episode inference and authorizes no media movement."
         ),
     )
     review_mode = review_parser.add_mutually_exclusive_group()
