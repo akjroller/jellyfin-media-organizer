@@ -312,9 +312,9 @@ def derive_quarantine_plan(
         if winner_entry is None:
             raise QuarantineContractError("duplicate winner record is missing")
         winner_index, winner_record = winner_entry
-        if winner_record.get("status") != "matched":
+        if winner_record.get("status") not in {"matched", "extra"}:
             raise QuarantineContractError(
-                "duplicate winner must be an approved matched record"
+                "duplicate winner must be an approved matched or extra record"
             )
         winner_source, winner_fingerprint = _record_source(winner_record, winner_index)
         winner_destination = _string(

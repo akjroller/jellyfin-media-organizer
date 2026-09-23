@@ -190,8 +190,13 @@ def test_derivation_rejects_missing_winner_nonmatched_winner_and_destination_dri
 
     manifest = _manifest()
     _records(manifest)[0]["status"] = "held"
-    with pytest.raises(QuarantineContractError, match="approved matched"):
+    with pytest.raises(QuarantineContractError, match="approved matched or extra"):
         derive_quarantine_plan(manifest, _prepared())
+
+    manifest = _manifest()
+    _records(manifest)[0]["status"] = "extra"
+    plan = derive_quarantine_plan(manifest, _prepared())
+    assert len(plan.groups) == 2
 
     manifest = _manifest()
     _records(manifest)[1]["destination"] = "Wrong/Season 01/wrong.mkv"
