@@ -158,6 +158,15 @@ For a quick overview without opening the report files individually:
 jmo inspect LocalState/audit
 ```
 
+For a shareable machine-readable summary, omit the local audit path:
+
+```text
+jmo inspect LocalState/audit --json --redact-paths
+```
+
+This reports counts, readiness, and the plan identity without exposing local
+directory names.
+
 To generate the starter files from the installed version instead of copying
 them from this guide:
 

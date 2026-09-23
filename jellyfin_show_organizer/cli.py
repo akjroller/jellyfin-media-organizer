@@ -162,6 +162,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     inspect_parser.add_argument("run_dir", type=Path)
     inspect_parser.add_argument("--json", action="store_true", dest="json_output")
+    inspect_parser.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="Omit the local audit path so JSON/text output is safe to share.",
+    )
     inspect_parser.set_defaults(handler=_run_inspect)
 
     demo_parser = subparsers.add_parser(
@@ -810,7 +815,11 @@ def _run_init(args: argparse.Namespace) -> int:
 
 def _run_inspect(args: argparse.Namespace) -> int:
     try:
-        return run_inspect(cast(Path, args.run_dir), json_output=bool(args.json_output))
+        return run_inspect(
+            cast(Path, args.run_dir),
+            json_output=bool(args.json_output),
+            redact_paths=bool(args.redact_paths),
+        )
     except (OSError, UnicodeError, ValueError) as exc:
         print(f"Inspect failed safely: {exc}", file=sys.stderr)
         return 2

@@ -256,7 +256,9 @@ def run_doctor(
     return 0 if ready else 2
 
 
-def run_inspect(run_dir: Path, *, json_output: bool = False) -> int:
+def run_inspect(
+    run_dir: Path, *, json_output: bool = False, redact_paths: bool = False
+) -> int:
     """Summarize an audit bundle without exposing paths or requiring its source tree."""
 
     root = run_dir.expanduser().resolve(strict=True)
@@ -271,7 +273,6 @@ def run_inspect(run_dir: Path, *, json_output: bool = False) -> int:
             values[key] = value
     result = {
         "schema_version": 1,
-        "run_dir": str(root),
         "readiness_state": values.get("readiness_state", "not-evaluated"),
         "preflight_ready": values.get("preflight_ready", "unknown"),
         "records": int(values.get("records", "0")),
@@ -284,10 +285,15 @@ def run_inspect(run_dir: Path, *, json_output: bool = False) -> int:
         "remaining_total": int(values.get("remaining_total", "0")),
         "plan_sha256": values.get("plan_sha256"),
     }
+    if not redact_paths:
+        result["run_dir"] = str(root)
     if json_output:
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     else:
-        print(f"Run: {root}")
+        if redact_paths:
+            print("Run: [redacted]")
+        else:
+            print(f"Run: {root}")
         print(f"Status: {result['readiness_state']}")
         for key in (
             "records",
