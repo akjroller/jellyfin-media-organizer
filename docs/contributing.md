@@ -94,6 +94,6 @@ Apply changes must preserve exact plan/review/revision/root approval, status-gat
 
 Keep examples copy/pasteable and platform-neutral. Windows examples should invoke the virtual environment executables directly rather than requiring PowerShell activation or execution-policy changes.
 
-Normal pull-request CI verifies installable artifacts but does not publish packages. The `v0.1.0` version tag and its verified artifacts exist; publishing a GitHub Release remains a separate deliberate step, and no release authorizes media mutation outside the apply safety contract.
+Normal pull-request CI verifies installable artifacts but does not publish packages. The `v0.1.0` version tag and its verified artifacts exist; the `v0.1.1` patch release is the current release candidate, and publishing a GitHub Release remains a separate deliberate step. No release authorizes media mutation outside the apply safety contract.
 
 See `docs/releasing.md` for version, tag, and artifact rules.

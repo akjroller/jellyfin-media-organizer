@@ -17,7 +17,7 @@ def test_package_version_has_one_source_of_truth():
 
     assert 'dynamic = ["version"]' in project
     assert 'version = { attr = "jellyfin_show_organizer.__version__" }' in project
-    assert '__version__ = "0.1.0"' in package_init
+    assert '__version__ = "0.1.1"' in package_init
 
 
 def test_project_metadata_documents_supported_python_versions():
