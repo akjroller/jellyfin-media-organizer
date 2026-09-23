@@ -375,6 +375,8 @@ def run_review_status(
                 "suspicious",
                 "unresolved",
                 "companions",
+                "associated_companions",
+                "ignored_companions",
             )
         }
         untouched = sum(
@@ -439,9 +441,17 @@ def run_review_status(
             "held",
             "suspicious",
             "unresolved",
-            "companions",
         ):
-            print(f"  {key.title():16} {plan_counts[key]}")
+            plan_percentages = plan_summary["percentages"]
+            assert isinstance(plan_percentages, dict)
+            print(
+                f"  {key.title():16} {plan_counts[key]} ({plan_percentages[key]:.2f}%)"
+            )
+        print(f"  {'Companions':16} {plan_counts['companions']}")
+        print(
+            f"  Associated companions: {plan_counts['associated_companions']}\n"
+            f"  Ignored companions:    {plan_counts['ignored_companions']}"
+        )
         print(f"  Movable videos:   {plan_summary['movable_videos']}")
         print(f"  Untouched videos: {plan_summary['untouched_videos']}")
         print(
