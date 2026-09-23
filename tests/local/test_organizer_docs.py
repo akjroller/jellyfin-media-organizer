@@ -161,7 +161,9 @@ def test_release_docs_describe_the_verified_version_tag():
     releasing = RELEASING.read_text(encoding="utf-8")
 
     assert "The `v0.1.0` version tag has been created" in readme
-    assert "The `v0.1.0` version tag was the first verified JMO version tag" in releasing
+    assert (
+        "The `v0.1.0` version tag was the first verified JMO version tag" in releasing
+    )
     assert "Current releases are **plan-only**" not in readme
     assert "Current releases are **plan-only**" not in releasing
     assert "workflow artifact is not itself a decision to publish" in releasing
