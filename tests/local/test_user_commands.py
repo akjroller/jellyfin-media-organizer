@@ -198,6 +198,43 @@ def test_review_status_reports_percentages_and_safe_movement_boundary(
     assert "partial review never authorizes apply" in capsys.readouterr().out
 
 
+def test_review_status_can_include_plan_totals_without_private_paths(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    session_path = tmp_path / "session.json"
+    session_path.write_bytes(b"synthetic")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "summary.txt").write_text(
+        "records=10\nmatched=5\nextra=1\nduplicate=2\nheld=1\n"
+        "suspicious=1\nunresolved=0\ncompanions=4\n"
+        "readiness_state=blocked\npreflight_ready=false\n",
+        encoding="utf-8",
+    )
+    fake_session = SimpleNamespace(
+        items=[],
+        sha256="a" * 64,
+        plan_sha256="b" * 64,
+        approved_scope_refs=(),
+        complete=False,
+        approved_partial=False,
+    )
+    monkeypatch.setattr(
+        "jellyfin_show_organizer.user_commands.load_review_session",
+        lambda _payload: fake_session,
+    )
+
+    assert run_review_status(session_path, run_dir=run_dir, json_output=True) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["plan_summary"]["movable_videos"] == 6
+    assert payload["plan_summary"]["untouched_videos"] == 4
+
+    assert run_review_status(session_path, run_dir=run_dir) == 0
+    output = capsys.readouterr().out
+    assert "Plan totals" in output
+    assert "Companions move only" in output
+
+
 def test_write_example_refuses_overwrite(tmp_path: Path, capsys) -> None:
     target = tmp_path / "example.toml"
     assert write_example(target, "x\n") == 0

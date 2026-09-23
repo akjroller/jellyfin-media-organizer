@@ -75,15 +75,17 @@ def test_review_summary_requires_only_session(
 ):
     session = tmp_path / "session.json"
     session.write_text("synthetic", encoding="utf-8")
-    called: list[tuple[Path, bool]] = []
+    called: list[tuple[Path, bool, Path | None]] = []
 
-    def fake_status(path: Path, *, json_output: bool = False) -> int:
-        called.append((path, json_output))
+    def fake_status(
+        path: Path, *, json_output: bool = False, run_dir: Path | None = None
+    ) -> int:
+        called.append((path, json_output, run_dir))
         return 0
 
     monkeypatch.setattr(cli, "run_review_status", fake_status)
     assert main(["review", "--summary", "--session", str(session), "--json"]) == 0
-    assert called == [(session, True)]
+    assert called == [(session, True, None)]
 
 
 def test_organizer_plan_requires_explicit_paths_without_creating_output(

@@ -320,7 +320,12 @@ def run_inspect(
     return 0
 
 
-def run_review_status(session_path: Path, *, json_output: bool = False) -> int:
+def run_review_status(
+    session_path: Path,
+    *,
+    json_output: bool = False,
+    run_dir: Path | None = None,
+) -> int:
     """Summarize review progress without exposing reviewed source paths."""
 
     path = session_path.expanduser().resolve(strict=True)
@@ -338,6 +343,62 @@ def run_review_status(session_path: Path, *, json_output: bool = False) -> int:
     answered_percent = percent(answered)
     deferred_percent = percent(deferred)
     pending_percent = percent(pending)
+
+    plan_summary: dict[str, object] | None = None
+    if run_dir is not None:
+        root = run_dir.expanduser().resolve(strict=True)
+        summary_path = root / "summary.txt"
+        if not summary_path.is_file():
+            raise ValueError(
+                "review summary run directory does not contain summary.txt"
+            )
+        values: dict[str, str] = {}
+        for line in summary_path.read_text(encoding="utf-8-sig").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                values[key] = value
+
+        def plan_number(key: str) -> int:
+            try:
+                return int(values.get(key, "0"))
+            except ValueError as exc:
+                raise ValueError(f"audit summary has invalid {key}") from exc
+
+        records = plan_number("records")
+        counts = {
+            key: plan_number(key)
+            for key in (
+                "matched",
+                "extra",
+                "duplicate",
+                "held",
+                "suspicious",
+                "unresolved",
+                "companions",
+            )
+        }
+        untouched = sum(
+            counts[key] for key in ("duplicate", "held", "suspicious", "unresolved")
+        )
+        plan_summary = {
+            "records": records,
+            "counts": counts,
+            "percentages": {
+                key: round((counts[key] / records) * 100, 2) if records else 0.0
+                for key in (
+                    "matched",
+                    "extra",
+                    "duplicate",
+                    "held",
+                    "suspicious",
+                    "unresolved",
+                )
+            },
+            "movable_videos": counts["matched"] + counts["extra"],
+            "untouched_videos": untouched,
+            "readiness_state": values.get("readiness_state", "not-evaluated"),
+            "preflight_ready": values.get("preflight_ready", "unknown"),
+        }
 
     result = {
         "schema_version": 2,
@@ -357,6 +418,8 @@ def run_review_status(session_path: Path, *, json_output: bool = False) -> int:
         "approved_scope_items": len(session.approved_scope_refs),
         "complete": session.complete,
     }
+    if plan_summary is not None:
+        result["plan_summary"] = plan_summary
     if json_output:
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
@@ -365,6 +428,26 @@ def run_review_status(session_path: Path, *, json_output: bool = False) -> int:
     print(f"Answered:          {answered} ({answered_percent:.2f}%)")
     print(f"Deferred:           {deferred} ({deferred_percent:.2f}%)")
     print(f"Pending:            {pending} ({pending_percent:.2f}%)")
+    if plan_summary is not None:
+        plan_counts = plan_summary["counts"]
+        assert isinstance(plan_counts, dict)
+        print("Plan totals")
+        for key in (
+            "matched",
+            "extra",
+            "duplicate",
+            "held",
+            "suspicious",
+            "unresolved",
+            "companions",
+        ):
+            print(f"  {key.title():16} {plan_counts[key]}")
+        print(f"  Movable videos:   {plan_summary['movable_videos']}")
+        print(f"  Untouched videos: {plan_summary['untouched_videos']}")
+        print(
+            "  Companions move only when associated with a movable video; ignored "
+            "companions remain untouched."
+        )
     print("Review categories")
     print(f"  Duplicates:      {result['duplicates']}")
     print(f"  Held:            {result['held']}")

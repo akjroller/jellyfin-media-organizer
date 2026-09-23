@@ -204,6 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Use with --session; no plan, provider, or output arguments are needed."
         ),
     )
+    review_parser.add_argument(
+        "--run-dir",
+        type=Path,
+        help="Optional audit directory whose plan totals are shown with --summary.",
+    )
     review_parser.add_argument("--json", action="store_true", dest="json_output")
     review_parser.add_argument("--resume", action="store_true")
     review_parser.add_argument(
@@ -535,7 +540,9 @@ def _run_review(args: argparse.Namespace) -> int:
             return 2
         try:
             return run_review_status(
-                cast(Path, args.session), json_output=bool(args.json_output)
+                cast(Path, args.session),
+                json_output=bool(args.json_output),
+                run_dir=cast(Path | None, args.run_dir),
             )
         except (OSError, ValueError, UnicodeDecodeError) as exc:
             print(f"Review summary failed safely: {exc}", file=sys.stderr)
