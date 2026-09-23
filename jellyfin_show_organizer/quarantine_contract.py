@@ -317,17 +317,6 @@ def derive_quarantine_plan(
                 "duplicate winner must be an approved matched or extra record"
             )
         winner_source, winner_fingerprint = _record_source(winner_record, winner_index)
-        winner_destination = _string(
-            winner_record.get("destination"),
-            f"records[{winner_index}].destination",
-        )
-        loser_destination = _string(
-            record.get("destination"), f"records[{index}].destination"
-        )
-        if _path_key(winner_destination) != _path_key(loser_destination):
-            raise QuarantineContractError(
-                "duplicate winner and loser do not share the reviewed destination"
-            )
         winner_duplicate = _mapping(
             winner_record.get("duplicate"), f"records[{winner_index}].duplicate"
         )
@@ -343,6 +332,10 @@ def derive_quarantine_plan(
             raise QuarantineContractError(
                 "winner and loser records disagree about the reviewed duplicate decision"
             )
+        winner_destination = _string(
+            winner_record.get("destination"),
+            f"records[{winner_index}].destination",
+        )
 
         companions = tuple(
             sorted(

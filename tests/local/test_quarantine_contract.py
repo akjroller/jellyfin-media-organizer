@@ -199,9 +199,16 @@ def test_derivation_rejects_missing_winner_nonmatched_winner_and_destination_dri
     assert len(plan.groups) == 2
 
     manifest = _manifest()
-    _records(manifest)[1]["destination"] = "Wrong/Season 01/wrong.mkv"
-    with pytest.raises(QuarantineContractError, match="share the reviewed destination"):
+    cast(dict[str, object], _records(manifest)[1]["duplicate"])["destination_key"] = (
+        "wrong-key"
+    )
+    with pytest.raises(QuarantineContractError, match="disagree about the reviewed"):
         derive_quarantine_plan(manifest, _prepared())
+
+    manifest = _manifest()
+    _records(manifest)[1]["destination"] = "Show (2026)/Season 01/Show S01E01.mp4"
+    plan = derive_quarantine_plan(manifest, _prepared())
+    assert len(plan.groups) == 2
 
 
 def test_derivation_rejects_winner_decision_drift_and_orphan_duplicate_companion(
