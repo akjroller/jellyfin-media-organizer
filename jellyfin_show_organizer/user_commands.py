@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 import os
 import textwrap
+from collections import Counter
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
+
+from .planner import PlanningConfig
+from .review_session import ReviewItemKind, ReviewItemState, load_review_session
 
 CONFIG_EXAMPLE = """schema_version = 1
 
@@ -122,7 +126,6 @@ def run_demo(output_dir: Path | None) -> int:
     )
     # Seed the normal TVMaze cache through its public cache API, using a local
     # deterministic getter. The subsequent planner run is genuinely offline.
-    from .planner import PlanningConfig
     from .review_execution import execute_plan
     from .tvmaze_cache import TVMAZE_EPISODES_URL, TVMAZE_SEARCH_URL, TvmazeCatalogCache
 
@@ -312,6 +315,50 @@ def run_inspect(
             print("Next step: run jmo review against this run's plan.json.")
         else:
             print("Next step: inspect preflight.txt and unresolved.csv for blockers.")
+    return 0
+
+
+def run_review_status(session_path: Path, *, json_output: bool = False) -> int:
+    """Summarize review progress without exposing reviewed source paths."""
+
+    path = session_path.expanduser().resolve(strict=True)
+    session = load_review_session(path.read_bytes())
+    states = Counter(item.state.value for item in session.items)
+    kinds = Counter(item.kind.value for item in session.items)
+    result = {
+        "schema_version": 1,
+        "session_sha256": session.sha256,
+        "plan_sha256": session.plan_sha256,
+        "items": len(session.items),
+        "duplicates": kinds[ReviewItemKind.DUPLICATE.value],
+        "held": kinds[ReviewItemKind.HELD.value],
+        "answered": states[ReviewItemState.ANSWERED.value],
+        "deferred": states[ReviewItemState.DEFERRED.value],
+        "pending": states[ReviewItemState.PENDING.value],
+        "approved_scope_items": len(session.approved_scope_refs),
+        "complete": session.complete,
+    }
+    if json_output:
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        return 0
+    print("Review status")
+    print(f"Items:             {result['items']}")
+    print(f"Duplicates:        {result['duplicates']}")
+    print(f"Held:              {result['held']}")
+    print(f"Answered:          {result['answered']}")
+    print(f"Deferred:          {result['deferred']}")
+    print(f"Pending:           {result['pending']}")
+    print(f"Session SHA-256:   {result['session_sha256']}")
+    if session.complete:
+        print(
+            "Next step: compile a fresh reviewed plan with jmo plan --review-session."
+        )
+    elif session.approved_partial:
+        print(
+            "Next step: continue the remaining review scope; partial review never authorizes apply."
+        )
+    else:
+        print("Next step: resume the review session with jmo review --resume.")
     return 0
 
 

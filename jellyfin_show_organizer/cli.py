@@ -43,6 +43,7 @@ from .user_commands import (
     run_doctor,
     run_init,
     run_inspect,
+    run_review_status,
     write_example,
 )
 
@@ -243,6 +244,18 @@ def build_parser() -> argparse.ArgumentParser:
     review_mode.add_argument("--offline", action="store_true")
     review_mode.add_argument("--online", action="store_true")
     review_parser.set_defaults(handler=_run_review)
+
+    review_status_parser = subparsers.add_parser(
+        "review-status",
+        help="Summarize one review session without exposing reviewed paths.",
+        description=(
+            "Show review progress, counts, hashes, and the safest next step. "
+            "This command never reads media or changes review state."
+        ),
+    )
+    review_status_parser.add_argument("session", type=Path)
+    review_status_parser.add_argument("--json", action="store_true", dest="json_output")
+    review_status_parser.set_defaults(handler=_run_review_status)
 
     apply_parser = subparsers.add_parser(
         "apply",
@@ -624,6 +637,16 @@ def _run_review(args: argparse.Namespace) -> int:
     print(f"Review saved: partial {state_text}")
     print("Next step: resume this session with the same --session and --resume.")
     return REVIEW_INCOMPLETE_EXIT
+
+
+def _run_review_status(args: argparse.Namespace) -> int:
+    try:
+        return run_review_status(
+            cast(Path, args.session), json_output=bool(args.json_output)
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        print(f"Review status failed safely: {exc}", file=sys.stderr)
+        return 2
 
 
 def _run_apply(args: argparse.Namespace) -> int:
