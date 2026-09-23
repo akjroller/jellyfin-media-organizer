@@ -160,6 +160,26 @@ def test_reviewed_duplicate_select_winner_is_verified_without_rewriting_plan() -
     assert _apply_duplicate_group_contract(plan, catalog) is plan
 
 
+def test_reviewed_duplicate_select_winner_resolves_tied_plan_group() -> None:
+    plan = _plan(winner=None)
+    catalog = _catalog(plan, action=DuplicateGroupAction.SELECT_WINNER, winner=FIRST)
+
+    updated = _apply_duplicate_group_contract(plan, catalog)
+
+    assert updated is not plan
+    winner = next(
+        record for record in updated.records if record.source.relative_path == FIRST
+    )
+    loser = next(
+        record for record in updated.records if record.source.relative_path == SECOND
+    )
+    assert winner.status is TerminalStatus.SUSPICIOUS
+    assert loser.status is TerminalStatus.DUPLICATE
+    assert winner.duplicate is not None
+    assert winner.duplicate.winner == FIRST
+    assert loser.duplicate == winner.duplicate
+
+
 def test_reviewed_duplicate_keep_all_makes_every_candidate_nonmoving() -> None:
     plan = _plan(winner=FIRST)
     catalog = _catalog(plan, action=DuplicateGroupAction.KEEP_ALL, winner=None)
@@ -214,7 +234,7 @@ def test_reviewed_winner_group_can_be_consumed_after_same_root_move() -> None:
     assert _apply_duplicate_group_contract(current, catalog) is current
 
 
-def test_reviewed_duplicate_rejects_different_planner_winner() -> None:
+def test_reviewed_duplicate_winner_overrides_planner_winner() -> None:
     reviewed_plan = _plan(winner=FIRST)
     catalog = _catalog(
         reviewed_plan,
@@ -223,8 +243,17 @@ def test_reviewed_duplicate_rejects_different_planner_winner() -> None:
     )
     current = _plan(winner=SECOND)
 
-    with pytest.raises(PlanningConfigurationError, match="different winner"):
-        _apply_duplicate_group_contract(current, catalog)
+    updated = _apply_duplicate_group_contract(current, catalog)
+    winner = next(
+        record for record in updated.records if record.source.relative_path == FIRST
+    )
+    loser = next(
+        record for record in updated.records if record.source.relative_path == SECOND
+    )
+    assert winner.duplicate is not None
+    assert winner.duplicate.winner == FIRST
+    assert winner.status is TerminalStatus.DUPLICATE
+    assert loser.status is TerminalStatus.DUPLICATE
 
 
 def _review_session(

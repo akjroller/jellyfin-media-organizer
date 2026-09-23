@@ -568,16 +568,77 @@ def _apply_duplicate_group_contract(
             )
 
         if reviewed.action is DuplicateGroupAction.SELECT_WINNER:
-            if decision.winner is None or reviewed.winner is None:
+            if reviewed.winner is None:
                 raise PlanningConfigurationError(
                     "reviewed duplicate winner could not be honored safely"
                 )
-            if normalize_review_path(decision.winner) != normalize_review_path(
-                reviewed.winner
-            ):
+            if normalize_review_path(reviewed.winner) not in {
+                normalize_review_path(candidate) for candidate in decision.candidates
+            }:
                 raise PlanningConfigurationError(
-                    "planner selected a different winner than the reviewed duplicate decision"
+                    "reviewed duplicate winner could not be honored safely"
                 )
+            if decision.winner is not None and normalize_review_path(
+                decision.winner
+            ) == normalize_review_path(reviewed.winner):
+                continue
+
+            # A human review is authoritative for this collision. This covers
+            # both a tied group with no automatic winner and an automatic
+            # winner that the reviewer deliberately overrode. Rewrite the
+            # group into the same winner/loser shape the planner would have
+            # produced for an unambiguous duplicate preference.
+            rewritten = replace(
+                decision,
+                winner=reviewed.winner,
+                losers=tuple(
+                    candidate
+                    for candidate in decision.candidates
+                    if normalize_review_path(candidate)
+                    != normalize_review_path(reviewed.winner)
+                ),
+                confidence=1.0,
+                evidence=(
+                    *decision.evidence,
+                    "human-reviewed duplicate-group winner",
+                ),
+            )
+            for candidate in records:
+                if normalize_review_path(
+                    candidate.source.relative_path
+                ) == normalize_review_path(reviewed.winner):
+                    if candidate.extra is not None:
+                        status = TerminalStatus.EXTRA
+                    elif all(
+                        value is not None
+                        for value in (
+                            candidate.parse,
+                            candidate.show,
+                            candidate.evidence,
+                            candidate.destination,
+                        )
+                    ):
+                        status = TerminalStatus.MATCHED
+                    else:
+                        # Keep malformed/synthetic records fail-closed rather
+                        # than constructing an invalid MATCHED PlanRecord.
+                        status = candidate.status
+                    by_source[candidate.source.relative_path] = replace(
+                        candidate,
+                        status=status,
+                        duplicate=rewritten,
+                        reason=None,
+                    )
+                elif normalize_review_path(candidate.source.relative_path) in {
+                    normalize_review_path(loser) for loser in rewritten.losers
+                }:
+                    by_source[candidate.source.relative_path] = replace(
+                        candidate,
+                        status=TerminalStatus.DUPLICATE,
+                        duplicate=rewritten,
+                        reason="non-destructive duplicate loser",
+                    )
+            changed = True
             continue
 
         keep_all = DuplicateDecision(
