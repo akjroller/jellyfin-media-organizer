@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -46,7 +47,10 @@ from jellyfin_show_organizer.review_session import (
     load_review_session,
     render_review_session,
 )
-from jellyfin_show_organizer.review_system import _collect_duplicate_groups
+from jellyfin_show_organizer.review_system import (
+    _collect_duplicate_groups,
+    _display_record_evidence,
+)
 from jellyfin_show_organizer.schema import PLAN_SCHEMA_VERSION, plan_to_manifest
 
 pytestmark = pytest.mark.local
@@ -443,3 +447,26 @@ def test_atomic_new_output_refuses_overwrite(tmp_path: Path) -> None:
         atomic_write_new(path, b"second\n")
 
     assert path.read_bytes() == b"first\n"
+
+
+def test_review_display_groups_provider_evidence() -> None:
+    output = StringIO()
+    _display_record_evidence(
+        {
+            "show": {"title": "Fabricated Series", "tvmaze_id": 42},
+            "provider_episodes": [
+                {"season": 1, "number": 2, "title": "Second", "tvmaze_episode_id": 4242}
+            ],
+            "evidence": {
+                "candidates": [
+                    {"title": "Fabricated Series", "tvmaze_id": 42, "score": 0.91}
+                ]
+            },
+        },
+        output,
+    )
+    rendered = output.getvalue()
+    assert "show: Fabricated Series; provider: tvmaze:42" in rendered
+    assert "S01, E02, title=Second, provider=tvmaze:4242" in rendered
+    assert "title candidates:" in rendered
+    assert "confidence=0.91" in rendered

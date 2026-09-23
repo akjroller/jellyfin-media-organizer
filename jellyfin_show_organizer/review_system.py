@@ -429,6 +429,87 @@ def _fingerprint_summary(record: Mapping[str, object]) -> tuple[int, str | None]
     return size, cast(str | None, digest)
 
 
+def _format_provider_identity(value: object) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        return f"tvmaze:{value}"
+    if isinstance(value, Mapping):
+        namespace = value.get("namespace")
+        identifier = value.get("value")
+        if isinstance(namespace, str) and isinstance(identifier, str):
+            return f"{namespace}:{identifier}"
+        legacy = value.get("tvmaze_id")
+        if isinstance(legacy, int) and not isinstance(legacy, bool):
+            return f"tvmaze:{legacy}"
+    return None
+
+
+def _display_record_evidence(record: Mapping[str, object], output: TextIO) -> None:
+    """Render portable matching evidence without requiring another provider call."""
+
+    show = record.get("show")
+    if isinstance(show, Mapping):
+        title = show.get("title") or show.get("name")
+        identity = _format_provider_identity(
+            show.get("provider_identity") or show.get("tvmaze_id")
+        )
+        if title is not None or identity is not None:
+            output.write(
+                "       show: "
+                f"{title if isinstance(title, str) else 'unknown title'}"
+                f"; provider: {identity or 'unknown'}\n"
+            )
+
+    episodes = record.get("provider_episodes")
+    if isinstance(episodes, list | tuple) and episodes:
+        output.write("       provider episodes:\n")
+        for episode in episodes:
+            if not isinstance(episode, Mapping):
+                continue
+            coordinate_parts: list[str] = []
+            for key, label in (
+                ("season", "S"),
+                ("episode", "E"),
+                ("number", "E"),
+                ("absolute_number", "A"),
+            ):
+                value = episode.get(key)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    coordinate_parts.append(f"{label}{value:02d}")
+                    if key in {"episode", "number"}:
+                        break
+            title = episode.get("title") or episode.get("name")
+            identity = _format_provider_identity(
+                episode.get("provider_identity") or episode.get("tvmaze_episode_id")
+            )
+            details = ", ".join(coordinate_parts) or "coordinate unknown"
+            if isinstance(title, str) and title:
+                details += f", title={title}"
+            details += f", provider={identity or 'unknown'}"
+            output.write(f"         - {details}\n")
+
+    evidence = record.get("evidence")
+    if isinstance(evidence, Mapping):
+        candidates = evidence.get("candidates")
+        if isinstance(candidates, list | tuple) and candidates:
+            output.write("       title candidates:\n")
+            for candidate in candidates:
+                if not isinstance(candidate, Mapping):
+                    continue
+                title = candidate.get("title") or candidate.get("name")
+                identity = _format_provider_identity(
+                    candidate.get("provider_identity") or candidate.get("tvmaze_id")
+                )
+                confidence = candidate.get("confidence") or candidate.get("score")
+                output.write(
+                    "         - "
+                    f"{title if isinstance(title, str) else 'unknown title'}"
+                    f"; provider={identity or 'unknown'}"
+                    f"; confidence={confidence if confidence is not None else 'unknown'}\n"
+                )
+
+
 def _display_duplicate(
     group: DuplicateReviewGroup,
     records: Mapping[str, Mapping[str, object]],
@@ -466,6 +547,7 @@ def _display_duplicate(
                 for reason in reasons:
                     if isinstance(reason, str):
                         output.write(f"         evidence: {reason}\n")
+        _display_record_evidence(record, output)
         members = companions.get(normalize_review_path(candidate), ())
         if members:
             output.write("       companions:\n")
@@ -689,6 +771,7 @@ def _answer_held(
             for entry in reasons:
                 if isinstance(entry, str):
                     output.write(f"  evidence: {entry}\n")
+    _display_record_evidence(record, output)
     output.write(f"Reviewed source/member identity: {item.identity_sha256}\n")
 
     if answer is None:
