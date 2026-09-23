@@ -532,6 +532,16 @@ def run_report(run_dir: Path, output_dir: Path) -> int:
         for key, value in counts.items()
         if key in {"matched", "extra", "duplicate", "held", "suspicious", "unresolved"}
     }
+    companion_percentages = {
+        key: round((counts[key] / counts["companions"]) * 100, 2)
+        if counts["companions"]
+        else 0.0
+        for key in (
+            "associated_companions",
+            "ignored_companions",
+            "duplicate_companions",
+        )
+    }
     payload = {
         "schema_version": 1,
         "tool_version": __version__,
@@ -540,6 +550,7 @@ def run_report(run_dir: Path, output_dir: Path) -> int:
         "records": records,
         "counts": counts,
         "percentages": percentages,
+        "companion_percentages": companion_percentages,
         "movable_videos": counts["matched"] + counts["extra"],
         "untouched_videos": untouched,
         "readiness_state": values.get("readiness_state", "not-evaluated"),
@@ -563,6 +574,10 @@ def run_report(run_dir: Path, output_dir: Path) -> int:
         f"held={counts['held']} ({percentages['held']}%)",
         f"suspicious={counts['suspicious']} ({percentages['suspicious']}%)",
         f"unresolved={counts['unresolved']} ({percentages['unresolved']}%)",
+        f"companions={counts['companions']}",
+        f"associated_companions={counts['associated_companions']} ({companion_percentages['associated_companions']}%)",
+        f"ignored_companions={counts['ignored_companions']} ({companion_percentages['ignored_companions']}%)",
+        f"duplicate_companions={counts['duplicate_companions']} ({companion_percentages['duplicate_companions']}%)",
         f"movable_videos={counts['matched'] + counts['extra']}",
         f"untouched_videos={untouched}",
         f"readiness_state={values.get('readiness_state', 'not-evaluated')}",

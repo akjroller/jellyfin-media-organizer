@@ -64,3 +64,5 @@ def test_report_bundle_excludes_private_path_and_sensitive_artifacts(tmp_path, c
     assert "private_paths=excluded" in report_text
     assert "approval_tokens=excluded" in report_text
     assert "provider_cache=excluded" in report_text
+    assert "companions=0" in report_text
+    assert "associated_companions=0" in report_text
