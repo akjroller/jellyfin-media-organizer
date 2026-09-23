@@ -222,6 +222,25 @@ def test_structural_extra_seasons_do_not_collapse_to_one_destination() -> None:
     assert "extra-naming-season-context:02" in season_two.reasons
 
 
+def test_title_hint_preserves_season_context_for_structural_extras() -> None:
+    decision = build_extra_destination(
+        _show(),
+        source_key=(
+            "Fixture Series/extras/Season 01 - Extra 02 - "
+            "Selected Crew Analysis NTSC.mkv"
+        ),
+        extra=ExtraDecision(kind="extra", rule="fabricated test evidence"),
+        source_extension=".mkv",
+        display_title="Selected Crew Analysis",
+    )
+
+    assert decision.status is DestinationStatus.READY
+    assert decision.relative_path == (
+        "Fixture Series (2026)/extras/Season 01 - Selected Crew Analysis.mkv"
+    )
+    assert "extra-naming-season-context:01" in decision.reasons
+
+
 def test_creditless_extra_seasons_do_not_collapse_to_one_destination() -> None:
     season_one = _destination(
         "Fixture Series/Fixture.Series.S1.NCOP.01.1080p.BluRay.x265.mkv",

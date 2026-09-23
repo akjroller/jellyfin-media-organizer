@@ -36,7 +36,7 @@ _DEFAULT_TITLES: dict[str, str] = {
 }
 
 _STRUCTURAL_EXTRA = re.compile(
-    r"(?i)(?<![A-Za-z0-9])s(?P<season>\d{1,2})[ ._-]*extras?"
+    r"(?i)(?<![A-Za-z0-9])(?:s|season[ ._-]*)(?P<season>\d{1,2})[ ._-]*extras?"
     r"(?:[ ._-]*(?P<variant>\d{1,3}))?(?![A-Za-z0-9])"
 )
 _GENERIC_EXTRA = re.compile(r"(?i)(?<![A-Za-z0-9])extras?(?![A-Za-z0-9])")
@@ -171,10 +171,19 @@ def derive_extra_display_identity(
     if title_hint is not None and title_hint.strip():
         hinted, trimmed = _trim_release_noise(title_hint)
         if hinted:
+            structural_match = _STRUCTURAL_EXTRA.search(stem)
+            additional_reasons: tuple[str, ...] = ()
+            if structural_match is not None:
+                season_context = _variant_label(structural_match.group("season"))
+                season_prefix = f"Season {season_context} - "
+                if not hinted.casefold().startswith(season_prefix.casefold()):
+                    hinted = f"{season_prefix}{hinted}"
+                additional_reasons = (f"extra-naming-season-context:{season_context}",)
             return _finalize(
                 hinted,
                 source_reason="extra-naming-source:parser-title-hint",
                 release_noise_trimmed=trimmed,
+                additional_reasons=additional_reasons,
             )
 
     creditless_pattern = _CREDITLESS_MARKERS.get(kind)
