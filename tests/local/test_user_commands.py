@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 from jellyfin_show_organizer.user_commands import (
     run_demo,
     run_doctor,
     run_init,
     run_inspect,
+    run_report,
+    run_review_status,
     write_example,
 )
 
@@ -138,12 +141,102 @@ def test_inspect_points_blocked_review_runs_to_review(tmp_path: Path, capsys) ->
     assert "jmo review" in capsys.readouterr().out
 
 
+def test_review_status_reports_percentages_and_safe_movement_boundary(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    session_path = tmp_path / "session.json"
+    session_path.write_bytes(b"synthetic")
+    items = [
+        SimpleNamespace(
+            state=SimpleNamespace(value="answered"),
+            kind=SimpleNamespace(value="duplicate"),
+        ),
+        SimpleNamespace(
+            state=SimpleNamespace(value="pending"), kind=SimpleNamespace(value="held")
+        ),
+        SimpleNamespace(
+            state=SimpleNamespace(value="deferred"), kind=SimpleNamespace(value="held")
+        ),
+        SimpleNamespace(
+            state=SimpleNamespace(value="answered"), kind=SimpleNamespace(value="held")
+        ),
+    ]
+    fake_session = SimpleNamespace(
+        items=items,
+        sha256="a" * 64,
+        plan_sha256="b" * 64,
+        approved_scope_refs=(),
+        complete=False,
+        approved_partial=False,
+    )
+    monkeypatch.setattr(
+        "jellyfin_show_organizer.user_commands.load_review_session",
+        lambda _payload: fake_session,
+    )
+
+    assert run_review_status(session_path, json_output=True) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema_version"] == 2
+    assert payload["percentages"] == {
+        "answered": 50.0,
+        "deferred": 25.0,
+        "pending": 25.0,
+    }
+
+    assert run_review_status(session_path) == 0
+    output = capsys.readouterr().out
+    assert "Review categories" in output
+    assert "review decisions never move media" in output
+
+    fake_session.complete = True
+    assert run_review_status(session_path) == 0
+    assert "compile a fresh reviewed plan" in capsys.readouterr().out
+
+    fake_session.complete = False
+    fake_session.approved_partial = True
+    assert run_review_status(session_path) == 0
+    assert "partial review never authorizes apply" in capsys.readouterr().out
+
+
 def test_write_example_refuses_overwrite(tmp_path: Path, capsys) -> None:
     target = tmp_path / "example.toml"
     assert write_example(target, "x\n") == 0
     assert write_example(target, "y\n") == 2
     assert target.read_text(encoding="utf-8") == "x\n"
     assert "Refusing" in capsys.readouterr().out
+
+
+def test_report_rejects_invalid_or_existing_output(tmp_path: Path) -> None:
+    missing_summary = tmp_path / "missing"
+    missing_summary.mkdir()
+    try:
+        run_report(missing_summary, tmp_path / "out")
+    except ValueError as exc:
+        assert "summary.txt" in str(exc)
+    else:
+        raise AssertionError("missing summary should be rejected")
+
+    invalid = tmp_path / "invalid"
+    invalid.mkdir()
+    (invalid / "summary.txt").write_text("records=not-a-number\n", encoding="utf-8")
+    try:
+        run_report(invalid, tmp_path / "out")
+    except ValueError as exc:
+        assert "records" in str(exc)
+    else:
+        raise AssertionError("invalid count should be rejected")
+
+    valid = tmp_path / "valid"
+    valid.mkdir()
+    (valid / "summary.txt").write_text("records=0\n", encoding="utf-8")
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    try:
+        run_report(valid, existing)
+    except ValueError as exc:
+        assert "already exists" in str(exc)
+    else:
+        raise AssertionError("existing output should be rejected")
 
 
 def test_write_example_can_print_and_reject_missing_parent(

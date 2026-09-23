@@ -327,16 +327,33 @@ def run_review_status(session_path: Path, *, json_output: bool = False) -> int:
     session = load_review_session(path.read_bytes())
     states = Counter(item.state.value for item in session.items)
     kinds = Counter(item.kind.value for item in session.items)
+    total_items = len(session.items)
+
+    def percent(count: int) -> float:
+        return round((count / total_items) * 100, 2) if total_items else 0.0
+
+    answered = states[ReviewItemState.ANSWERED.value]
+    deferred = states[ReviewItemState.DEFERRED.value]
+    pending = states[ReviewItemState.PENDING.value]
+    answered_percent = percent(answered)
+    deferred_percent = percent(deferred)
+    pending_percent = percent(pending)
+
     result = {
-        "schema_version": 1,
+        "schema_version": 2,
         "session_sha256": session.sha256,
         "plan_sha256": session.plan_sha256,
-        "items": len(session.items),
+        "items": total_items,
         "duplicates": kinds[ReviewItemKind.DUPLICATE.value],
         "held": kinds[ReviewItemKind.HELD.value],
-        "answered": states[ReviewItemState.ANSWERED.value],
-        "deferred": states[ReviewItemState.DEFERRED.value],
-        "pending": states[ReviewItemState.PENDING.value],
+        "answered": answered,
+        "deferred": deferred,
+        "pending": pending,
+        "percentages": {
+            "answered": answered_percent,
+            "deferred": deferred_percent,
+            "pending": pending_percent,
+        },
         "approved_scope_items": len(session.approved_scope_refs),
         "complete": session.complete,
     }
@@ -345,11 +362,16 @@ def run_review_status(session_path: Path, *, json_output: bool = False) -> int:
         return 0
     print("Review status")
     print(f"Items:             {result['items']}")
-    print(f"Duplicates:        {result['duplicates']}")
-    print(f"Held:              {result['held']}")
-    print(f"Answered:          {result['answered']}")
-    print(f"Deferred:          {result['deferred']}")
-    print(f"Pending:           {result['pending']}")
+    print(f"Answered:          {answered} ({answered_percent:.2f}%)")
+    print(f"Deferred:           {deferred} ({deferred_percent:.2f}%)")
+    print(f"Pending:            {pending} ({pending_percent:.2f}%)")
+    print("Review categories")
+    print(f"  Duplicates:      {result['duplicates']}")
+    print(f"  Held:            {result['held']}")
+    print(
+        "Movement:          review decisions never move media; run a fresh plan and "
+        "preflight before any apply."
+    )
     print(f"Session SHA-256:   {result['session_sha256']}")
     if session.complete:
         print(
