@@ -191,11 +191,20 @@ def build_parser() -> argparse.ArgumentParser:
             "and quarantine execution are unavailable."
         ),
     )
-    review_parser.add_argument("plan", type=Path)
-    review_parser.add_argument("--overrides", type=Path, required=True)
-    review_parser.add_argument("--output", type=Path, required=True)
+    review_parser.add_argument("plan", type=Path, nargs="?")
+    review_parser.add_argument("--overrides", type=Path)
+    review_parser.add_argument("--output", type=Path)
     review_parser.add_argument("--session", type=Path, required=True)
-    review_parser.add_argument("--cache-dir", type=Path, required=True)
+    review_parser.add_argument("--cache-dir", type=Path)
+    review_parser.add_argument(
+        "--summary",
+        action="store_true",
+        help=(
+            "Show hash-bound review progress without reading media or changing state. "
+            "Use with --session; no plan, provider, or output arguments are needed."
+        ),
+    )
+    review_parser.add_argument("--json", action="store_true", dest="json_output")
     review_parser.add_argument("--resume", action="store_true")
     review_parser.add_argument(
         "--answers",
@@ -517,6 +526,33 @@ def _no_interactive_input(_prompt: str) -> str:
 
 
 def _run_review(args: argparse.Namespace) -> int:
+    if bool(args.summary):
+        if args.session is None:
+            print(
+                "Review summary failed safely: --summary requires --session",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            return run_review_status(
+                cast(Path, args.session), json_output=bool(args.json_output)
+            )
+        except (OSError, ValueError, UnicodeDecodeError) as exc:
+            print(f"Review summary failed safely: {exc}", file=sys.stderr)
+            return 2
+
+    if (
+        args.plan is None
+        or args.overrides is None
+        or args.output is None
+        or args.cache_dir is None
+    ):
+        print(
+            "Review failed safely: plan, --overrides, --output, and --cache-dir "
+            "are required unless --summary is used",
+            file=sys.stderr,
+        )
+        return 2
     plan_path = cast(Path, args.plan)
     overrides_path = cast(Path, args.overrides)
     output_path = cast(Path, args.output)

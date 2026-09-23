@@ -70,6 +70,22 @@ def test_organizer_apply_help_exposes_exact_safety_inputs(
     assert "--resume" in output
 
 
+def test_review_summary_requires_only_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    session = tmp_path / "session.json"
+    session.write_text("synthetic", encoding="utf-8")
+    called: list[tuple[Path, bool]] = []
+
+    def fake_status(path: Path, *, json_output: bool = False) -> int:
+        called.append((path, json_output))
+        return 0
+
+    monkeypatch.setattr(cli, "run_review_status", fake_status)
+    assert main(["review", "--summary", "--session", str(session), "--json"]) == 0
+    assert called == [(session, True)]
+
+
 def test_organizer_plan_requires_explicit_paths_without_creating_output(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
