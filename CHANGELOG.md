@@ -2,6 +2,16 @@
 
 All notable public changes will be documented in this file. The project follows Semantic Versioning.
 
+## 0.2.0 - 2026-09-23
+
+- Added `jmo report` for path-free, shareable diagnostic bundles that include
+  readiness, counts, percentages, and failure categories without private paths,
+  caches, credentials, approval tokens, or journals.
+- Added `jmo review-status` percentages, separated duplicate/held categories,
+  and an explicit review-to-apply safety boundary.
+- Added `jmo init`, `jmo doctor`, `jmo demo`, `jmo inspect`, first-run guidance,
+  and public issue templates and roadmap for portable community use.
+
 ## 0.1.0 - 2026-09-21
 
 - First verified standalone JMO version tag and release-artifact build.

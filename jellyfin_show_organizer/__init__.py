@@ -1,6 +1,6 @@
 """Plan-first Jellyfin show organizer with an explicitly gated executor."""
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 from .api import AuditSummary, inspect_audit, plan_library
 
