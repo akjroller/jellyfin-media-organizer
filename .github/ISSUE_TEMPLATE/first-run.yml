@@ -1,0 +1,24 @@
+name: First-run or onboarding
+description: Improve the safe experience for a new installation.
+title: "[Onboarding]: "
+labels: [enhancement, onboarding]
+body:
+  - type: textarea
+    id: friction
+    attributes:
+      label: First-run friction
+      description: What should a new user understand or accomplish more easily?
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Synthetic workflow
+      description: Give safe steps using demo data or fabricated paths only.
+    validations:
+      required: true
+  - type: textarea
+    id: portability
+    attributes:
+      label: Platform considerations
+      description: Note Windows, macOS, Linux, shell, or packaging differences.

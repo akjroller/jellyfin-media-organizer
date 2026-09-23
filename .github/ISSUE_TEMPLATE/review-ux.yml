@@ -1,0 +1,26 @@
+name: Review UX
+description: Improve review summaries, explanations, or safe batch decisions.
+title: "[Review UX]: "
+labels: [enhancement, review]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Review problem
+      description: What is unclear, repetitive, or difficult to verify?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Safe evidence
+      description: Include fabricated examples or redacted counts, candidates, coordinates, and hashes.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and resumability
+      description: Explain how the proposal remains hash-bound and fail-closed.
+    validations:
+      required: true

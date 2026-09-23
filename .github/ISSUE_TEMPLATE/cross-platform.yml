@@ -1,0 +1,23 @@
+name: Cross-platform packaging
+description: Report or propose a portability, installer, shell, or packaging improvement.
+title: "[Packaging]: "
+labels: [enhancement, packaging]
+body:
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and Python version
+      placeholder: Linux/macOS/Windows and Python version
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed and expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Safe reproduction
+      description: Use a clean environment and synthetic data; do not include machine paths or secrets.

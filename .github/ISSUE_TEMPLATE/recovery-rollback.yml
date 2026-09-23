@@ -1,0 +1,24 @@
+name: Recovery or rollback
+description: Improve journals, resume behavior, rollback, or uncertain filesystem states.
+title: "[Recovery]: "
+labels: [enhancement, safety]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Recovery scenario
+      description: Describe the interrupted or partially completed synthetic scenario.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected safe behavior
+      description: State what should remain untouched and what evidence should be required.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted evidence
+      description: Include counts, exit codes, journal state, and hashes only.

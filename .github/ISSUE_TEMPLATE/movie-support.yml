@@ -1,0 +1,24 @@
+name: Future movie-library support
+description: Propose provider-neutral planning or review behavior for movies.
+title: "[Movies]: "
+labels: [enhancement, movies]
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Movie use case
+      description: Describe the library shape and desired result using fabricated examples.
+    validations:
+      required: true
+  - type: textarea
+    id: metadata
+    attributes:
+      label: Metadata and matching evidence
+      description: Identify title, year, edition, and provider evidence without private filenames or caches.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Collision and recovery safety
+      description: Explain review, duplicate, sidecar, and rollback expectations.
