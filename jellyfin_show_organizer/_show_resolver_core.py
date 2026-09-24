@@ -780,6 +780,49 @@ def _attempt_structural_resolution(
         )
         if segment_title_rescue is not None:
             if segment_title_rescue.winner is None:
+                title_tie_break = catalog_title_tiebreak(
+                    provider,
+                    parse_group,
+                    segment_title_rescue.candidates,
+                    minimum_gap=_MINIMUM_MATCH_GAP,
+                    suspicious_threshold=_SUSPICIOUS_THRESHOLD,
+                )
+                if title_tie_break is not None and title_tie_break.winner is not None:
+                    provider_show = next(
+                        candidate
+                        for candidate in provider_candidates
+                        if candidate.identity == title_tie_break.winner
+                    )
+                    title = _preferred_title(
+                        override, source_title, provider_show.title
+                    )
+                    assert title is not None
+                    return _StructuralResolutionTrace(
+                        resolution=_resolved_show_result(
+                            source_key=source_key,
+                            parse_group=parse_group,
+                            override=override,
+                            provider=provider,
+                            provider_identity=provider_show.identity,
+                            title=title,
+                            year=(
+                                provider_show.year
+                                if provider_show.year is not None
+                                else year_hint
+                            ),
+                            method=f"{method}+catalog-title-tiebreak-after-segments",
+                            confidence=top_score,
+                            reasons=(
+                                *search_reasons,
+                                *alias_reasons,
+                                *segment_title_rescue.reasons,
+                                *title_tie_break.reasons,
+                                f"candidate-gap:{gap:.3f}",
+                            ),
+                            candidates=title_tie_break.candidates,
+                        ),
+                        title_tie_break=title_tie_break,
+                    )
                 return _StructuralResolutionTrace(
                     resolution=ShowResolution(
                         status=ResolutionStatus.SUSPICIOUS,
