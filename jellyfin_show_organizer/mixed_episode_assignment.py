@@ -751,6 +751,100 @@ def _protect_coordinate_title_conflict_peers(
     return tuple(protected)
 
 
+def _compound_title_candidates(
+    source: SourceEpisodeInput,
+    assignment: SourceEpisodeAssignment,
+    catalog: ProviderEpisodeCatalog,
+) -> tuple[ProviderEpisode, ...] | None:
+    """Find a contiguous multi-episode range encoded in one title hint.
+
+    A lone file remains suspicious in the strict resolver. This group-level
+    path only activates when several files provide the same kind of compound
+    evidence, so a release family can prove the mapping without weakening the
+    single-file fail-closed rule.
+    """
+
+    parse = source.parse
+    if (
+        assignment.status is not AssignmentStatus.SUSPICIOUS
+        or not _has_coordinate_title_conflict(assignment)
+        or parse.season is None
+        or len(parse.episodes) != 1
+        or not parse.title_hint
+        or not re.search(r"\s(?:-|/|&)\s", parse.title_hint)
+    ):
+        return None
+    normalized_source = f" {_normalize_title(parse.title_hint)} "
+    contained = [
+        episode
+        for episode in catalog.episodes
+        if episode.season == parse.season
+        and episode.number is not None
+        and len(_normalize_title(episode.title).split()) >= 2
+        and f" {_normalize_title(episode.title)} " in normalized_source
+    ]
+    unique = {episode.identity: episode for episode in contained}
+    ordered = tuple(sorted(unique.values(), key=lambda episode: episode.number or 0))
+    if len(ordered) < 2 or any(
+        (left.number or 0) + 1 != (right.number or 0)
+        for left, right in zip(ordered, ordered[1:], strict=False)
+    ):
+        return None
+    return ordered
+
+
+def _apply_compound_title_remap(
+    sources: tuple[SourceEpisodeInput, ...],
+    assignments: tuple[SourceEpisodeAssignment, ...],
+    catalog: ProviderEpisodeCatalog,
+) -> tuple[SourceEpisodeAssignment, ...]:
+    assignment_by_key = {
+        assignment.source_key: assignment for assignment in assignments
+    }
+    candidates = {
+        source.source_key: episodes
+        for source in sources
+        if (assignment := assignment_by_key.get(source.source_key)) is not None
+        and (episodes := _compound_title_candidates(source, assignment, catalog))
+        is not None
+    }
+    if len(candidates) < 3:
+        return assignments
+    identities = [
+        episode.identity for episodes in candidates.values() for episode in episodes
+    ]
+    if len(identities) != len(set(identities)):
+        return assignments
+    remapped: list[SourceEpisodeAssignment] = []
+    for assignment in assignments:
+        episodes = candidates.get(assignment.source_key)
+        if episodes is None:
+            remapped.append(assignment)
+            continue
+        remapped.append(
+            replace(
+                assignment,
+                status=AssignmentStatus.MATCHED,
+                episodes=episodes,
+                evidence=MatchEvidence(
+                    method="catalog-compound-title-remap",
+                    confidence=1.0,
+                    reasons=(
+                        *assignment.evidence.reasons,
+                        "catalog-compound-title-remap:group-proven",
+                        f"catalog-compound-title-count:{len(episodes)}",
+                        "catalog-compound-title-coordinates:"
+                        + ",".join(
+                            f"S{episode.season:02d}E{episode.number:02d}"
+                            for episode in episodes
+                        ),
+                    ),
+                ),
+            )
+        )
+    return tuple(remapped)
+
+
 def _is_nonregular_title_quarantine(assignment: SourceEpisodeAssignment) -> bool:
     return any(
         reason.startswith("nonregular-title-quarantine:")
@@ -1076,6 +1170,7 @@ def assign_episode_group_with_provider(
         ordered = _apply_segment_counted_title_remap(
             show, source_group, ordered, provider, catalog
         )
+    ordered = _apply_compound_title_remap(source_group, ordered, catalog)
     ordered = _protect_coordinate_title_conflict_peers(source_group, ordered)
     ordered = _protect_provider_episode_identity(ordered)
     request_key = next(iter(request_keys)) if len(request_keys) == 1 else None

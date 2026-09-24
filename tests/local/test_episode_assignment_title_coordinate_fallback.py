@@ -278,6 +278,41 @@ def test_compound_catalog_titles_do_not_collapse_to_one_episode() -> None:
     )
 
 
+def test_repeated_compound_titles_prove_contiguous_episode_ranges() -> None:
+    provider = FixtureProvider(
+        tuple(
+            _episode(f"episode-{number}", 1, number, f"Story {number}A")
+            for number in range(1, 7)
+        )
+    )
+    sources = tuple(
+        SourceEpisodeInput(
+            f"episode-{start}.mkv",
+            ParseResult(
+                season=1,
+                episodes=(start,),
+                title_hint=f"Story {start}A - Story {start + 1}A",
+            ),
+        )
+        for start in (1, 3, 5)
+    )
+
+    result = assign_episode_group_with_provider(_show(), sources, provider)
+
+    assert all(
+        assignment.status is AssignmentStatus.MATCHED
+        for assignment in result.assignments
+    )
+    assert [
+        tuple(episode.number for episode in assignment.episodes)
+        for assignment in result.assignments
+    ] == [(1, 2), (3, 4), (5, 6)]
+    assert all(
+        "catalog-compound-title-remap:group-proven" in assignment.evidence.reasons
+        for assignment in result.assignments
+    )
+
+
 def test_selected_full_title_is_not_confused_with_nested_catalog_title() -> None:
     provider = FixtureProvider(
         (
