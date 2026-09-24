@@ -5,7 +5,6 @@ import hashlib
 import io
 import json
 import os
-import re
 import shutil
 import unicodedata
 from collections import Counter
@@ -22,6 +21,7 @@ from .models import (
     TerminalStatus,
 )
 from .preflight import PreflightResult, summarize_preflight
+from .privacy import path_free_text
 from .review import stable_review_ref
 from .schema import (
     canonical_companions,
@@ -457,19 +457,6 @@ def _readiness_summary(
     return state, remaining
 
 
-_PRIVATE_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\)[^\s,;]+")
-_PRIVATE_FILE_RE = re.compile(
-    r"(?i)\b[^\s,;]+\.(?:mkv|mp4|m4v|avi|mov|wmv|srt|ass|ssa|nfo|jpg|jpeg|png)\b"
-)
-
-
-def _path_free_text(value: str) -> str:
-    """Redact path-like values before they enter a shareable report."""
-
-    redacted = _PRIVATE_PATH_RE.sub("<private-path>", value)
-    return _PRIVATE_FILE_RE.sub("<private-file>", redacted)
-
-
 def _held_group_label(record: PlanRecord) -> str:
     """Return a user-facing show label without falling back to a source path."""
 
@@ -477,7 +464,7 @@ def _held_group_label(record: PlanRecord) -> str:
     if parse is not None:
         for value in (parse.series_hint, parse.title_hint, *parse.series_aliases):
             if value and value.strip():
-                return _path_free_text(value.strip())
+                return path_free_text(value.strip())
     return "<unidentified-show>"
 
 
@@ -487,7 +474,7 @@ def _held_triage_lines(records: tuple[PlanRecord, ...]) -> list[str]:
         return ["held_triage=none"]
     by_show = Counter(_held_group_label(record) for record in held)
     by_reason = Counter(
-        _path_free_text(record.reason or "unspecified") for record in held
+        path_free_text(record.reason or "unspecified") for record in held
     )
     total = len(held)
 

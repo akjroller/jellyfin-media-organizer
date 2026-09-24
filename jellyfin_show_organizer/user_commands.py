@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import platform
-import re
 import sys
 import textwrap
 from collections import Counter
@@ -16,16 +15,12 @@ from pathlib import Path
 
 from . import __version__
 from .planner import PlanningConfig
+from .privacy import path_free_text
 from .review_session import (
     ReviewItemKind,
     ReviewItemState,
     ReviewSession,
     load_review_session,
-)
-
-_PRIVATE_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\)[^\s,;]+")
-_PRIVATE_FILE_RE = re.compile(
-    r"(?i)\b[^\s,;]+\.(?:mkv|mp4|m4v|avi|mov|wmv|srt|ass|ssa|nfo|jpg|jpeg|png)\b"
 )
 
 CONFIG_EXAMPLE = """schema_version = 1
@@ -563,14 +558,9 @@ def run_review_status(
     return 0
 
 
-def _redact_review_text(value: str) -> str:
-    redacted = _PRIVATE_PATH_RE.sub("<private-path>", value)
-    return _PRIVATE_FILE_RE.sub("<private-file>", redacted)
-
-
 def _safe_review_value(value: object) -> object:
     if isinstance(value, str):
-        return _redact_review_text(value)
+        return path_free_text(value)
     if isinstance(value, list):
         return [_safe_review_value(item) for item in value]
     if isinstance(value, tuple):
@@ -633,7 +623,7 @@ def _write_review_export(
             "review_ref": item.review_ref,
             "kind": item.kind.value,
             "state": item.state.value,
-            "show_key": _redact_review_text(item.show_key),
+            "show_key": path_free_text(item.show_key),
             "collision_class": (
                 item.collision_class.value if item.collision_class is not None else None
             ),
