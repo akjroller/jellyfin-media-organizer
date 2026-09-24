@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pytest
 
+from jellyfin_show_organizer import __version__
+
 pytestmark = pytest.mark.local
 ROOT = Path(__file__).parents[2]
 PROJECT = ROOT / "pyproject.toml"
@@ -17,7 +19,7 @@ def test_package_version_has_one_source_of_truth():
 
     assert 'dynamic = ["version"]' in project
     assert 'version = { attr = "jellyfin_show_organizer.__version__" }' in project
-    assert '__version__ = "0.3.0"' in package_init
+    assert f'__version__ = "{__version__}"' in package_init
 
 
 def test_project_metadata_documents_supported_python_versions():
@@ -48,5 +50,6 @@ def test_release_policy_keeps_gated_apply_and_private_data_boundaries_explicit()
     assert "The `v0.1.0` version tag was the first verified JMO version tag" in text
     assert "exact reviewed-artifact approval" in text
     assert "no copy/delete/quarantine/source cleanup" in text
-    assert "There is currently no automatic PyPI" in text
+    assert "release-only PyPI workflow" in text
+    assert "short-lived OIDC Trusted Publishing credentials" in text
     assert "Real media, inventories, reports, provider caches, manifests" in text

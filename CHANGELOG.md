@@ -2,6 +2,13 @@
 
 All notable public changes will be documented in this file. The project follows Semantic Versioning.
 
+## 0.3.1 - 2026-09-24
+
+- Added protected, release-only PyPI publishing through GitHub Actions Trusted
+  Publishing with wheel, source-distribution, metadata, package-data, and CLI
+  verification before upload.
+- Added install and publication guidance for the PyPI-first community workflow.
+
 ## 0.3.0 - 2026-09-23
 
 - Added guided first-run review workflows, evidence-aware review batches,
