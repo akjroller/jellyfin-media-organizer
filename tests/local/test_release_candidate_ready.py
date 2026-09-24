@@ -18,7 +18,7 @@ from jellyfin_show_organizer.tvmaze_cache import JsonGetter
 pytestmark = pytest.mark.local
 FIXED_MTIME_NS = 1_700_000_000_000_000_000
 APPROVED_PLAN_SHA256 = (
-    "8ab86503ec8f0182f24cd4ee50f7f97c43fa82192d7791d4ab0c67dd2207d6a6"
+    "a6eb61c8a357fefbc2cbda307f5fff9ef0959abef2089e3d17ede985f671c50b"
 )
 
 
@@ -234,7 +234,7 @@ def test_complete_ready_candidate_has_stable_approved_hash_and_zero_mutation(
     assert first.preflight.plan_hash == APPROVED_PLAN_SHA256
     assert first.plan.schema_version == PLAN_SCHEMA_VERSION
     assert first.plan.provenance is not None
-    assert first.plan.provenance.tool_version == "0.2.0"
+    assert first.plan.provenance.tool_version == "0.3.0"
     assert len(first.plan.provenance.cache_snapshots) == 10
     assert all(
         snapshot.state == "ok" for snapshot in first.plan.provenance.cache_snapshots

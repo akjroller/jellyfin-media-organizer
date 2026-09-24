@@ -160,7 +160,7 @@ def test_release_docs_describe_the_verified_version_tag():
     readme = README.read_text(encoding="utf-8")
     releasing = RELEASING.read_text(encoding="utf-8")
 
-    assert "`v0.2.0` is the current minor release" in readme
+    assert "`v0.3.0` is the current minor release" in readme
     assert (
         "The `v0.1.0` version tag was the first verified JMO version tag" in releasing
     )
