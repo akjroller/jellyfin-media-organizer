@@ -229,7 +229,7 @@ docs/                      architecture and operating guidance
 
 JMO uses Semantic Versioning. Pull-request CI builds and verifies both wheel and source-distribution installs in isolated environments. Verified artifacts can be built by the deliberate release-artifact workflow or a matching version tag; the repository does not automatically publish packages to a package registry.
 
-The `v0.1.0` version tag was the first verified release. The `v0.1.1` patch release added the reviewed-duplicate winner fix, `v0.2.0` added onboarding, review-status, reporting, and contributor-workflow foundations, and `v0.3.0` is the current minor release with guided review workflows, evidence-aware decisions, quarantine hardening, modularity checks, and typed packaging. A GitHub Release is published separately from the tag and does not itself approve or authorize any media run. The presence of `jmo apply` in source remains subject to the explicit apply safety contract.
+The `v0.1.0` version tag was the first verified release. The `v0.1.1` patch release added the reviewed-duplicate winner fix, `v0.2.0` added onboarding, review-status, reporting, and contributor-workflow foundations, `v0.3.0` added guided review workflows and quarantine hardening, and `v0.3.1` adds the protected PyPI publication path. A GitHub Release is published separately from the tag and does not itself approve or authorize any media run. The presence of `jmo apply` in source remains subject to the explicit apply safety contract.
 
 See the [release policy](docs/releasing.md) for the version source of truth, supported runtime matrix, tag rules, artifact verification process, and privacy boundary.
 

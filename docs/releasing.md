@@ -2,7 +2,7 @@
 
 Jellyfin Media Organizer (JMO) uses Semantic Versioning for public releases. While the project remains pre-1.0, minor versions may introduce planned interface changes and patch versions are reserved for compatible fixes and packaging/documentation corrections.
 
-The `v0.1.0` version tag was the first verified JMO version tag. The `v0.1.1` patch release contained compatible duplicate-review correctness fixes. The `v0.2.0` minor release added onboarding, review-status, sanitized-report, and community-documentation foundations. The `v0.3.0` minor release adds guided review workflows, evidence-aware decisions, quarantine hardening, modularity checks, contributor validation, and typed packaging. A GitHub Release is published separately after the matching CI and release-artifact checks pass. Neither a tag nor a GitHub Release authorizes media mutation.
+The `v0.1.0` version tag was the first verified JMO version tag. The `v0.1.1` patch release contained compatible duplicate-review correctness fixes. The `v0.2.0` minor release added onboarding, review-status, sanitized-report, and community-documentation foundations. The `v0.3.0` minor release added guided review workflows, evidence-aware decisions, quarantine hardening, modularity checks, contributor validation, and typed packaging. The `v0.3.1` patch release adds protected PyPI publication. A GitHub Release is published separately after the matching CI and release-artifact checks pass. Neither a tag nor a GitHub Release authorizes media mutation.
 
 ## Version source of truth
 
@@ -46,7 +46,13 @@ A workflow artifact is not itself a decision to publish or announce a JMO releas
 
 ## Publication boundary
 
-There is currently no automatic PyPI or other package-registry publication. Pull requests and ordinary branch pushes never receive release credentials and cannot publish packages. Adding registry publication later requires a separate explicitly reviewed protected release mechanism with least-privilege credentials.
+The repository has a release-only PyPI workflow at
+`.github/workflows/publish-pypi.yml`. Pull requests and ordinary branch pushes
+never receive release credentials and cannot publish packages. A published
+GitHub Release must match the package version, pass distribution metadata and
+installation checks, and use the protected `pypi` environment. The workflow
+uses short-lived OIDC Trusted Publishing credentials; no long-lived PyPI token
+is stored in the repository.
 
 Release notes must describe the actual gated apply limitations precisely: exact reviewed-artifact approval, same-filesystem atomic no-overwrite moves, durable journaling, and no copy/delete/quarantine/source cleanup. A source implementation or successful workflow is not itself approval to publish.
 
