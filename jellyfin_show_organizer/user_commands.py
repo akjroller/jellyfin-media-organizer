@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import re
+import sys
 import textwrap
 from collections import Counter
 from collections.abc import Mapping
@@ -106,6 +107,59 @@ def run_init(
         f'Next step: jmo doctor "{source}" --destination-root "{destination}" --output-dir "{state / "runs" / "initial"}" --cache-dir "{state / "cache"}"'
     )
     print(f'Then:      jmo plan "{source}" --config "{state / "planning.toml"}"')
+    return 0
+
+
+def run_wizard(*, input_fn=input, output=None) -> int:
+    """Guide a first paper run without requiring users to assemble CLI flags."""
+
+    if output is None:
+        output = sys.stdout
+
+    def ask(label: str, default: str | None = None) -> str:
+        suffix = f" [{default}]" if default else ""
+        value = input_fn(f"{label}{suffix}: ").strip()
+        return value or (default or "")
+
+    output.write(
+        "Jellyfin Media Organizer guided setup\n"
+        "This wizard only creates state, checks paths, and prepares a paper plan.\n"
+        "It never moves, deletes, quarantines, or overwrites media.\n\n"
+    )
+    source_text = ask("Shows/library directory")
+    if not source_text:
+        output.write("Wizard cancelled: a Shows/library directory is required.\n")
+        return 2
+    source = Path(source_text).expanduser().resolve(strict=False)
+    destination_default = str(source.parent / "OrganizedShows")
+    destination_text = ask("Destination directory", destination_default)
+    state_default = str(source.parent / f"{source.name}-JMO-State")
+    state_text = ask("JMO state directory", state_default)
+    provider = ask("Provider mode (online/offline/refresh)", "online").casefold()
+    if provider not in {"online", "offline", "refresh"}:
+        output.write(
+            "Wizard cancelled: provider mode must be online, offline, or refresh.\n"
+        )
+        return 2
+    destination = Path(destination_text).expanduser().resolve(strict=False)
+    state = Path(state_text).expanduser().resolve(strict=False)
+    output.write(
+        "\nReview these paths before continuing:\n"
+        f"  Source:      {source}\n"
+        f"  Destination: {destination}\n"
+        f"  State:       {state}\n"
+        f"  Provider:    {provider}\n"
+    )
+    if ask("Create this setup", "Y").casefold() not in {"y", "yes"}:
+        output.write("Wizard cancelled before changing anything.\n")
+        return 0
+    result = run_init(source, destination, state, provider_mode=provider)
+    if result != 0:
+        return result
+    output.write(
+        "\nSetup is ready. Run the printed doctor command, then run the printed plan "
+        "command. Review the audit bundle before any future apply step.\n"
+    )
     return 0
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tomllib
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ from jellyfin_show_organizer.user_commands import (
     run_inspect,
     run_report,
     run_review_status,
+    run_wizard,
     write_example,
 )
 
@@ -298,6 +300,22 @@ def test_review_status_exports_path_free_evidence_snapshot(
     rendered = output.read_text(encoding="utf-8")
     assert "secret.mkv" not in rendered
     assert "C:\\\\Users" not in rendered
+
+
+def test_wizard_creates_safe_setup_from_guided_answers(tmp_path: Path) -> None:
+    source = tmp_path / "Shows"
+    destination = tmp_path / "Organized"
+    state = tmp_path / "JMO-State"
+    source.mkdir()
+    destination.mkdir()
+    answers = iter((str(source), str(destination), str(state), "offline", "Y"))
+    output = StringIO()
+
+    assert run_wizard(input_fn=lambda _prompt: next(answers), output=output) == 0
+    assert (state / "planning.toml").is_file()
+    assert (state / "base-overrides.toml").is_file()
+    assert (state / "cache").is_dir()
+    assert "never moves, deletes, quarantines" in output.getvalue()
 
 
 def test_write_example_refuses_overwrite(tmp_path: Path, capsys) -> None:

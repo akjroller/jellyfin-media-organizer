@@ -45,6 +45,7 @@ from .user_commands import (
     run_inspect,
     run_report,
     run_review_status,
+    run_wizard,
     write_example,
 )
 
@@ -181,6 +182,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     demo_parser.add_argument("--output", type=Path)
     demo_parser.set_defaults(handler=_run_demo)
+
+    wizard_parser = subparsers.add_parser(
+        "wizard",
+        help="Guided first-run setup for a safe paper plan.",
+        description=(
+            "Walk through source, destination, state, and provider choices, then "
+            "create a non-mutating JMO setup. The wizard never moves media."
+        ),
+    )
+    wizard_parser.set_defaults(handler=_run_wizard)
 
     review_parser = subparsers.add_parser(
         "review",
@@ -934,6 +945,14 @@ def _run_demo(args: argparse.Namespace) -> int:
         return run_demo(cast(Path | None, args.output))
     except OSError as exc:
         print(f"Demo failed safely: {exc}", file=sys.stderr)
+        return 2
+
+
+def _run_wizard(_args: argparse.Namespace) -> int:
+    try:
+        return run_wizard()
+    except (OSError, UnicodeError, ValueError) as exc:
+        print(f"Wizard failed safely: {exc}", file=sys.stderr)
         return 2
 
 

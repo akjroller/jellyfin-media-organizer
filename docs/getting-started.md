@@ -54,6 +54,20 @@ It never reads or changes an existing directory and refuses to overwrite its
 output. Because the demo already includes its own state and audit, do not run
 `jmo init` against `JMO-demo`; use `init` for a separate library instead.
 
+## Guided setup
+
+If you do not want to assemble the paths and flags yourself, run:
+
+```text
+jmo wizard
+```
+
+The wizard asks for the Shows directory, destination, state directory, and
+provider mode, shows the choices back to you, and requires confirmation before
+creating state. It then prints the exact `doctor` and `plan` commands for the
+paper run. The wizard never moves, deletes, overwrites, or quarantines media;
+review the generated audit bundle before any later apply workflow.
+
 For a new library, initialize a separate state directory and run the read-only
 doctor check before planning:
 
