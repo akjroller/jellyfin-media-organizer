@@ -2,7 +2,7 @@
 
 Jellyfin Media Organizer (JMO) uses Semantic Versioning for public releases. While the project remains pre-1.0, minor versions may introduce planned interface changes and patch versions are reserved for compatible fixes and packaging/documentation corrections.
 
-The `v0.1.0` version tag was the first verified JMO version tag. The `v0.1.1` patch release contained compatible duplicate-review correctness fixes. The `v0.2.0` minor release added onboarding, review-status, sanitized-report, and community-documentation foundations. The `v0.3.0` minor release added guided review workflows, evidence-aware decisions, quarantine hardening, modularity checks, contributor validation, and typed packaging. The `v0.3.1` patch release adds protected PyPI publication. A GitHub Release is published separately after the matching CI and release-artifact checks pass. Neither a tag nor a GitHub Release authorizes media mutation.
+The `v0.1.0` version tag was the first verified JMO version tag. The `v0.1.1` patch release contained compatible duplicate-review correctness fixes. The `v0.2.0` minor release added onboarding, review-status, sanitized-report, and community-documentation foundations. The `v0.3.0` minor release added guided review workflows, evidence-aware decisions, quarantine hardening, modularity checks, contributor validation, and typed packaging. The `v0.3.1` patch release added protected PyPI publication. The `v0.4.0` minor release adds guided run, optional TMDb provider support, and the permanent fail-closed review/apply boundary. A GitHub Release is published separately after the matching CI and release-artifact checks pass. Neither a tag nor a GitHub Release authorizes media mutation.
 
 ## Version source of truth
 

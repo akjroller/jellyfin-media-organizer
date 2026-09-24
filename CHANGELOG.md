@@ -2,6 +2,20 @@
 
 All notable public changes will be documented in this file. The project follows Semantic Versioning.
 
+## 0.4.0 - 2026-09-24
+
+- Added saved-configuration `jmo run` for repeatable, read-only planning after
+  guided setup.
+- Added the optional TMDb adapter and deterministic `auto` provider mode.
+- Improved provider-aware matching, override feedback, review summaries, and
+  hash-bound review decisions.
+- Made the fail-closed review/apply boundary an explicit permanent invariant.
+- Added cross-platform package, wheel, source-distribution, and installed
+  workflow validation for the normal first-run path.
+
+The demo intentionally remains blocked until its synthetic held and ambiguous
+records are reviewed; it never silently authorizes an apply.
+
 ## 0.3.1 - 2026-09-24
 
 - Added protected, release-only PyPI publishing through GitHub Actions Trusted
