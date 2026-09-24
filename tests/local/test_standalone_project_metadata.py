@@ -25,8 +25,13 @@ def test_only_standalone_application_package_is_shipped() -> None:
     assert (
         'packages = ["jellyfin_show_organizer", "jellyfin_show_organizer.data"]' in text
     )
+    assert '"py.typed"' in text
     assert 'jmo = "jellyfin_show_organizer.entrypoint:main"' in text
     assert 'organizer = "jellyfin_show_organizer.entrypoint:main"' in text
+
+
+def test_typed_package_marker_is_present() -> None:
+    assert (ROOT / "jellyfin_show_organizer" / "py.typed").is_file()
 
 
 def test_project_metadata_does_not_restore_legacy_upstream_identity() -> None:
