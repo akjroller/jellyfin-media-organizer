@@ -2,9 +2,9 @@
 
 Jellyfin Media Organizer is a plan-first, fail-closed tool for organizing media libraries across operating systems and provider configurations.
 
-## Current release: v0.1.1
+## Current release: v0.2.0
 
-The current release includes deterministic planning, hash-bound review sessions, check-only apply validation, recovery journals, onboarding commands, redacted inspection, review progress, and sanitized diagnostic reports. The next minor release will follow another user-facing improvement validated in CI.
+The current release includes deterministic planning, hash-bound review sessions, check-only apply validation, recovery journals, onboarding commands, redacted inspection, review progress, sanitized diagnostic reports, and the public contributor workflow. The next minor release will follow another user-facing improvement validated in CI.
 
 ## Priorities
 
