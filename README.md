@@ -67,8 +67,9 @@ For a real library, the simplest entrypoint is the guided wizard:
 ```
 
 With no subcommand, JMO walks through setup, doctor, planning, review, and the
-read-only apply check. It still requires a separate exact confirmation before
-any media can move. Advanced users and automation can continue to use the
+read-only apply check. If that check passes, the wizard offers the real apply
+and requires the literal `APPLY` confirmation; any other response leaves the
+media untouched. Advanced users and automation can continue to use the
 explicit `plan`, `review`, `inspect`, and `apply` commands.
 
 JMO is intentionally conservative: planning and review remain non-mutating, while `jmo apply` is an explicitly gated executor for one exact reviewed plan. Apply permits only same-filesystem, atomic, no-overwrite renames for `matched` and `extra` operation groups. It never copies across filesystems, overwrites, deletes, quarantines, or moves duplicate/held/ignored records.
