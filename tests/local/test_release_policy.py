@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+
 from jellyfin_show_organizer import __version__
 
 pytestmark = pytest.mark.local
