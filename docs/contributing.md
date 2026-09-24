@@ -45,7 +45,7 @@ The wrapper runs the checks in the same order as pull-request CI and stops at
 the first failure. The individual commands above remain useful when iterating
 on one layer.
 
-CI also checks Linux on Python 3.12, 3.13, and 3.14, Windows on Python 3.12, repository safety, branch coverage, and clean wheel/source-distribution installs.
+CI also checks Linux on Python 3.12, 3.13, and 3.14, Windows on Python 3.12, and macOS on Python 3.12. It also checks repository safety, branch coverage, and clean wheel/source-distribution installs on all three operating systems.
 
 ## Synthetic fixtures
 

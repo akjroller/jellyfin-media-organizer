@@ -27,6 +27,7 @@ The package requires Python 3.12 or newer. CI currently exercises:
 - Linux with Python 3.13;
 - Linux with Python 3.14;
 - Windows with Python 3.12.
+- macOS with Python 3.12.
 
 The project metadata advertises Python 3.12, 3.13, and 3.14 support. A version should not be advertised if it is known to fail the supported public contract.
 
@@ -39,7 +40,7 @@ Normal pull-request CI builds both a wheel and source distribution. Each artifac
 - the `plan` help surface;
 - packaged JSON/TOML data required by the planner.
 
-A deliberate manual invocation of the release-artifact workflow can build verified artifacts without creating a public version tag or release. A matching version tag triggers the same artifact workflow and additionally verifies that the tag matches the package version.
+A deliberate manual invocation of the release-artifact workflow can build verified artifacts without creating a public version tag or release. The workflow builds and smoke-tests artifacts on Linux, Windows, and macOS. A matching version tag triggers the same artifact workflow and additionally verifies that the tag matches the package version.
 
 A workflow artifact is not itself a decision to publish or announce a JMO release.
 
