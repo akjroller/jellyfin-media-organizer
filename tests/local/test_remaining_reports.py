@@ -228,6 +228,36 @@ def test_summary_distinguishes_readiness_from_library_completion():
     assert "readiness_state=blocked" in blocked
 
 
+def test_summary_reports_percentages_and_path_free_held_triage():
+    held_one = PlanRecord(
+        source=_source("Alpha/private-one.mkv", 30),
+        status=TerminalStatus.HELD,
+        parse=ParseResult(series_hint="Alpha"),
+        evidence=MatchEvidence(method="human-hold", confidence=1.0),
+        reason=r"reviewed source C:\\Users\\akjro\\private-one.mkv",
+    )
+    held_two = PlanRecord(
+        source=_source("Alpha/private-two.mkv", 31),
+        status=TerminalStatus.HELD,
+        parse=ParseResult(series_hint="Alpha"),
+        evidence=MatchEvidence(method="human-hold", confidence=1.0),
+        reason="reviewed source remains untouched",
+    )
+    plan = OrganizerPlan(
+        schema_version=3,
+        overrides_version=4,
+        records=(held_one, held_two),
+    )
+
+    summary = render_summary(plan).decode("utf-8")
+
+    assert "held_pct=100.0%" in summary
+    assert "held_triage_total=2" in summary
+    assert "held_triage_by_show=Alpha=2:100.0%" in summary
+    assert "<private-path>" in summary
+    assert "private-one.mkv" not in summary
+
+
 def test_ready_plan_with_only_intentional_remaining_is_apply_ready():
     plan = OrganizerPlan(
         schema_version=3,

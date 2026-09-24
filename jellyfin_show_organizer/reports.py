@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import unicodedata
 from collections import Counter
@@ -456,6 +457,55 @@ def _readiness_summary(
     return state, remaining
 
 
+_PRIVATE_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\)[^\s,;]+")
+_PRIVATE_FILE_RE = re.compile(
+    r"(?i)\b[^\s,;]+\.(?:mkv|mp4|m4v|avi|mov|wmv|srt|ass|ssa|nfo|jpg|jpeg|png)\b"
+)
+
+
+def _path_free_text(value: str) -> str:
+    """Redact path-like values before they enter a shareable report."""
+
+    redacted = _PRIVATE_PATH_RE.sub("<private-path>", value)
+    return _PRIVATE_FILE_RE.sub("<private-file>", redacted)
+
+
+def _held_group_label(record: PlanRecord) -> str:
+    """Return a user-facing show label without falling back to a source path."""
+
+    parse = record.parse
+    if parse is not None:
+        for value in (parse.series_hint, parse.title_hint, *parse.series_aliases):
+            if value and value.strip():
+                return _path_free_text(value.strip())
+    return "<unidentified-show>"
+
+
+def _held_triage_lines(records: tuple[PlanRecord, ...]) -> list[str]:
+    held = tuple(record for record in records if record.status is TerminalStatus.HELD)
+    if not held:
+        return ["held_triage=none"]
+    by_show = Counter(_held_group_label(record) for record in held)
+    by_reason = Counter(
+        _path_free_text(record.reason or "unspecified") for record in held
+    )
+    total = len(held)
+
+    def _rows(values: Counter[str]) -> list[str]:
+        return [
+            f"{label}={count}:{count / total:.1%}"
+            for label, count in sorted(
+                values.items(), key=lambda item: (-item[1], item[0].casefold(), item[0])
+            )
+        ]
+
+    return [
+        f"held_triage_total={total}",
+        "held_triage_by_show=" + "|".join(_rows(by_show)),
+        "held_triage_by_reason=" + "|".join(_rows(by_reason)),
+    ]
+
+
 def render_summary(
     plan: OrganizerPlan,
     preflight: PreflightResult | None = None,
@@ -480,6 +530,13 @@ def render_summary(
         f"records={len(plan.records)}",
     ]
     lines.extend(f"{status.value}={counts[status]}" for status in TerminalStatus)
+    lines.extend(
+        f"{status.value}_pct={counts[status] / len(plan.records):.1%}"
+        if plan.records
+        else f"{status.value}_pct=0.0%"
+        for status in TerminalStatus
+    )
+    lines.extend(_held_triage_lines(plan.records))
     lines.extend(
         (
             f"duplicate_review={duplicate_review}",
