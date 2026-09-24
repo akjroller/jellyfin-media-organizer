@@ -429,6 +429,30 @@ def run_wizard(*, input_fn=input, output=None) -> int:
                     f"  Files to move:    {total_moving_members(prepared)}\n"
                     f"  Confirmation token: {approval_token(prepared, source_root, destination_root)}\n"
                 )
+                if (
+                    input_fn(
+                        "Type APPLY to execute this exact reviewed plan now "
+                        "(anything else keeps files untouched): "
+                    ).strip()
+                    == "APPLY"
+                ):
+                    journal_path = run_dir / "apply-journal.jsonl"
+                    applied = execute_apply(
+                        prepared,
+                        source_root,
+                        destination_root,
+                        journal_path=journal_path,
+                        check_only=False,
+                        resume=False,
+                    )
+                    output.write(
+                        "\nApply completed successfully.\n"
+                        f"  Groups completed: {applied.groups_completed}\n"
+                        f"  Files moved:      {applied.members_moved}\n"
+                        f"  Journal:          {journal_path}\n"
+                    )
+                else:
+                    output.write("\nApply not started. Your media remains untouched.\n")
             except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
                 output.write(f"\nApply check stopped safely: {exc}\n")
     output.write(
