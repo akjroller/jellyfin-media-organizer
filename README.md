@@ -2,6 +2,48 @@
 
 A plan-first Python CLI for organizing media into Jellyfin-friendly layouts. The current implementation is deliberately focused on **TV shows** while the planning and safety model is built out.
 
+## Try JMO in five minutes (without your media)
+
+The safest way to evaluate JMO is with its disposable synthetic demo. It never
+reads your library, never calls a provider, and never changes files outside the
+demo directory.
+
+```powershell
+py -m pip install jellyfin-media-organizer
+jmo demo
+jmo doctor <demo-shows> --destination-root <demo-destination> --output-dir <demo-state> --cache-dir <demo-cache>
+jmo inspect <demo-state>
+```
+
+PyPI publication is being staged for the project. Until it is enabled, install
+the verified wheel attached to the [latest GitHub Release](https://github.com/akjroller/jellyfin-media-organizer/releases/latest), then run the same
+`jmo demo` workflow. See [package publishing](docs/publishing.md) for the
+maintainer setup and trust boundary.
+
+If you are running from a source checkout, use `.venv\Scripts\python.exe` and
+`.venv\Scripts\jmo.exe` instead. The demo prints the exact workspace paths and
+creates a ready, one-video synthetic plan. A typical summary looks like this:
+
+```text
+records=1
+matched=1
+extra=0
+duplicate=0
+held=0
+suspicious=0
+unresolved=0
+preflight_ready=true
+apply_safe=true
+```
+
+The complete fabricated walkthrough, including duplicate, held, extra, sidecar,
+and ambiguous examples, is in the [synthetic case study](docs/synthetic-case-study.md).
+For safe beta testing and feedback, see [Community beta](docs/community-beta.md).
+
+JMO is not a universal media manager yet. It is a TV-show-focused, plan-first
+tool for people who want to inspect and review a proposed Jellyfin layout before
+anything can move.
+
 JMO is intentionally conservative: planning and review remain non-mutating, while `jmo apply` is an explicitly gated executor for one exact reviewed plan. Apply permits only same-filesystem, atomic, no-overwrite renames for `matched` and `extra` operation groups. It never copies across filesystems, overwrites, deletes, quarantines, or moves duplicate/held/ignored records.
 
 ## Current capabilities
@@ -143,6 +185,9 @@ Repository examples and tests use synthetic paths and fixtures. Real library inv
 - [Release and versioning policy](docs/releasing.md)
 - [Security policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)
+- [Synthetic case study](docs/synthetic-case-study.md)
+- [Community beta guide](docs/community-beta.md)
+- [Package publishing](docs/publishing.md)
 - [Upstream acknowledgments](ACKNOWLEDGMENTS.md)
 
 ## Development
