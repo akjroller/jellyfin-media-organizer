@@ -8,15 +8,29 @@ The safest way to evaluate JMO is with its disposable synthetic demo. It never
 reads your library, never calls a provider, and never changes files outside the
 demo directory.
 
-PyPI publication is being staged for the project. Until it is enabled, install
-the wheel attached to the [latest GitHub Release](https://github.com/akjroller/jellyfin-media-organizer/releases/latest).
-The PowerShell commands below use the v0.3.0 release in an isolated environment.
-Start in a writable working directory with Python 3.12 installed (or adjust
-`-3.12` to a newer installed version). No environment activation is needed.
+PyPI is the preferred installation source. Publication of the current
+[v0.3.1 release](https://github.com/akjroller/jellyfin-media-organizer/releases/tag/v0.3.1)
+is still staged until its Trusted Publisher workflow succeeds. Start in a
+writable working directory with Python 3.12 installed (or adjust `-3.12` to a
+newer installed version). No environment activation is needed.
 
 ```powershell
 py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install "jellyfin-media-organizer==0.3.1"
+```
+
+If PyPI does not yet offer that version, use a verified wheel from
+[GitHub Releases](https://github.com/akjroller/jellyfin-media-organizer/releases).
+The v0.3.0 wheel below is the fallback while v0.3.1 artifacts are unavailable;
+it installs the previous release rather than v0.3.1:
+
+```powershell
 .\.venv\Scripts\python.exe -m pip install "https://github.com/akjroller/jellyfin-media-organizer/releases/download/v0.3.0/jellyfin_media_organizer-0.3.0-py3-none-any.whl"
+```
+
+After either installation succeeds, run the same disposable demo workflow:
+
+```powershell
 .\.venv\Scripts\jmo.exe demo --output .\jmo-demo
 .\.venv\Scripts\jmo.exe doctor .\jmo-demo\Shows --destination-root .\jmo-demo\OrganizedShows --output-dir .\jmo-demo\State\runs\initial --cache-dir .\jmo-demo\State\cache
 .\.venv\Scripts\jmo.exe inspect .\jmo-demo\State\runs\demo-run
