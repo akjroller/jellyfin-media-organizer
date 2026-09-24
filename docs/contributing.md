@@ -28,6 +28,23 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe tools\check_repository_safety.py
 ```
 
+After installing the development extras, the complete local gate can also be
+run with one command:
+
+```bash
+./.venv/bin/python tools/run_checks.py
+```
+
+On Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe tools\run_checks.py
+```
+
+The wrapper runs the checks in the same order as pull-request CI and stops at
+the first failure. The individual commands above remain useful when iterating
+on one layer.
+
 CI also checks Linux on Python 3.12, 3.13, and 3.14, Windows on Python 3.12, repository safety, branch coverage, and clean wheel/source-distribution installs.
 
 ## Synthetic fixtures

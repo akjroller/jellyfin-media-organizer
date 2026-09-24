@@ -147,6 +147,16 @@ Repository examples and tests use synthetic paths and fixtures. Real library inv
 
 ## Development
 
+The quickest complete local validation is:
+
+```bash
+python tools/run_checks.py
+```
+
+It runs the same constraints, lint, format, type, test, and repository-safety
+gates used by CI. Use the individual commands below when iterating on one
+check.
+
 ```bash
 python -m pip install -e ".[dev]"
 python tools/check_ci_constraints.py
