@@ -38,6 +38,13 @@ The current project boundary is deliberately narrow:
 - `apply_contract.py`, `apply_validation.py`, and `apply_execution.py` — exact approval binding, status-gated operation groups, live-state validation, atomic no-overwrite moves, durable journaling, rollback, resume, and final verification.
 - `data/` — versioned JSON/TOML contracts and synthetic default override examples.
 
+Command adapters (`cli.py`, `entrypoint.py`, `apply_scope_cli.py`, and
+`quarantine_cli.py`) sit at the outer edge of the package. Core modules may be
+called by those adapters, but must not import them; the boundary is enforced by
+`tests/local/test_module_boundaries.py`. Shareable output sanitization lives in
+`privacy.py` so audit reports and review exports cannot drift into separate
+redaction policies.
+
 ## Determinism
 
 Equivalent input evidence should produce equivalent typed results and stable plan hashes. Run-local timestamps, machine paths, and other environment-specific metadata do not belong in the immutable plan contract.
