@@ -1,0 +1,99 @@
+name: Publish package to PyPI
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_CONSTRAINT: ${{ github.workspace }}/requirements-ci.txt
+
+jobs:
+  publish-to-pypi:
+    name: Publish verified release to PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/jellyfin-media-organizer
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out released revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install constrained build frontend
+        run: python -m pip install build
+
+      - name: Verify published release identity
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+
+          from jellyfin_show_organizer import __version__
+
+          expected = f"v{__version__}"
+          actual = os.environ["RELEASE_TAG"]
+          if actual != expected:
+              raise SystemExit(
+                  f"release tag {actual!r} does not match package version {expected!r}"
+              )
+          print(f"release tag matches package version: {actual}")
+          PY
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+
+      - name: Build wheel and source distribution
+        run: python -m build
+
+      - name: Verify wheel before publication
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/pypi-wheel-venv"
+          "$RUNNER_TEMP/pypi-wheel-venv/bin/python" -m pip install --no-deps dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/pypi-wheel-venv/bin/jmo" --version
+          "$RUNNER_TEMP/pypi-wheel-venv/bin/jmo" demo --help
+          "$RUNNER_TEMP/pypi-wheel-venv/bin/jmo" doctor --help
+          "$RUNNER_TEMP/pypi-wheel-venv/bin/jmo" inspect --help
+          "$RUNNER_TEMP/pypi-wheel-venv/bin/python" - <<'PY'
+          from importlib.metadata import version
+          from importlib.resources import files
+          from jellyfin_show_organizer import __version__
+          from jellyfin_show_organizer.schema import PLAN_SCHEMA_RESOURCE
+
+          assert version("jellyfin-media-organizer") == __version__
+          data = files("jellyfin_show_organizer").joinpath("data")
+          assert data.joinpath(PLAN_SCHEMA_RESOURCE.removeprefix("data/")).is_file()
+          assert data.joinpath("overrides-v1.toml").is_file()
+          print("PyPI wheel verified")
+          PY
+
+      - name: Verify source distribution before publication
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/pypi-sdist-venv"
+          "$RUNNER_TEMP/pypi-sdist-venv/bin/python" -m pip install setuptools wheel
+          "$RUNNER_TEMP/pypi-sdist-venv/bin/python" -m pip install --no-build-isolation --no-deps dist/*.tar.gz
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/pypi-sdist-venv/bin/jmo" --version
+          "$RUNNER_TEMP/pypi-sdist-venv/bin/jmo" demo --help
+          echo "PyPI source distribution verified"
+
+      - name: Publish verified distributions
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: dist/
