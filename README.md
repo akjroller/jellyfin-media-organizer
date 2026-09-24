@@ -8,21 +8,30 @@ The safest way to evaluate JMO is with its disposable synthetic demo. It never
 reads your library, never calls a provider, and never changes files outside the
 demo directory.
 
+PyPI publication is being staged for the project. Until it is enabled, install
+the wheel attached to the [latest GitHub Release](https://github.com/akjroller/jellyfin-media-organizer/releases/latest).
+The PowerShell commands below use the v0.3.0 release in an isolated environment.
+Start in a writable working directory with Python 3.12 installed (or adjust
+`-3.12` to a newer installed version). No environment activation is needed.
+
 ```powershell
-py -m pip install jellyfin-media-organizer
-jmo demo
-jmo doctor <demo-shows> --destination-root <demo-destination> --output-dir <demo-state> --cache-dir <demo-cache>
-jmo inspect <demo-state>
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install "https://github.com/akjroller/jellyfin-media-organizer/releases/download/v0.3.0/jellyfin_media_organizer-0.3.0-py3-none-any.whl"
+.\.venv\Scripts\jmo.exe demo --output .\jmo-demo
+.\.venv\Scripts\jmo.exe doctor .\jmo-demo\Shows --destination-root .\jmo-demo\OrganizedShows --output-dir .\jmo-demo\State\runs\initial --cache-dir .\jmo-demo\State\cache
+.\.venv\Scripts\jmo.exe inspect .\jmo-demo\State\runs\demo-run
 ```
 
-PyPI publication is being staged for the project. Until it is enabled, install
-the verified wheel attached to the [latest GitHub Release](https://github.com/akjroller/jellyfin-media-organizer/releases/latest), then run the same
-`jmo demo` workflow. See [package publishing](docs/publishing.md) for the
-maintainer setup and trust boundary.
+The `jmo-demo` directory must not already exist; choose a new `--output` path
+for another run. The demo's `README.txt` also prints commands with the exact
+paths. `inspect` takes the generated audit bundle (`State/runs/demo-run`),
+not the parent state directory. On macOS/Linux, use `python3` to create the
+environment and `.venv/bin/python` / `.venv/bin/jmo` for its executables.
+See [package publishing](docs/publishing.md) for the maintainer setup and trust
+boundary.
 
-If you are running from a source checkout, use `.venv\Scripts\python.exe` and
-`.venv\Scripts\jmo.exe` instead. The demo prints the exact workspace paths and
-creates a ready, one-video synthetic plan. A typical summary looks like this:
+If you prefer a source checkout, follow [Install](#install) below first.
+The demo creates a ready, one-video synthetic plan. A typical summary looks like this:
 
 ```text
 records=1
