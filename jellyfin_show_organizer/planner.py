@@ -1284,9 +1284,7 @@ def execute_plan(
         )
     else:
         provider = tvmaze_provider
-    tmdb_snapshots = (
-        _cache_snapshots(tmdb_cache) if tmdb_cache is not None else ()
-    )
+    tmdb_snapshots = _cache_snapshots(tmdb_cache) if tmdb_cache is not None else ()
     plan = _build_plan(
         source_root,
         config,
