@@ -23,6 +23,10 @@ _EPISODE_WORD = re.compile(
     r"(?i)(?<![A-Za-z0-9])episode[ ._-]*(?P<episode>\d{1,3})"
     r"(?P<segment>[A-Za-z])?(?![A-Za-z0-9])"
 )
+_EPISODE_TOKEN = re.compile(
+    r"(?i)(?<![A-Za-z0-9])Ep[ ._-]*(?P<episode>\d{1,3})"
+    r"(?P<segment>[A-Za-z])?(?![A-Za-z0-9])"
+)
 _SPECIAL_NUMBERING = re.compile(
     r"(?i)(?<![A-Za-z0-9])(?P<kind>OVA|OAD)[ ._-]*(?P<episode>\d{1,3})(?!\d)"
 )
@@ -37,15 +41,13 @@ _LEGACY_BRACKETED = re.compile(
     r"(?P<segment>[A-Za-z])?\s*\]"
 )
 _DUAL_ABSOLUTE_AFTER_SXE = re.compile(
-    r"^[ ._-]*(?:\((?P<paren>\d{1,3})\)|\[(?P<bracket>\d{1,3})\])"
-    r"(?=$|[ ._\-\[])"
+    r"^[ ._-]*(?:\((?P<paren>\d{1,3})\)|\[(?P<bracket>\d{1,3})\])" r"(?=$|[ ._\-\[])"
 )
 _PARENTHESIZED_ABSOLUTE = re.compile(
     r"^(?P<series>.+?)\s*\((?P<episode>\d{1,3})\)(?=$|[ ._\-\[])"
 )
 _ABSOLUTE = re.compile(
-    r"^(?P<series>.+?)[ ._]+-[ ._]+(?P<episode>\d{1,3})(?:v\d+)?"
-    r"(?=$|[ ._\-\[(])"
+    r"^(?P<series>.+?)[ ._]+-[ ._]+(?P<episode>\d{1,3})(?:v\d+)?" r"(?=$|[ ._\-\[(])"
 )
 _BARE_ABSOLUTE = re.compile(
     r"^(?P<series>.+?)[ ._-]+(?P<episode>\d{1,3})(?:v\d+)?(?=$|\s|[([])"
@@ -62,8 +64,7 @@ _RELEASE_TAIL = re.compile(
     r"flac|opus|10bit|hi10)(?=$|[ ._\-\])])"
 )
 _SEASON_NOISE = re.compile(
-    rf"(?i)(?:^|[ ._\-\[(])(?:s(?:eason)?[ ._-]*{_SEASON_NUMBER})"
-    r"(?=$|[ ._\-\])])"
+    rf"(?i)(?:^|[ ._\-\[(])(?:s(?:eason)?[ ._-]*{_SEASON_NUMBER})" r"(?=$|[ ._\-\])])"
 )
 _GENERIC_SEASON_DIR = re.compile(
     rf"(?i)^(?:season[ ._-]*{_SEASON_NUMBER}|s{_SEASON_NUMBER})$"
@@ -71,6 +72,9 @@ _GENERIC_SEASON_DIR = re.compile(
 _SEASON_COLLECTION = re.compile(
     rf"(?i)^(?P<series>.+?)[ ._-]+(?:s|season[ ._-]*)(?P<season>{_SEASON_NUMBER})"
     r"(?=$|[ ._-])"
+)
+_SEASON_TOKEN_ANYWHERE = re.compile(
+    rf"(?i)(?<![A-Za-z0-9])(?:s|season)[ ._-]*(?P<season>{_SEASON_NUMBER})(?!\d)"
 )
 _CHECKSUM = re.compile(r"(?i)(?:^|\s)[A-F0-9]{8}(?=$|\s)")
 _UNBRACKETED_RELEASE_PREFIX = re.compile(r"^(?P<tag>[A-Za-z0-9]+)-(?P<series>.+)$")
@@ -261,6 +265,41 @@ def _season_collection_context(
             and not leaf_tokens[-1].isdigit()
         )
         if not exact and not one_suffix:
+            continue
+        candidates.append((parent_series, int(match.group("season")), parent_year))
+
+    unique = {
+        (series.casefold(), season, year): (series, season, year)
+        for series, season, year in candidates
+    }
+    if len(unique) != 1:
+        return None
+    return next(iter(unique.values()))
+
+
+def _season_context_from_path(
+    path: PurePosixPath, leaf_series: str | None
+) -> tuple[str, int, int | None] | None:
+    """Recover a season from a descriptive ancestor such as ``Show Season 2``.
+
+    Some release folders put the season token in the middle of the title rather
+    than using the canonical ``Show S02``/``Show Season 2`` prefix.  We only
+    accept a context when the text before that token independently identifies
+    the same series and all matching ancestors agree on one season.
+    """
+
+    if leaf_series is None:
+        return None
+    leaf_normalized = _normalize_text(leaf_series).casefold()
+    candidates: list[tuple[str, int, int | None]] = []
+    for component in reversed(path.parts[:-1]):
+        match = _SEASON_TOKEN_ANYWHERE.search(component)
+        if match is None:
+            continue
+        parent_series, parent_year = _series_and_year(component[: match.start()])
+        if parent_series is None:
+            continue
+        if _normalize_text(parent_series).casefold() != leaf_normalized:
             continue
         candidates.append((parent_series, int(match.group("season")), parent_year))
 
@@ -578,6 +617,46 @@ def parse_video_path(relative_path: str) -> ParseResult:
             series_aliases=_series_aliases(series, source),
             absolute_episode=int(match.group("episode")),
             segment_hint=(match.group("segment") or None),
+            year=year,
+            embedded_tvmaze_id=embedded_id,
+            title_hint=_title_hint(stem, match.end()),
+        )
+
+    match = _EPISODE_TOKEN.search(stem)
+    if match is not None:
+        source = stem[: match.start()]
+        series, year = _series_for_match(stem, path, match)
+        fallback_series, fallback_year = _fallback_series(path)
+        if (
+            series is not None
+            and fallback_series is not None
+            and _normalize_text(series)
+            .casefold()
+            .startswith(_normalize_text(fallback_series).casefold() + " ")
+        ):
+            series = fallback_series
+            if year is None:
+                year = fallback_year
+        episode = int(match.group("episode"))
+        if episode > 0:
+            season_context = _season_context_from_path(path, series)
+            if season_context is not None:
+                context_series, context_season, context_year = season_context
+                return ParseResult(
+                    series_hint=context_series,
+                    season=context_season,
+                    episodes=(episode,),
+                    year=year if year is not None else context_year,
+                    embedded_tvmaze_id=embedded_id,
+                    title_hint=_title_hint(stem, match.end()),
+                )
+        # ``Ep00`` is commonly an OVA or other non-aired extra.  It is not a
+        # positive regular episode coordinate, so retain the show identity but
+        # leave the record unresolved for explicit review instead of inventing
+        # a provider match.
+        return ParseResult(
+            series_hint=series,
+            series_aliases=_series_aliases(series, source),
             year=year,
             embedded_tvmaze_id=embedded_id,
             title_hint=_title_hint(stem, match.end()),

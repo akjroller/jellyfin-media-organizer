@@ -28,6 +28,29 @@ def test_managed_numeric_episode_title_is_not_parsed_as_a_range() -> None:
     assert result.episodes == (6,)
 
 
+def test_ep_token_uses_descriptive_ancestor_season() -> None:
+    result = parse_video_path(
+        "[Exiled-Destiny]_Sekirei_Season_2_Pure_Engagement_[BD_1080P]/"
+        "[Exiled-Destiny]_Sekirei_Pure_Engagement_Ep01_[BD_1080P]_(243F5220).mkv"
+    )
+
+    assert result.series_hint == "Sekirei"
+    assert result.season == 2
+    assert result.episodes == (1,)
+
+
+def test_ep00_is_not_invented_as_a_regular_episode() -> None:
+    result = parse_video_path(
+        "[Exiled-Destiny]_Sekirei_Season_2_Pure_Engagement_[BD_1080P]/"
+        "[Exiled-Destiny]_Sekirei_Pure_Engagement_Ep00_[BD_1080P]_(243F5220).mkv"
+    )
+
+    assert result.series_hint == "Sekirei"
+    assert result.season is None
+    assert result.episodes == ()
+    assert result.absolute_episode is None
+
+
 def test_year_prefixed_season_tokens_preserve_four_digit_provider_seasons() -> None:
     result = parse_video_path(
         "Naruto (2002)/Season 2002/Naruto (2002) S2002E01 - Enter Naruto Uzumaki!.mkv"
