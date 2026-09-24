@@ -161,6 +161,8 @@ def test_rendered_provenance_is_canonical_path_free_and_hash_linked() -> None:
     assert payload["overrides_snapshot_id"] == _OVERRIDES
     assert payload["provider"] == {
         "name": "tvmaze",
+        "strategy": "tvmaze",
+        "providers": ["tvmaze"],
         "mode": "offline",
         "failure": True,
         "cache_snapshot_count": 2,

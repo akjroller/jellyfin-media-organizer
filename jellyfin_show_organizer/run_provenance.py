@@ -57,6 +57,8 @@ class RunProvenance:
     companion_statuses: tuple[tuple[str, int], ...]
     preflight_ready: bool
     preflight_finding_count: int
+    provider_strategy: str = "tvmaze"
+    provider_names: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -74,6 +76,8 @@ class RunProvenance:
             "overrides_snapshot_id": self.overrides_snapshot_id,
             "provider": {
                 "name": self.provider_name,
+                "strategy": self.provider_strategy,
+                "providers": list(self.provider_names),
                 "mode": self.provider_mode,
                 "failure": self.provider_failure,
                 "cache_snapshot_count": self.cache_snapshot_count,
@@ -173,6 +177,8 @@ def build_run_provenance(
     overrides_configured: bool,
     preflight_ready: bool,
     preflight_finding_count: int,
+    provider_strategy: str = "tvmaze",
+    provider_names: tuple[str, ...] = (),
 ) -> RunProvenance:
     provenance = plan.provenance
     if provenance is None:
@@ -204,6 +210,8 @@ def build_run_provenance(
         companion_statuses=_companion_status_counts(plan),
         preflight_ready=preflight_ready,
         preflight_finding_count=preflight_finding_count,
+        provider_strategy=provider_strategy,
+        provider_names=provider_names or ("tvmaze",),
     )
 
 
