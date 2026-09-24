@@ -268,7 +268,9 @@ def run_wizard(*, input_fn=input, output=None) -> int:
         if result != 0:
             return result
         run_dir = state / "runs" / "initial"
-    if not resume_existing and ask("Run the read-only safety check and paper plan now", "Y").casefold() not in {
+    if not resume_existing and ask(
+        "Run the read-only safety check and paper plan now", "Y"
+    ).casefold() not in {
         "y",
         "yes",
     }:
@@ -278,9 +280,7 @@ def run_wizard(*, input_fn=input, output=None) -> int:
         )
         return 0
     if resume_existing:
-        output.write(
-            f'  jmo plan "{source}" --config "{state / "planning.toml"}"\n'
-        )
+        output.write(f'  jmo plan "{source}" --config "{state / "planning.toml"}"\n')
 
     doctor_result = run_doctor(
         source,
