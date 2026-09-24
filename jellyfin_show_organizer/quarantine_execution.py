@@ -774,6 +774,93 @@ def _rollback_quarantined_members(
     return failures
 
 
+def _check_only_quarantine(
+    prepared: PreparedQuarantine,
+    source_root: Path,
+    organized_root: Path,
+    quarantine_root: Path,
+    members_total: int,
+) -> QuarantineExecutionResult:
+    preapply, organized = _validate_check(
+        prepared, source_root, organized_root, quarantine_root
+    )
+    return QuarantineExecutionResult(
+        quarantine_plan_sha256=prepared.plan.sha256,
+        plan_sha256=prepared.plan.plan_sha256,
+        review_session_sha256=prepared.plan.review_session_sha256,
+        groups_total=len(prepared.plan.groups),
+        members_total=members_total,
+        winners_preapply=preapply,
+        winners_organized=organized,
+        groups_completed=0,
+        members_moved=0,
+        members_recovered=0,
+        journal_path=None,
+        check_only=True,
+    )
+
+
+def _completed_quarantine_result(
+    prepared: PreparedQuarantine,
+    source_root: Path,
+    organized_root: Path,
+    quarantine_root: Path,
+    journal_path: Path,
+    members_total: int,
+) -> QuarantineExecutionResult:
+    for group in prepared.plan.groups:
+        if _winner_state(group, source_root, organized_root) != "organized":
+            raise QuarantineExecutionError(
+                "completed quarantine winner state no longer matches"
+            )
+        for member in group.members:
+            if _member_state(member, source_root, quarantine_root) not in {
+                "quarantined",
+                "already-absent",
+            }:
+                raise QuarantineExecutionError(
+                    "completed quarantine member state no longer matches"
+                )
+    return QuarantineExecutionResult(
+        quarantine_plan_sha256=prepared.plan.sha256,
+        plan_sha256=prepared.plan.plan_sha256,
+        review_session_sha256=prepared.plan.review_session_sha256,
+        groups_total=len(prepared.plan.groups),
+        members_total=members_total,
+        winners_preapply=0,
+        winners_organized=len(prepared.plan.groups),
+        groups_completed=len(prepared.plan.groups),
+        members_moved=0,
+        members_recovered=0,
+        journal_path=journal_path,
+        check_only=False,
+    )
+
+
+def _start_quarantine_journal(
+    prepared: PreparedQuarantine,
+    source_root: Path,
+    organized_root: Path,
+    quarantine_root: Path,
+    journal: _QuarantineJournal,
+    *,
+    resume: bool,
+) -> None:
+    if resume:
+        return
+    preapply, organized = _validate_check(
+        prepared, source_root, organized_root, quarantine_root
+    )
+    if preapply:
+        raise QuarantineExecutionError(
+            "duplicate quarantine cannot start until every reviewed winner is "
+            "at its approved organized destination"
+        )
+    if organized != len(prepared.plan.groups):
+        raise QuarantineExecutionError("not every duplicate winner is organized")
+    journal.append("run-started", result="started")
+
+
 def execute_quarantine(
     prepared: PreparedQuarantine,
     source_root: Path,
@@ -794,22 +881,12 @@ def execute_quarantine(
             raise QuarantineExecutionError(
                 "--check-only cannot be combined with --resume"
             )
-        preapply, organized = _validate_check(
-            prepared, source_root, organized_root, quarantine_root
-        )
-        return QuarantineExecutionResult(
-            quarantine_plan_sha256=prepared.plan.sha256,
-            plan_sha256=prepared.plan.plan_sha256,
-            review_session_sha256=prepared.plan.review_session_sha256,
-            groups_total=len(prepared.plan.groups),
-            members_total=members_total,
-            winners_preapply=preapply,
-            winners_organized=organized,
-            groups_completed=0,
-            members_moved=0,
-            members_recovered=0,
-            journal_path=None,
-            check_only=True,
+        return _check_only_quarantine(
+            prepared,
+            source_root,
+            organized_root,
+            quarantine_root,
+            members_total,
         )
     if journal_path is None:
         raise QuarantineExecutionError(
@@ -823,48 +900,23 @@ def execute_quarantine(
     recovered_count = 0
     try:
         journal = _QuarantineJournal(journal_path, prepared, resume=resume)
-        if not resume:
-            preapply, organized = _validate_check(
-                prepared, source_root, organized_root, quarantine_root
-            )
-            if preapply:
-                raise QuarantineExecutionError(
-                    "duplicate quarantine cannot start until every reviewed winner is "
-                    "at its approved organized destination"
-                )
-            if organized != len(prepared.plan.groups):
-                raise QuarantineExecutionError(
-                    "not every duplicate winner is organized"
-                )
-            journal.append("run-started", result="started")
+        _start_quarantine_journal(
+            prepared,
+            source_root,
+            organized_root,
+            quarantine_root,
+            journal,
+            resume=resume,
+        )
         state = journal.state()
         if state.run_completed:
-            for group in prepared.plan.groups:
-                if _winner_state(group, source_root, organized_root) != "organized":
-                    raise QuarantineExecutionError(
-                        "completed quarantine winner state no longer matches"
-                    )
-                for member in group.members:
-                    if _member_state(member, source_root, quarantine_root) not in {
-                        "quarantined",
-                        "already-absent",
-                    }:
-                        raise QuarantineExecutionError(
-                            "completed quarantine member state no longer matches"
-                        )
-            return QuarantineExecutionResult(
-                quarantine_plan_sha256=prepared.plan.sha256,
-                plan_sha256=prepared.plan.plan_sha256,
-                review_session_sha256=prepared.plan.review_session_sha256,
-                groups_total=len(prepared.plan.groups),
-                members_total=members_total,
-                winners_preapply=0,
-                winners_organized=len(prepared.plan.groups),
-                groups_completed=len(prepared.plan.groups),
-                members_moved=0,
-                members_recovered=0,
-                journal_path=journal_path,
-                check_only=False,
+            return _completed_quarantine_result(
+                prepared,
+                source_root,
+                organized_root,
+                quarantine_root,
+                journal_path,
+                members_total,
             )
 
         completed_groups = set(state.completed_groups)

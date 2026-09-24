@@ -959,6 +959,130 @@ def _answer_held(
     )
 
 
+def _apply_batch_recommended(
+    session: ReviewSession,
+    selected: tuple[str, ...],
+    duplicate_by_ref: Mapping[str, DuplicateReviewGroup],
+    *,
+    session_path: Path,
+    input_fn: InputFn,
+    output: TextIO,
+) -> tuple[ReviewSession, tuple[str, ...]]:
+    duplicate_refs = [
+        ref
+        for ref in selected
+        if session.item(ref).kind is ReviewItemKind.DUPLICATE
+        and session.item(ref).state is not ReviewItemState.ANSWERED
+    ]
+    if not duplicate_refs:
+        return session, selected
+    if any(duplicate_by_ref[ref].recommended_winner is None for ref in duplicate_refs):
+        raise ReviewConfigurationError(
+            "batch recommended acceptance requires a winner for every selected group"
+        )
+
+    batches: dict[tuple[object, ...], list[str]] = {}
+    for ref in duplicate_refs:
+        batches.setdefault(_duplicate_batch_key(duplicate_by_ref[ref]), []).append(ref)
+    accepted: set[str] = set()
+    for batch_index, batch_refs in enumerate(batches.values(), start=1):
+        output.write("Batch recommended winners:\n")
+        output.write(f"  Evidence group {batch_index} ({len(batch_refs)} items):\n")
+        batch_group = duplicate_by_ref[batch_refs[0]]
+        output.write(
+            "  Shared evidence fingerprint: "
+            f"{_evidence_fingerprint(_duplicate_batch_key(batch_group))}\n"
+        )
+        if batch_group.evidence:
+            output.write("  Shared evidence: " + "; ".join(batch_group.evidence) + "\n")
+        for ref in batch_refs:
+            batch_group = duplicate_by_ref[ref]
+            output.write(
+                f"  {ref}: {batch_group.recommended_winner} -> "
+                f"{batch_group.destination_key}\n"
+            )
+        if input_fn(
+            "Accept this evidence-identical group? [y/N]: "
+        ).strip().casefold() not in {
+            "y",
+            "yes",
+        }:
+            continue
+        accepted.update(batch_refs)
+        for ref in batch_refs:
+            batch_group = duplicate_by_ref[ref]
+            assert batch_group.recommended_winner is not None
+            session = session.with_answer(
+                ref,
+                state=ReviewItemState.ANSWERED,
+                action="select_winner",
+                data={
+                    "active_action": DuplicateGroupAction.SELECT_WINNER.value,
+                    "winner": batch_group.recommended_winner,
+                },
+            )
+            atomic_replace(session_path, render_review_session(session))
+    return session, tuple(ref for ref in selected if ref not in accepted)
+
+
+def _apply_batch_keep_held(
+    session: ReviewSession,
+    selected: tuple[str, ...],
+    held_by_source: Mapping[str, Mapping[str, object]],
+    *,
+    session_path: Path,
+    input_fn: InputFn,
+    output: TextIO,
+) -> tuple[ReviewSession, tuple[str, ...]]:
+    held_refs = [
+        ref
+        for ref in selected
+        if session.item(ref).kind is ReviewItemKind.HELD
+        and session.item(ref).state is not ReviewItemState.ANSWERED
+    ]
+    if not held_refs:
+        return session, selected
+
+    held_batches: dict[str, list[tuple[str, Mapping[str, object]]]] = {}
+    for ref in held_refs:
+        item = session.item(ref)
+        assert item.source is not None
+        record = held_by_source.get(normalize_review_path(item.source))
+        if record is None:
+            raise ReviewConfigurationError("source review item disappeared from plan")
+        held_batches.setdefault(_held_batch_key(record), []).append((ref, record))
+
+    accepted: set[str] = set()
+    for batch_index, batch in enumerate(held_batches.values(), start=1):
+        output.write("Batch leave-untouched sources:\n")
+        output.write(f"  Evidence group {batch_index} ({len(batch)} items):\n")
+        batch_record = batch[0][1]
+        output.write(
+            "  Shared evidence fingerprint: "
+            f"{_evidence_fingerprint(_held_batch_key(batch_record))}\n"
+        )
+        shared_reason = batch_record.get("reason")
+        if isinstance(shared_reason, str) and shared_reason:
+            output.write(f"  Shared reason: {shared_reason}\n")
+        for ref, record in batch:
+            item = session.item(ref)
+            status = record.get("status")
+            reason = record.get("reason")
+            reason_text = f"; reason={reason}" if isinstance(reason, str) else ""
+            output.write(f"  {ref}: {item.source} [{status}]{reason_text}\n")
+        if input_fn(
+            "Leave this evidence-identical group untouched / held? [y/N]: "
+        ).strip().casefold() not in {"y", "yes"}:
+            continue
+        for ref, _record in batch:
+            accepted.add(ref)
+            session = session.with_answer(
+                ref, state=ReviewItemState.ANSWERED, action="keep_held"
+            )
+            atomic_replace(session_path, render_review_session(session))
+    return session, tuple(ref for ref in selected if ref not in accepted)
+
+
 def run_review_system(
     manifest: object,
     base_override_payload: bytes,
@@ -1060,121 +1184,28 @@ def run_review_system(
             raise ReviewConfigurationError(
                 "--batch-accept-recommended cannot be combined with --answers"
             )
-        duplicate_refs = [
-            ref
-            for ref in selected
-            if session.item(ref).kind is ReviewItemKind.DUPLICATE
-            and session.item(ref).state is not ReviewItemState.ANSWERED
-        ]
-        if duplicate_refs:
-            if any(
-                duplicate_by_ref[ref].recommended_winner is None
-                for ref in duplicate_refs
-            ):
-                raise ReviewConfigurationError(
-                    "batch recommended acceptance requires a winner for every selected group"
-                )
-            batches: dict[tuple[object, ...], list[str]] = {}
-            for ref in duplicate_refs:
-                batches.setdefault(
-                    _duplicate_batch_key(duplicate_by_ref[ref]), []
-                ).append(ref)
-            accepted_duplicate: set[str] = set()
-            for batch_index, batch_refs in enumerate(batches.values(), start=1):
-                output.write("Batch recommended winners:\n")
-                output.write(
-                    f"  Evidence group {batch_index} ({len(batch_refs)} items):\n"
-                )
-                batch_group = duplicate_by_ref[batch_refs[0]]
-                output.write(
-                    "  Shared evidence fingerprint: "
-                    f"{_evidence_fingerprint(_duplicate_batch_key(batch_group))}\n"
-                )
-                if batch_group.evidence:
-                    output.write(
-                        "  Shared evidence: " + "; ".join(batch_group.evidence) + "\n"
-                    )
-                for ref in batch_refs:
-                    batch_group = duplicate_by_ref[ref]
-                    output.write(
-                        f"  {ref}: {batch_group.recommended_winner} -> "
-                        f"{batch_group.destination_key}\n"
-                    )
-                if input_fn(
-                    "Accept this evidence-identical group? [y/N]: "
-                ).strip().casefold() not in {"y", "yes"}:
-                    continue
-                accepted_duplicate.update(batch_refs)
-                for ref in batch_refs:
-                    batch_group = duplicate_by_ref[ref]
-                    assert batch_group.recommended_winner is not None
-                    session = session.with_answer(
-                        ref,
-                        state=ReviewItemState.ANSWERED,
-                        action="select_winner",
-                        data={
-                            "active_action": DuplicateGroupAction.SELECT_WINNER.value,
-                            "winner": batch_group.recommended_winner,
-                        },
-                    )
-                    atomic_replace(session_path, render_review_session(session))
-            selected = tuple(ref for ref in selected if ref not in accepted_duplicate)
+        session, selected = _apply_batch_recommended(
+            session,
+            selected,
+            duplicate_by_ref,
+            session_path=session_path,
+            input_fn=input_fn,
+            output=output,
+        )
 
     if batch_keep_held:
         if answers is not None:
             raise ReviewConfigurationError(
                 "--batch-keep-held cannot be combined with --answers"
             )
-        held_refs = [
-            ref
-            for ref in selected
-            if session.item(ref).kind is ReviewItemKind.HELD
-            and session.item(ref).state is not ReviewItemState.ANSWERED
-        ]
-        if held_refs:
-            held_batches: dict[str, list[tuple[str, Mapping[str, object]]]] = {}
-            for ref in held_refs:
-                item = session.item(ref)
-                assert item.source is not None
-                record = held_by_source.get(normalize_review_path(item.source))
-                if record is None:
-                    raise ReviewConfigurationError(
-                        "source review item disappeared from plan"
-                    )
-                held_batches.setdefault(_held_batch_key(record), []).append(
-                    (ref, record)
-                )
-            accepted_held: set[str] = set()
-            for batch_index, batch in enumerate(held_batches.values(), start=1):
-                output.write("Batch leave-untouched sources:\n")
-                output.write(f"  Evidence group {batch_index} ({len(batch)} items):\n")
-                batch_record = batch[0][1]
-                output.write(
-                    "  Shared evidence fingerprint: "
-                    f"{_evidence_fingerprint(_held_batch_key(batch_record))}\n"
-                )
-                shared_reason = batch_record.get("reason")
-                if isinstance(shared_reason, str) and shared_reason:
-                    output.write(f"  Shared reason: {shared_reason}\n")
-                for ref, record in batch:
-                    item = session.item(ref)
-                    status = record.get("status")
-                    reason = record.get("reason")
-                    reason_text = (
-                        f"; reason={reason}" if isinstance(reason, str) else ""
-                    )
-                    output.write(f"  {ref}: {item.source} [{status}]{reason_text}\n")
-                if input_fn(
-                    "Leave this evidence-identical group untouched / held? [y/N]: "
-                ).strip().casefold() not in {"y", "yes"}:
-                    continue
-                for ref, _record in batch:
-                    accepted_held.add(ref)
-                    session = session.with_answer(
-                        ref, state=ReviewItemState.ANSWERED, action="keep_held"
-                    )
-                    atomic_replace(session_path, render_review_session(session))
-            selected = tuple(ref for ref in selected if ref not in accepted_held)
+        session, selected = _apply_batch_keep_held(
+            session,
+            selected,
+            held_by_source,
+            session_path=session_path,
+            input_fn=input_fn,
+            output=output,
+        )
 
     for ref in selected:
         item = session.item(ref)
