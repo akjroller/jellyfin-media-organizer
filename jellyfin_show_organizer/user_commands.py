@@ -40,6 +40,57 @@ max_component_length = 180
 OVERRIDES_EXAMPLE = "schema_version = 4\n"
 
 
+def _discover_library_candidates() -> list[Path]:
+    """Return a small, predictable set of likely library directories.
+
+    Discovery is intentionally shallow: JMO must never walk an entire drive or
+    silently choose a media root.  The wizard only offers existing directories
+    with at least one common video file below them.
+    """
+
+    candidates: list[Path] = []
+    roots = [Path.cwd(), Path.home() / "Videos", Path.home() / "Desktop"]
+    for root in roots:
+        if not root.is_dir():
+            continue
+        children = [root] + [child for child in root.iterdir() if child.is_dir()]
+        for child in children:
+            if child.name.casefold() not in {"shows", "tv", "media", "library"}:
+                continue
+            try:
+                has_video = any(
+                    item.is_file()
+                    and item.suffix.casefold()
+                    in {".mkv", ".mp4", ".avi", ".m4v", ".ts", ".mov"}
+                    for item in child.rglob("*")
+                )
+            except OSError:
+                has_video = False
+            resolved = child.resolve(strict=False)
+            if has_video and resolved not in candidates:
+                candidates.append(resolved)
+    return sorted(candidates, key=lambda path: str(path).casefold())
+
+
+def _write_wizard_summary(output, outcome, run_dir: Path) -> None:
+    """Print the actionable part of a paper plan in non-technical language."""
+
+    counts = Counter(record.status.value for record in outcome.plan.records)
+    total = len(outcome.plan.records)
+    movable = counts["matched"] + counts["extra"]
+    output.write(
+        "\nPaper plan summary\n"
+        f"  Found {total} video records.\n"
+        f"  Safe to organize now: {movable} (matched {counts['matched']}, extras {counts['extra']})\n"
+        f"  Duplicate releases kept in place: {counts['duplicate']}\n"
+        f"  Held files kept in place: {counts['held']}\n"
+        f"  Suspicious files needing review: {counts['suspicious']}\n"
+        f"  Unresolved files needing review: {counts['unresolved']}\n"
+        f"  Audit bundle: {run_dir}\n"
+        "  Nothing has been moved, deleted, overwritten, or quarantined.\n"
+    )
+
+
 def run_init(
     shows_root: Path,
     destination_root: Path,
@@ -126,7 +177,19 @@ def run_wizard(*, input_fn=input, output=None) -> int:
         "This wizard only creates state, checks paths, and prepares a paper plan.\n"
         "It never moves, deletes, quarantines, or overwrites media.\n\n"
     )
-    source_text = ask("Shows/library directory")
+    candidates = _discover_library_candidates()
+    source_default: str | None = None
+    if len(candidates) == 1:
+        source_default = str(candidates[0])
+        output.write(
+            f"Detected one likely Shows directory: {source_default}\n"
+            "You can press Enter to use it, or type a different path.\n"
+        )
+    elif candidates:
+        output.write("Likely Shows directories (choose explicitly):\n")
+        for candidate in candidates:
+            output.write(f"  - {candidate}\n")
+    source_text = ask("Shows/library directory", source_default)
     if not source_text:
         output.write("Wizard cancelled: a Shows/library directory is required.\n")
         return 2
@@ -165,6 +228,7 @@ def run_wizard(*, input_fn=input, output=None) -> int:
         and (state / "cache").is_dir()
         and (state / "runs").is_dir()
     )
+    resume_existing = False
     if existing_setup:
         output.write(
             "\nExisting JMO setup detected; preserving it and its audit bundles.\n"
@@ -172,24 +236,39 @@ def run_wizard(*, input_fn=input, output=None) -> int:
             f"  Overrides: {state / 'base-overrides.toml'}\n"
             f"  Runs:     {state / 'runs'}\n"
         )
-        if ask("Use this existing setup", "Y").casefold() not in {"y", "yes"}:
-            output.write("Wizard cancelled without changing the existing setup.\n")
+        if ask("Resume with a fresh read-only run now", "Y").casefold() not in {
+            "y",
+            "yes",
+        }:
+            output.write(
+                "Setup preserved. Nothing touched your media.\n"
+                f'Run later with: jmo "{source}"\n'
+            )
             return 0
-        output.write(
-            "A new run was not started automatically. Use the commands below to "
-            "resume or create a fresh audit bundle safely.\n"
-        )
-        output.write(
-            f'  jmo doctor "{source}" --destination-root "{destination}" '
-            f'--output-dir "{state / "runs" / "doctor"}" --cache-dir "{state / "cache"}"\n'
-            f'  jmo plan "{source}" --config "{state / "planning.toml"}"\n'
-        )
-        return 0
-
-    result = run_init(source, destination, state, provider_mode=provider)
-    if result != 0:
-        return result
-    if ask("Run the read-only safety check and paper plan now", "Y").casefold() not in {
+        try:
+            has_media = any(
+                item.is_file()
+                and item.suffix.casefold()
+                in {".mkv", ".mp4", ".avi", ".m4v", ".ts", ".mov"}
+                for item in source.rglob("*")
+            )
+        except OSError:
+            has_media = False
+        if not has_media:
+            output.write(
+                "No supported video files were found yet. The existing setup was "
+                "preserved; add media and run the printed plan command when ready.\n"
+                f'  jmo plan "{source}" --config "{state / "planning.toml"}"\n'
+            )
+            return 0
+        resume_existing = True
+        run_dir = state / "runs" / f"wizard-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    else:
+        result = run_init(source, destination, state, provider_mode=provider)
+        if result != 0:
+            return result
+        run_dir = state / "runs" / "initial"
+    if not resume_existing and ask("Run the read-only safety check and paper plan now", "Y").casefold() not in {
         "y",
         "yes",
     }:
@@ -198,8 +277,11 @@ def run_wizard(*, input_fn=input, output=None) -> int:
             "you are ready. Nothing touched your media.\n"
         )
         return 0
+    if resume_existing:
+        output.write(
+            f'  jmo plan "{source}" --config "{state / "planning.toml"}"\n'
+        )
 
-    run_dir = state / "runs" / "initial"
     doctor_result = run_doctor(
         source,
         destination,
@@ -226,6 +308,7 @@ def run_wizard(*, input_fn=input, output=None) -> int:
         output.write(f"\nPaper plan stopped safely: {exc}\n")
         return 2
     status = "ready" if outcome.preflight.ready else "blocked"
+    _write_wizard_summary(output, outcome, run_dir)
     duplicate_count = sum(r.status.value == "duplicate" for r in outcome.plan.records)
     held_count = sum(r.status.value == "held" for r in outcome.plan.records)
     review_session_sha: str | None = None
