@@ -49,24 +49,33 @@ jmo demo --output JMO-demo
 jmo inspect JMO-demo/State/runs/demo-run --json
 ```
 
-`demo` creates fabricated files, an offline cache, and a ready audit bundle.
-It never reads or changes an existing directory and refuses to overwrite its
+`demo` creates fabricated files, an offline cache, and an audit bundle that
+intentionally contains a duplicate review group and an explicit held file. It
+never reads or changes an existing directory and refuses to overwrite its
 output. Because the demo already includes its own state and audit, do not run
 `jmo init` against `JMO-demo`; use `init` for a separate library instead.
 
 ## Guided setup
 
-If you do not want to assemble the paths and flags yourself, run:
+If you do not want to assemble the paths and flags yourself, run either the
+bare command or the explicit wizard command:
 
 ```text
+jmo
 jmo wizard
 ```
 
 The wizard asks for the Shows directory, destination, state directory, and
 provider mode, shows the choices back to you, and requires confirmation before
-creating state. It then prints the exact `doctor` and `plan` commands for the
-paper run. The wizard never moves, deletes, overwrites, or quarantines media;
-review the generated audit bundle before any later apply workflow.
+creating state. It runs the read-only doctor and paper plan, offers the guided
+review for duplicate and held records, rebuilds the reviewed plan, and can run
+the read-only apply check. The wizard never moves, deletes, overwrites, or
+quarantines media. An actual apply remains a separate explicit command.
+
+The default `auto` mode uses TVMaze first and consults TMDb only when the
+TVMaze result is unresolved or ambiguous. TMDb comparison is enabled only when
+`JMO_TMDB_ACCESS_TOKEN` is set; without it, auto mode behaves like the existing
+TVMaze path and remains fully offline-safe.
 
 For a new library, initialize a separate state directory and run the read-only
 doctor check before planning:
@@ -74,7 +83,12 @@ doctor check before planning:
 ```text
 jmo init /path/to/Shows --destination-root /path/to/OrganizedShows --state-dir LocalState
 jmo doctor /path/to/Shows --destination-root /path/to/OrganizedShows --output-dir LocalState/runs/initial --cache-dir LocalState/cache
+jmo run --state-dir LocalState
 ```
+
+After `jmo init`, `jmo run --state-dir LocalState` is the normal repeatable
+command. It reads the saved roots and provider settings, creates a fresh
+timestamped audit bundle, and never overwrites an earlier run.
 
 Every path is an example. Replace it with paths appropriate to your operating
 system; keep state, cache, and audit output outside both media roots.
@@ -108,7 +122,7 @@ schema_version = 1
 destination_root = "../OrganizedShows"
 output_dir = "./audit"
 cache_dir = "./cache"
-provider_mode = "online"
+provider_mode = "auto"
 max_path_length = 240
 max_component_length = 180
 ```

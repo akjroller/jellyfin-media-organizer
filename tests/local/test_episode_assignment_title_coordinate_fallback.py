@@ -170,7 +170,7 @@ def test_multi_episode_source_does_not_use_single_title_fallback() -> None:
     assert "missing-aired-catalog-entry:S02E05" in assignment.evidence.reasons
 
 
-def test_existing_coordinate_with_contradictory_title_fails_closed() -> None:
+def test_existing_coordinate_can_remap_to_unique_exact_title() -> None:
     provider = FixtureProvider(
         (
             _episode("wrong-coordinate", 2, 5, "Unrelated Episode"),
@@ -194,13 +194,10 @@ def test_existing_coordinate_with_contradictory_title_fails_closed() -> None:
     )
 
     assignment = result.assignments[0]
-    assert result.status is AssignmentStatus.SUSPICIOUS
-    assert assignment.status is AssignmentStatus.SUSPICIOUS
-    assert not assignment.episodes
-    assert (
-        "catalog-coordinate-title-conflict:unique-exact-title-elsewhere"
-        in assignment.evidence.reasons
-    )
+    assert result.status is AssignmentStatus.MATCHED
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].identity.value == "title-match"
+    assert "catalog-title-season-remap:S02E05" in assignment.evidence.reasons
 
 
 def test_release_metadata_only_hint_does_not_create_title_conflict() -> None:

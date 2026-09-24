@@ -229,3 +229,95 @@ def render_override_stub(manifest: object) -> bytes:
     if not grouped:
         lines.extend(["", "# No unresolved or suspicious video records were present."])
     return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def render_override_suggestions(manifest: object) -> bytes:
+    """Render conservative, reviewable overrides from repeated candidate evidence.
+
+    A provider identity is promoted only when the same candidate is the top
+    candidate for at least two records in one show family and each score is at
+    least 0.75.  The result is still a local review artifact; it is never loaded
+    implicitly by planning.
+    """
+
+    validate_manifest(manifest)
+    root = cast(Mapping[str, object], manifest)
+    raw_records = root["records"]
+    assert isinstance(raw_records, list | tuple)
+    grouped: dict[str, dict[str, Any]] = {}
+    for raw in raw_records:
+        record = cast(Mapping[str, object], raw)
+        if _string(record.get("status")) not in _REVIEW_STATUSES:
+            continue
+        relative = _record_source_path(record)
+        key = _record_key(record, relative)
+        evidence = _mapping(record.get("evidence"))
+        candidates = evidence.get("candidates") if evidence else None
+        if not isinstance(candidates, list | tuple) or not candidates:
+            continue
+        candidate = _mapping(candidates[0])
+        if candidate is None:
+            continue
+        provider_id = _integer(candidate.get("tvmaze_id"))
+        score = candidate.get("score")
+        if provider_id is None or not isinstance(score, int | float) or score < 0.75:
+            continue
+        entry = grouped.setdefault(
+            _normalized_identity(key),
+            {
+                "key": key,
+                "provider_titles": set(),
+                "ids": [],
+                "modes": set(),
+                "years": set(),
+            },
+        )
+        entry["ids"].append(provider_id)
+        provider_title = _string(candidate.get("title"))
+        if provider_title is not None:
+            entry["provider_titles"].add(provider_title)
+        entry["modes"].add(_numbering_mode(record))
+        year = _year(record)
+        if year is not None:
+            entry["years"].add(year)
+
+    lines = [
+        "schema_version = 4",
+        "",
+        "# Provider-identity suggestions generated from repeated plan evidence.",
+        "# Review every entry and run `jmo overrides validate` before planning.",
+        "# Suggestions are not automatically activated by JMO.",
+    ]
+    for normalized in sorted(grouped):
+        entry = grouped[normalized]
+        ids = entry["ids"]
+        if len(ids) < 2 or len(set(ids)) != 1:
+            continue
+        provider_titles = sorted(
+            entry["provider_titles"],
+            key=lambda value: (_normalized_identity(value), value),
+        )
+        key = provider_titles[0] if len(provider_titles) == 1 else entry["key"]
+        lines.extend(
+            [
+                "",
+                "[[shows]]",
+                f"key = {_toml_string(key)}",
+                f"tvmaze_id = {ids[0]}",
+                (
+                    "aliases = " + json.dumps([entry["key"]], ensure_ascii=False)
+                    if key != entry["key"]
+                    else "aliases = []"
+                ),
+                f"numbering_mode = {_toml_string(next(iter(entry['modes'])))}"
+                if len(entry["modes"]) == 1
+                else '# numbering_mode = "aired" # review conflicting evidence',
+                'title_preference = "provider"',
+                "# Add aliases and season_map only after review.",
+            ]
+        )
+        if len(entry["years"]) == 1:
+            lines.insert(-1, f"year = {next(iter(entry['years']))}")
+    if len(lines) == 5:
+        lines.extend(["", "# No repeated high-confidence provider candidates found."])
+    return ("\n".join(lines) + "\n").encode("utf-8")

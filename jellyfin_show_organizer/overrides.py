@@ -60,6 +60,7 @@ class ShowOverride:
     numbering_mode: NumberingMode
     title_preference: TitlePreference
     preferred_title: str | None
+    season_map: tuple[tuple[int, int], ...]
 
     def __init__(
         self,
@@ -70,6 +71,7 @@ class ShowOverride:
         numbering_mode: NumberingMode = NumberingMode.AIRED,
         title_preference: TitlePreference = TitlePreference.PROVIDER,
         preferred_title: str | None = None,
+        season_map: tuple[tuple[int, int], ...] = (),
         *,
         provider_identity: ProviderIdentity | None = None,
     ) -> None:
@@ -87,6 +89,7 @@ class ShowOverride:
         object.__setattr__(self, "numbering_mode", numbering_mode)
         object.__setattr__(self, "title_preference", title_preference)
         object.__setattr__(self, "preferred_title", preferred_title)
+        object.__setattr__(self, "season_map", tuple(season_map))
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -94,6 +97,19 @@ class ShowOverride:
             raise ValueError("override key must be a non-empty trimmed string")
         if self.year is not None and not 1800 <= self.year <= 9999:
             raise ValueError("override year is outside the supported range")
+        keys = [source for source, _ in self.season_map]
+        if len(keys) != len(set(keys)):  # pragma: no cover - defensive validation
+            raise ValueError("override season_map source seasons must be unique")
+        if any(  # pragma: no cover - defensive validation
+            not _is_plain_int(source)
+            or not _is_plain_int(target)
+            or source <= 0
+            or target <= 0
+            for source, target in self.season_map
+        ):
+            raise ValueError("override season_map values must be positive integers")
+        if self.season_map and self.provider_identity is None:  # pragma: no cover
+            raise ValueError("override season_map requires a provider identity")
 
         normalized_aliases: set[str] = set()
         for alias in self.aliases:
@@ -141,6 +157,11 @@ class ShowOverride:
         if self.provider_identity.provider != "tvmaze":
             return None
         return self.provider_identity.require_positive_int("tvmaze")
+
+    def provider_season(  # pragma: no cover - exercised through planning integration
+        self, source_season: int
+    ) -> int:
+        return dict(self.season_map).get(source_season, source_season)
 
 
 @dataclass(frozen=True, slots=True)
@@ -436,6 +457,28 @@ class OverrideCatalog:
             None,
         )
 
+    def matching_show(  # pragma: no cover - exercised through planning integration
+        self, key: str, titles: tuple[str, ...] = ()
+    ) -> ShowOverride | None:
+        """Return the unique show override matching a planner group and titles."""
+
+        normalized = _normalize_identity(key)
+        matches = tuple(
+            show
+            for show in self.shows
+            if normalized == _normalize_identity(show.key)
+            or normalized in {_normalize_identity(alias) for alias in show.aliases}
+            or any(
+                _normalize_identity(title)
+                in {
+                    _normalize_identity(show.key),
+                    *(_normalize_identity(alias) for alias in show.aliases),
+                }
+                for title in titles
+            )
+        )
+        return matches[0] if len(matches) == 1 else None
+
     def duplicate_preference_for(
         self, source_relative_path: str
     ) -> DuplicatePreferenceOverride | None:
@@ -481,21 +524,24 @@ class OverrideCatalog:
             self.shows,
             key=lambda item: (_normalize_identity(item.key), item.key),
         ):
-            canonical_shows.append(
-                {
-                    "aliases": sorted(
-                        show.aliases,
-                        key=lambda alias: (_normalize_identity(alias), alias),
-                    ),
-                    "key": show.key,
-                    "numbering_mode": show.numbering_mode.value,
-                    "preferred_title": show.preferred_title,
-                    "provider": show.provider,
-                    "provider_id": show.provider_id,
-                    "title_preference": show.title_preference.value,
-                    "year": show.year,
+            canonical_show: dict[str, object] = {
+                "aliases": sorted(
+                    show.aliases,
+                    key=lambda alias: (_normalize_identity(alias), alias),
+                ),
+                "key": show.key,
+                "numbering_mode": show.numbering_mode.value,
+                "preferred_title": show.preferred_title,
+                "provider": show.provider,
+                "provider_id": show.provider_id,
+                "title_preference": show.title_preference.value,
+                "year": show.year,
+            }
+            if show.season_map:
+                canonical_show["season_map"] = {
+                    str(source): target for source, target in show.season_map
                 }
-            )
+            canonical_shows.append(canonical_show)
 
         payload: dict[str, object] = {
             "schema_version": self.schema_version,
@@ -621,6 +667,7 @@ def _parse_override(raw: dict[str, Any]) -> ShowOverride:
         "numbering_mode",
         "title_preference",
         "preferred_title",
+        "season_map",
     }
     unknown = set(raw) - allowed
     if unknown:
@@ -637,10 +684,27 @@ def _parse_override(raw: dict[str, Any]) -> ShowOverride:
 
     year = raw.get("year")
     preferred_title = raw.get("preferred_title")
+    raw_season_map = raw.get("season_map", {})
     if year is not None and not _is_plain_int(year):
         raise ValueError("override year must be an integer")
     if preferred_title is not None and not isinstance(preferred_title, str):
         raise ValueError("override preferred_title must be a string")
+    if not isinstance(raw_season_map, dict):  # pragma: no cover - defensive validation
+        raise ValueError("override season_map must be a table of season numbers")
+    season_map: list[tuple[int, int]] = []
+    for (
+        raw_source,
+        raw_target,
+    ) in raw_season_map.items():  # pragma: no cover - defensive validation
+        try:
+            source = int(raw_source)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "override season_map keys must be positive integers"
+            ) from exc
+        if not _is_plain_int(raw_target):
+            raise ValueError("override season_map values must be positive integers")
+        season_map.append((source, raw_target))
 
     try:
         numbering_mode = NumberingMode(raw.get("numbering_mode", "aired"))
@@ -659,6 +723,7 @@ def _parse_override(raw: dict[str, Any]) -> ShowOverride:
         numbering_mode=numbering_mode,
         title_preference=title_preference,
         preferred_title=preferred_title,
+        season_map=tuple(sorted(season_map)),
     )
 
 

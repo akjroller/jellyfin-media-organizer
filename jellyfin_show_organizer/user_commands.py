@@ -16,6 +16,7 @@ from pathlib import Path
 from . import __version__
 from .planner import PlanningConfig
 from .privacy import path_free_text
+from .review_execution import execute_plan
 from .review_session import (
     ReviewItemKind,
     ReviewItemState,
@@ -27,10 +28,11 @@ from .summary_io import read_summary, summary_int
 CONFIG_EXAMPLE = """schema_version = 1
 
 [plan]
+source_root = "../Shows"
 destination_root = "../OrganizedShows"
 output_dir = "./audit"
 cache_dir = "./cache"
-provider_mode = "online"
+provider_mode = "auto"
 max_path_length = 240
 max_component_length = 180
 """
@@ -43,7 +45,7 @@ def run_init(
     destination_root: Path,
     state_dir: Path,
     *,
-    provider_mode: str = "online",
+    provider_mode: str = "auto",
 ) -> int:
     """Create a local, non-overwriting JMO state directory and config."""
 
@@ -70,7 +72,7 @@ def run_init(
             "Init failed: state directory must be outside source and destination roots"
         )
         return 2
-    if provider_mode not in {"online", "offline", "refresh"}:
+    if provider_mode not in {"auto", "online", "offline", "refresh"}:
         print(f"Init failed: unsupported provider mode: {provider_mode}")
         return 2
     if state.exists():
@@ -79,12 +81,14 @@ def run_init(
     state.mkdir(parents=True)
     (state / "cache").mkdir()
     (state / "runs").mkdir()
+    source_value = os.path.relpath(source, state).replace(os.sep, "/")
     destination_value = os.path.relpath(destination, state).replace(os.sep, "/")
     config = textwrap.dedent(
         f'''\
         schema_version = 1
 
         [plan]
+        source_root = "{source_value}"
         destination_root = "{destination_value}"
         output_dir = "runs/initial"
         cache_dir = "cache"
@@ -131,10 +135,10 @@ def run_wizard(*, input_fn=input, output=None) -> int:
     destination_text = ask("Destination directory", destination_default)
     state_default = str(source.parent / f"{source.name}-JMO-State")
     state_text = ask("JMO state directory", state_default)
-    provider = ask("Provider mode (online/offline/refresh)", "online").casefold()
-    if provider not in {"online", "offline", "refresh"}:
+    provider = ask("Provider mode (auto/online/offline/refresh)", "auto").casefold()
+    if provider not in {"auto", "online", "offline", "refresh"}:
         output.write(
-            "Wizard cancelled: provider mode must be online, offline, or refresh.\n"
+            "Wizard cancelled: provider mode must be auto, online, offline, or refresh.\n"
         )
         return 2
     destination = Path(destination_text).expanduser().resolve(strict=False)
@@ -149,12 +153,213 @@ def run_wizard(*, input_fn=input, output=None) -> int:
     if ask("Create this setup", "Y").casefold() not in {"y", "yes"}:
         output.write("Wizard cancelled before changing anything.\n")
         return 0
+
+    # A second invocation should be a safe resume point, not a confusing
+    # "state already exists" failure and never an opportunity to overwrite an
+    # audit bundle.  The state files are deliberately checked by name here;
+    # their contents are still validated by the normal plan/review commands.
+    existing_setup = (
+        state.is_dir()
+        and (state / "planning.toml").is_file()
+        and (state / "base-overrides.toml").is_file()
+        and (state / "cache").is_dir()
+        and (state / "runs").is_dir()
+    )
+    if existing_setup:
+        output.write(
+            "\nExisting JMO setup detected; preserving it and its audit bundles.\n"
+            f"  Config:   {state / 'planning.toml'}\n"
+            f"  Overrides: {state / 'base-overrides.toml'}\n"
+            f"  Runs:     {state / 'runs'}\n"
+        )
+        if ask("Use this existing setup", "Y").casefold() not in {"y", "yes"}:
+            output.write("Wizard cancelled without changing the existing setup.\n")
+            return 0
+        output.write(
+            "A new run was not started automatically. Use the commands below to "
+            "resume or create a fresh audit bundle safely.\n"
+        )
+        output.write(
+            f'  jmo doctor "{source}" --destination-root "{destination}" '
+            f'--output-dir "{state / "runs" / "doctor"}" --cache-dir "{state / "cache"}"\n'
+            f'  jmo plan "{source}" --config "{state / "planning.toml"}"\n'
+        )
+        return 0
+
     result = run_init(source, destination, state, provider_mode=provider)
     if result != 0:
         return result
+    if ask("Run the read-only safety check and paper plan now", "Y").casefold() not in {
+        "y",
+        "yes",
+    }:
+        output.write(
+            "\nSetup is ready. The printed doctor and plan commands are available when "
+            "you are ready. Nothing touched your media.\n"
+        )
+        return 0
+
+    run_dir = state / "runs" / "initial"
+    doctor_result = run_doctor(
+        source,
+        destination,
+        run_dir,
+        state / "cache",
+    )
+    if doctor_result != 0:
+        output.write("\nWizard stopped because the safety check was not ready.\n")
+        return doctor_result
+    try:
+        outcome = execute_plan(
+            PlanningConfig(
+                shows_root=source,
+                destination_root=destination,
+                output_dir=run_dir,
+                cache_dir=state / "cache",
+                overrides_path=state / "base-overrides.toml",
+                offline=provider == "offline",
+                refresh=provider == "refresh",
+                provider_strategy="auto" if provider == "auto" else "tvmaze",
+            )
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
+        output.write(f"\nPaper plan stopped safely: {exc}\n")
+        return 2
+    status = "ready" if outcome.preflight.ready else "blocked"
+    duplicate_count = sum(r.status.value == "duplicate" for r in outcome.plan.records)
+    held_count = sum(r.status.value == "held" for r in outcome.plan.records)
+    review_session_sha: str | None = None
+    review_needed = duplicate_count + held_count
+    start_review = review_needed == 0 or ask(
+        f"Start guided review for {review_needed} duplicate/held items", "Y"
+    ).casefold() in {"y", "yes"}
+    if start_review:
+        try:
+            from .providers import TvmazeProviderAdapter
+            from .review_contract import load_review_contract
+            from .review_execution import http_json_getter
+            from .review_system import run_review_system
+            from .tvmaze_cache import TvmazeCatalogCache
+
+            plan_path = run_dir / "plan.json"
+            base_override = state / "base-overrides.toml"
+            session_path = state / "review-session.json"
+            reviewed_override = state / "reviewed-overrides.toml"
+            base_catalog = load_review_contract(base_override)
+            cache = TvmazeCatalogCache(
+                state / "cache",
+                offline=provider == "offline",
+                refresh=provider == "refresh",
+            )
+            session, _ = run_review_system(
+                json.loads(plan_path.read_text(encoding="utf-8")),
+                base_override.read_bytes(),
+                base_override_snapshot=base_catalog.snapshot_id,
+                provider=TvmazeProviderAdapter(cache, http_json_getter),
+                session_path=session_path,
+                output_override_path=reviewed_override,
+                resume=session_path.is_file(),
+                input_fn=input_fn,
+                output=output,
+            )
+            if not session.complete:
+                output.write(
+                    "Review is resumable. Re-run the wizard or use the printed "
+                    f"session at {session_path}.\n"
+                )
+                return 2
+            review_session_sha = session.sha256
+            reviewed_outcome = execute_plan(
+                PlanningConfig(
+                    shows_root=source,
+                    destination_root=destination,
+                    output_dir=state / "runs" / "reviewed",
+                    cache_dir=state / "cache",
+                    overrides_path=reviewed_override,
+                    offline=provider == "offline",
+                    refresh=provider == "refresh",
+                    provider_strategy="auto" if provider == "auto" else "tvmaze",
+                ),
+                review_session_path=session_path,
+            )
+            outcome = reviewed_outcome
+            run_dir = state / "runs" / "reviewed"
+            status = "ready" if outcome.preflight.ready else "blocked"
+            output.write(
+                f"\nReviewed plan complete: {status}\n"
+                f"  Audit bundle: {run_dir}\n"
+                "  No media was moved.\n"
+            )
+        except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+            output.write(f"\nGuided review stopped safely: {exc}\n")
+            return 2
+    if outcome.preflight.ready and review_session_sha is not None:
+        if ask("Run the read-only apply check now", "Y").casefold() in {"y", "yes"}:
+            try:
+                from .apply_execution import (
+                    approval_token,
+                    execute_apply,
+                    prepare_apply,
+                    total_moving_members,
+                )
+                from .apply_validation import validate_apply_roots
+                from .run_provenance import detect_source_revision
+
+                plan_path = run_dir / "plan.json"
+                preflight_path = run_dir / "preflight.json"
+                provenance_path = run_dir / "run-provenance.json"
+                plan_sha = (run_dir / "plan.sha256").read_text(encoding="ascii").strip()
+                provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+                recorded_revision = provenance["source_revision"]["commit"]
+                source_root, destination_root = validate_apply_roots(
+                    source, destination
+                )
+                current_revision = detect_source_revision()
+                if (
+                    current_revision.state != "git"
+                    or current_revision.dirty
+                    or current_revision.commit != recorded_revision
+                ):
+                    raise ValueError(
+                        "apply check requires the same clean Git revision recorded by the plan"
+                    )
+                prepared = prepare_apply(
+                    plan_path,
+                    preflight_path,
+                    provenance_path,
+                    approved_plan_sha256=plan_sha,
+                    approved_review_session_sha256=review_session_sha,
+                    approved_source_revision=recorded_revision,
+                    separate_roots=source_root != destination_root,
+                )
+                apply_result = execute_apply(
+                    prepared,
+                    source_root,
+                    destination_root,
+                    journal_path=None,
+                    check_only=True,
+                    resume=False,
+                )
+                output.write(
+                    "\nApply check passed. Nothing moved.\n"
+                    f"  Operation groups: {apply_result.groups_total}\n"
+                    f"  Files to move:    {total_moving_members(prepared)}\n"
+                    f"  Confirmation token: {approval_token(prepared, source_root, destination_root)}\n"
+                )
+            except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+                output.write(f"\nApply check stopped safely: {exc}\n")
     output.write(
-        "\nSetup is ready. Run the printed doctor command, then run the printed plan "
-        "command. Review the audit bundle before any future apply step.\n"
+        f"\nPaper plan complete: {status}\n"
+        f"  Audit bundle: {run_dir}\n"
+        f"  Records:       {len(outcome.plan.records)}\n"
+        f"  Matched:       {sum(r.status.value == 'matched' for r in outcome.plan.records)}\n"
+        f"  Extras:        {sum(r.status.value == 'extra' for r in outcome.plan.records)}\n"
+        f"  Held:          {sum(r.status.value == 'held' for r in outcome.plan.records)}\n"
+        f"  Duplicates:    {sum(r.status.value == 'duplicate' for r in outcome.plan.records)}\n"
+        f"  Suspicious:    {sum(r.status.value == 'suspicious' for r in outcome.plan.records)}\n"
+        f"  Unresolved:    {sum(r.status.value == 'unresolved' for r in outcome.plan.records)}\n"
+        "\nReview the audit bundle before any future apply step. No media was moved.\n"
+        f'Next: jmo inspect "{run_dir}"\n'
     )
     return 0
 
@@ -177,10 +382,24 @@ def run_demo(output_dir: Path | None) -> int:
     organized.mkdir(parents=True)
     (state / "cache").mkdir(parents=True)
     (state / "runs").mkdir()
+    demo_overrides = (
+        "schema_version = 4\n\n"
+        "[[source_holds]]\n"
+        'source = "Held Show/Season 01/Held Show - S01E01.mkv"\n'
+        'reasons = ["synthetic demo hold for the guided review workflow"]\n'
+    )
     (state / "base-overrides.toml").write_text(
-        OVERRIDES_EXAMPLE, encoding="utf-8", newline="\n"
+        demo_overrides, encoding="utf-8", newline="\n"
     )
     (episode_dir / "Example Show - S01E01.mkv").write_bytes(b"synthetic demo video")
+    duplicate_dir = episode_dir / "Release 2"
+    duplicate_dir.mkdir()
+    (duplicate_dir / "Example Show - S01E01.mkv").write_bytes(
+        b"synthetic duplicate video"
+    )
+    held_dir = shows / "Held Show" / "Season 01"
+    held_dir.mkdir(parents=True)
+    (held_dir / "Held Show - S01E01.mkv").write_bytes(b"synthetic held video")
     (episode_dir / "Example Show - S01E01.en.srt").write_text(
         "1\n00:00:00,000 --> 00:00:01,000\nDemo subtitle\n", encoding="utf-8"
     )
@@ -232,9 +451,6 @@ def run_demo(output_dir: Path | None) -> int:
             offline=True,
         )
     )
-    if not outcome.preflight.ready:
-        print("Demo failed: seeded offline plan was not preflight-ready")
-        return 2
     (output / "README.txt").write_text(
         f"""JMO synthetic demo workspace
 
@@ -246,7 +462,9 @@ jmo doctor "{shows}" --destination-root "{organized}" --output-dir "{state / "ru
 jmo inspect "{demo_run}"
 
 The demo plan is created from a local synthetic provider cache and never makes
-a network request. It is safe to delete this entire directory.
+a network request. It intentionally includes one duplicate and one held video
+so you can exercise the review workflow before trying a real library. It is
+safe to delete this entire directory.
 """,
         encoding="utf-8",
     )

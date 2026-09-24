@@ -6,6 +6,24 @@ For a first live rehearsal, use an immutable canary scope. A scope names an expl
 
 Planning, review, and `jmo apply --check-only` remain non-mutating. A ready plan is necessary but is not permission to move media.
 
+## Permanent command boundary
+
+This separation is a compatibility and safety invariant, not merely a
+workflow recommendation:
+
+| Command | May inspect or write audit state | May mutate media |
+| --- | --- | --- |
+| `jmo run` / `jmo plan` | Yes, the new plan bundle only | No |
+| `jmo review` | Yes, the hash-bound review ledger and answers | No |
+| `jmo apply --check-only` | No journal or destination changes | No |
+| `jmo apply` with a valid confirmation token and journal | Yes | Yes, and only for approved groups |
+
+Future commands must preserve this boundary. Planning and review code must not
+call the apply executor, and no convenience or automatic mode may infer an
+approval token, create an apply journal, or turn a check-only run into a
+mutation. Changes to this contract require regression tests for every row in
+the table and a documentation review before release.
+
 ## Exact approval boundary
 
 Apply requires all of the following to agree exactly:

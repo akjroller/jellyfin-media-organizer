@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,11 @@ from jellyfin_show_organizer.models import (
 )
 from jellyfin_show_organizer.overrides import load_overrides
 from jellyfin_show_organizer.reports import render_audit_bundle
-from jellyfin_show_organizer.review import render_override_stub, stable_review_ref
+from jellyfin_show_organizer.review import (
+    render_override_stub,
+    render_override_suggestions,
+    stable_review_ref,
+)
 from jellyfin_show_organizer.schema import plan_to_manifest
 
 pytestmark = pytest.mark.local
@@ -155,3 +160,35 @@ def test_override_stub_rejects_invalid_plan_without_echoing_local_path(
     assert captured.out == ""
     assert "Plan manifest invalid:" in captured.err
     assert str(tmp_path) not in captured.err
+
+
+def test_provider_identity_suggestions_require_repeated_high_confidence_evidence():
+    manifest = plan_to_manifest(_review_plan())
+    for record in manifest["records"]:
+        record["evidence"]["candidates"] = [
+            {
+                "tvmaze_id": 4242,
+                "title": "Fabricated Series",
+                "score": 0.91,
+                "reasons": ["synthetic-consensus"],
+            }
+        ]
+    rendered = render_override_suggestions(manifest).decode("utf-8")
+    assert 'key = "Fabricated Series"' in rendered
+    assert "tvmaze_id = 4242" in rendered
+    assert "schema_version = 4" in rendered
+    assert tomllib.loads(rendered)["shows"][0]["tvmaze_id"] == 4242
+
+
+def test_provider_identity_suggestions_do_not_promote_one_record():
+    manifest = plan_to_manifest(_review_plan())
+    manifest["records"][0]["evidence"]["candidates"] = [
+        {
+            "tvmaze_id": 4242,
+            "title": "Fabricated Series",
+            "score": 0.91,
+            "reasons": ["synthetic"],
+        }
+    ]
+    rendered = render_override_suggestions(manifest).decode("utf-8")
+    assert 'key = "Fabricated Series"' not in rendered

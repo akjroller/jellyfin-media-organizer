@@ -473,6 +473,26 @@ def _aired_assignment(
     for number in parse.episodes:
         coordinate = f"S{parse.season:02d}E{number:02d}"
         episode = by_coordinate.get((parse.season, number))
+        title_remap = False
+        if episode is not None and parse.title_hint is not None:
+            normalized_title = _normalize_title(parse.title_hint)
+            exact_title_matches = tuple(
+                candidate
+                for candidate in catalog.episodes
+                if candidate.season > 0
+                and candidate.number is not None
+                and _normalize_title(candidate.title) == normalized_title
+            )
+            if len(exact_title_matches) == 1 and exact_title_matches[0] is not episode:
+                episode = exact_title_matches[0]
+                title_remap = True
+                reasons.extend(
+                    (
+                        f"catalog-title-season-remap:{coordinate}",
+                        f"catalog-title-match:{normalized_title}"
+                        f"->{_episode_identity_reason(episode)}",
+                    )
+                )
         if episode is None:
             if len(parse.episodes) == 1 and parse.title_hint is not None:
                 normalized_title = _normalize_title(parse.title_hint)
@@ -520,7 +540,7 @@ def _aired_assignment(
                 *conflict_reasons,
             )
         matches.append(episode)
-        if by_coordinate.get((parse.season, number)) is episode:
+        if by_coordinate.get((parse.season, number)) is episode and not title_remap:
             reasons.append(
                 f"catalog-match:{coordinate}->{_episode_identity_reason(episode)}"
             )

@@ -11,8 +11,9 @@ from .parenthetical_aliases import parenthetical_show_aliases
 _LEADING_TAGS = re.compile(r"^(?:\[[^\]]+\][ ._-]*)+")
 _TRAILING_YEAR = re.compile(r"(?:^|[\s(])(?P<year>(?:18|19|20|21)\d{2})\)?$")
 _TVMAZE_ID = re.compile(r"(?i)(?:\[?tvmaze(?:[ ._-]?id)?[ ._-]?)(?P<id>\d+)\]?")
+_SEASON_NUMBER = r"(?:\d{1,2}|(?:18|19|20|21)\d{2})"
 _SXE = re.compile(
-    r"(?i)S(?P<season>\d{1,2})[ ._-]*E(?P<episode>\d{1,3})(?!\d)"
+    rf"(?i)S(?P<season>{_SEASON_NUMBER})[ ._-]*E(?P<episode>\d{{1,3}})(?!\d)"
     r"(?P<segment>[A-Za-z](?!\d))?"
     r"(?P<tail>(?:(?:[ ._-]*E\d{1,3}(?!\d))|"
     r"(?:[ ._-]*-[ ._-]*E?\d{1,3}(?!\d)))*)"
@@ -30,8 +31,8 @@ _EPISODE_DATE = re.compile(
     r"(?P<month>0[1-9]|1[0-2])[-._](?P<day>0[1-9]|[12]\d|3[01])(?!\d)"
 )
 _LEGACY_BRACKETED = re.compile(
-    r"(?i)^(?P<series>.+?)"
-    r"\[\s*season[ ._-]*(?P<season>\d{1,2})\s*\]"
+    rf"(?i)^(?P<series>.+?)"
+    rf"\[\s*season[ ._-]*(?P<season>{_SEASON_NUMBER})\s*\]"
     r"\s*\[\s*episod(?:e)?[ ._-]*(?P<episode>\d{1,3})"
     r"(?P<segment>[A-Za-z])?\s*\]"
 )
@@ -61,12 +62,14 @@ _RELEASE_TAIL = re.compile(
     r"flac|opus|10bit|hi10)(?=$|[ ._\-\])])"
 )
 _SEASON_NOISE = re.compile(
-    r"(?i)(?:^|[ ._\-\[(])(?:s(?:eason)?[ ._-]*\d{1,2})"
+    rf"(?i)(?:^|[ ._\-\[(])(?:s(?:eason)?[ ._-]*{_SEASON_NUMBER})"
     r"(?=$|[ ._\-\])])"
 )
-_GENERIC_SEASON_DIR = re.compile(r"(?i)^(?:season[ ._-]*\d{1,2}|s\d{1,2})$")
+_GENERIC_SEASON_DIR = re.compile(
+    rf"(?i)^(?:season[ ._-]*{_SEASON_NUMBER}|s{_SEASON_NUMBER})$"
+)
 _SEASON_COLLECTION = re.compile(
-    r"(?i)^(?P<series>.+?)[ ._-]+(?:s|season[ ._-]*)(?P<season>\d{1,2})"
+    rf"(?i)^(?P<series>.+?)[ ._-]+(?:s|season[ ._-]*)(?P<season>{_SEASON_NUMBER})"
     r"(?=$|[ ._-])"
 )
 _CHECKSUM = re.compile(r"(?i)(?:^|\s)[A-F0-9]{8}(?=$|\s)")
@@ -339,7 +342,7 @@ def _bare_absolute_is_unambiguous(
 ) -> bool:
     if (
         re.search(
-            r"(?i)(?:^|[ ._-])(?:s|season)[ ._-]*\d{1,2}(?=$|[ ._-])",
+            rf"(?i)(?:^|[ ._-])(?:s|season)[ ._-]*{_SEASON_NUMBER}(?=$|[ ._-])",
             match.group("series"),
         )
         is not None
@@ -469,7 +472,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
     normalized_path = relative_path.replace("\\", "/")
     path_parts = normalized_path.split("/")
     managed_layout = len(path_parts) >= 3 and re.fullmatch(
-        r"Season\s+\d{1,2}", path_parts[1], re.IGNORECASE
+        rf"Season\s+{_SEASON_NUMBER}", path_parts[1], re.IGNORECASE
     )
     if managed_layout:
         path_parts = [decode_sanitized_component(part) for part in path_parts]
@@ -479,7 +482,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
         # the general release parser must not reinterpret it as an episode
         # range. Explicit ``-E02`` ranges remain valid and are untouched.
         path_parts[-1] = re.sub(
-            r"(?i)(S\d{1,2}E\d{1,3})\s*-\s*(?=\d)",
+            rf"(?i)(S{_SEASON_NUMBER}E\d{{1,3}})\s*-\s*(?=\d)",
             r"\1 - #",
             path_parts[-1],
         )

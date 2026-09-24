@@ -103,9 +103,14 @@ def test_demo_creates_only_synthetic_workspace(tmp_path: Path, capsys) -> None:
     ).is_file()
     assert (output / "README.txt").is_file()
     assert (output / "State" / "runs" / "demo-run" / "plan.json").is_file()
-    assert "apply-ready" in (
-        output / "State" / "runs" / "demo-run" / "summary.txt"
-    ).read_text(encoding="utf-8")
+    summary = (output / "State" / "runs" / "demo-run" / "summary.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "duplicate_review=2" in summary
+    assert "held=1" in summary
+    assert "preflight_ready=false" in summary
+    assert run_inspect(output / "State" / "runs" / "demo-run") == 0
+    assert "blocked" in capsys.readouterr().out
     assert run_demo(output) == 2
     assert "refusing" in capsys.readouterr().out.lower()
 
@@ -340,7 +345,7 @@ def test_wizard_creates_safe_setup_from_guided_answers(tmp_path: Path) -> None:
     state = tmp_path / "JMO-State"
     source.mkdir()
     destination.mkdir()
-    answers = iter((str(source), str(destination), str(state), "offline", "Y"))
+    answers = iter((str(source), str(destination), str(state), "offline", "Y", "N"))
     output = StringIO()
 
     assert run_wizard(input_fn=lambda _prompt: next(answers), output=output) == 0
@@ -348,6 +353,28 @@ def test_wizard_creates_safe_setup_from_guided_answers(tmp_path: Path) -> None:
     assert (state / "base-overrides.toml").is_file()
     assert (state / "cache").is_dir()
     assert "never moves, deletes, quarantines" in output.getvalue()
+
+
+def test_wizard_resumes_existing_setup_without_overwriting_audit_state(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "Shows"
+    destination = tmp_path / "Organized"
+    state = tmp_path / "JMO-State"
+    source.mkdir()
+    destination.mkdir()
+    assert run_init(source, destination, state, provider_mode="offline") == 0
+    sentinel = state / "runs" / "prior-plan.json"
+    sentinel.write_text("keep me", encoding="utf-8")
+
+    answers = iter((str(source), str(destination), str(state), "offline", "Y", "Y"))
+    output = StringIO()
+    assert run_wizard(input_fn=lambda _prompt: next(answers), output=output) == 0
+
+    assert sentinel.read_text(encoding="utf-8") == "keep me"
+    text = output.getvalue()
+    assert "Existing JMO setup detected" in text
+    assert "jmo plan" in text
 
 
 def test_write_example_refuses_overwrite(tmp_path: Path, capsys) -> None:

@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any, Protocol, cast
 
 from .models import ProviderIdentity
+from .tmdb_cache import TMDB_PROVIDER, TmdbCatalogCache
 from .tvmaze_cache import TVMAZE_PROVIDER, JsonGetter, TvmazeCatalogCache
 
 
@@ -175,6 +176,67 @@ class MetadataProvider(Protocol):
         self,
         show_identity: ProviderIdentity,
     ) -> ProviderEpisodeCatalog: ...
+
+
+def _title_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+
+
+class AutoProviderAdapter:
+    """Use TVMaze first and consult TMDb only for unresolved/ambiguous search."""
+
+    provider_name = TVMAZE_PROVIDER
+
+    def __init__(
+        self,
+        tvmaze: TvmazeProviderAdapter,
+        tmdb: TmdbProviderAdapter | None,
+    ) -> None:
+        self._tvmaze = tvmaze
+        self._tmdb = tmdb
+
+    def search_shows(self, title: str) -> ProviderSearchSnapshot:
+        primary = self._tvmaze.search_shows(title)
+        if self._tmdb is None or (primary.resolved and len(primary.shows) == 1):
+            return primary
+        secondary = self._tmdb.search_shows(title)
+        if not secondary.resolved or not secondary.shows:
+            return primary
+        if not primary.resolved:
+            recovered: dict[str, ProviderShow] = {}
+            for tmdb_show in secondary.shows:
+                retry = self._tvmaze.search_shows(tmdb_show.title)
+                if retry.resolved:
+                    for show in retry.shows:
+                        recovered[show.identity.key] = show
+            if len(recovered) == 1:
+                return ProviderSearchSnapshot(
+                    provider=primary.provider,
+                    request_key=primary.request_key,
+                    cache_snapshot_id=primary.cache_snapshot_id,
+                    shows=tuple(recovered.values()),
+                    retrieved_at=primary.retrieved_at,
+                )
+            return primary
+        tmdb_titles = {_title_key(show.title) for show in secondary.shows}
+        consensus = tuple(
+            show for show in primary.shows if _title_key(show.title) in tmdb_titles
+        )
+        if len(consensus) == 1:
+            return ProviderSearchSnapshot(
+                provider=primary.provider,
+                request_key=primary.request_key,
+                cache_snapshot_id=primary.cache_snapshot_id,
+                shows=consensus,
+                retrieved_at=primary.retrieved_at,
+            )
+        return primary
+
+    def episode_catalog(
+        self,
+        show_identity: ProviderIdentity,
+    ) -> ProviderEpisodeCatalog:
+        return self._tvmaze.episode_catalog(show_identity)
 
 
 def _tvmaze_show_candidates(response: object) -> tuple[ProviderShow, ...]:
@@ -395,6 +457,154 @@ class TvmazeProviderAdapter:
                 retrieved_at=record.retrieved_at,
             )
         episodes, errors, diagnostics = _tvmaze_episode_catalog(record.response)
+        return ProviderEpisodeCatalog(
+            provider=self.provider_name,
+            request_key=record.request_key,
+            cache_snapshot_id=record.snapshot_id,
+            show_identity=show_identity,
+            episodes=episodes,
+            errors=errors,
+            diagnostics=diagnostics,
+            retrieved_at=record.retrieved_at,
+        )
+
+
+def _tmdb_show_candidates(response: object) -> tuple[ProviderShow, ...]:
+    if not isinstance(response, dict) or not isinstance(response.get("results"), list):
+        return ()
+    candidates: dict[str, ProviderShow] = {}
+    for item in response["results"]:
+        if not isinstance(item, dict):
+            continue
+        tmdb_id = item.get("id")
+        title = item.get("name") or item.get("original_name")
+        if not isinstance(tmdb_id, int) or tmdb_id <= 0:
+            continue
+        if not isinstance(title, str) or not title.strip():
+            continue
+        year = None
+        first_air_date = item.get("first_air_date")
+        if isinstance(first_air_date, str):
+            match = re.match(r"^(\d{4})-", first_air_date)
+            if match is not None:
+                year = int(match.group(1))
+        candidate = ProviderShow(ProviderIdentity("tmdb", str(tmdb_id)), title, year)
+        candidates[candidate.identity.key] = candidate
+    return tuple(
+        sorted(
+            candidates.values(),
+            key=lambda item: (item.title.casefold(), item.identity.key),
+        )
+    )
+
+
+def _tmdb_episode_catalog(
+    response: object,
+) -> tuple[tuple[ProviderEpisode, ...], tuple[str, ...], tuple[str, ...]]:
+    if not isinstance(response, list):
+        return (), ("episode-catalog-is-not-a-list",), ()
+    episodes: list[ProviderEpisode] = []
+    errors: list[str] = []
+    diagnostics: list[str] = []
+    for index, item in enumerate(response):
+        if not isinstance(item, dict):
+            errors.append(f"invalid-catalog-entry:{index}")
+            continue
+        episode_id = item.get("id")
+        season = item.get("season_number")
+        number = item.get("episode_number")
+        title = item.get("name")
+        if not isinstance(episode_id, int) or episode_id <= 0:
+            errors.append(f"invalid-catalog-episode-id:{index}")
+            continue
+        if not isinstance(season, int) or season < 0:
+            errors.append(f"invalid-catalog-season:{index}")
+            continue
+        if not isinstance(number, int) or number < 0:
+            errors.append(f"invalid-catalog-number:{index}")
+            continue
+        if not isinstance(title, str) or not title.strip():
+            errors.append(f"invalid-catalog-title:{index}")
+            continue
+        airdate = item.get("air_date")
+        if airdate is not None and (
+            not isinstance(airdate, str)
+            or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", airdate)
+        ):
+            diagnostics.append(f"invalid-catalog-airdate:{index}")
+            airdate = None
+        episode_type = item.get("type")
+        episodes.append(
+            ProviderEpisode(
+                identity=ProviderIdentity(TMDB_PROVIDER, str(episode_id)),
+                season=season,
+                number=number,
+                title=title,
+                airdate=airdate,
+                episode_type=episode_type if isinstance(episode_type, str) else None,
+            )
+        )
+    return (
+        tuple(
+            sorted(
+                episodes,
+                key=lambda item: (item.season, item.number or 0, item.identity.key),
+            )
+        ),
+        tuple(errors),
+        tuple(diagnostics),
+    )
+
+
+class TmdbProviderAdapter:
+    """Optional TMDb adapter implementing the provider-neutral metadata API."""
+
+    provider_name = TMDB_PROVIDER
+
+    def __init__(self, cache: TmdbCatalogCache, getter: JsonGetter) -> None:
+        self._cache = cache
+        self._getter = getter
+
+    def search_shows(self, title: str) -> ProviderSearchSnapshot:
+        record = self._cache.search_show(title, self._getter)
+        if not record.resolved:
+            return ProviderSearchSnapshot(
+                provider=self.provider_name,
+                request_key=record.request_key,
+                cache_snapshot_id=record.snapshot_id,
+                shows=(),
+                unresolved_reason=record.unresolved_reason
+                or "provider-search-unresolved",
+                retrieved_at=record.retrieved_at,
+            )
+        return ProviderSearchSnapshot(
+            provider=self.provider_name,
+            request_key=record.request_key,
+            cache_snapshot_id=record.snapshot_id,
+            shows=_tmdb_show_candidates(record.response),
+            retrieved_at=record.retrieved_at,
+        )
+
+    def episode_catalog(
+        self, show_identity: ProviderIdentity
+    ) -> ProviderEpisodeCatalog:
+        if show_identity.provider != self.provider_name:
+            raise ValueError(
+                f"provider identity is {show_identity.provider!r}, expected {self.provider_name!r}"
+            )
+        record = self._cache.episode_catalog(int(show_identity.value), self._getter)
+        if not record.resolved:
+            return ProviderEpisodeCatalog(
+                provider=self.provider_name,
+                request_key=record.request_key,
+                cache_snapshot_id=record.snapshot_id,
+                show_identity=show_identity,
+                episodes=(),
+                unresolved_reason=record.unresolved_reason
+                or "provider-catalog-unresolved",
+                retrieved_at=record.retrieved_at,
+            )
+        episodes, errors, diagnostics = _tmdb_episode_catalog(record.response)
         return ProviderEpisodeCatalog(
             provider=self.provider_name,
             request_key=record.request_key,

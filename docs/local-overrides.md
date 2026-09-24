@@ -42,6 +42,13 @@ To turn one completed plan's unresolved/suspicious records into an editable star
 jmo overrides stub ExampleOutput/plan.json > local-overrides.toml
 ```
 
+`jmo overrides suggest plan.json` emits a separate schema-4 suggestion file for
+repeated high-confidence provider candidates. It promotes a candidate only when
+the same provider ID is the top candidate for at least two records in one
+family. The provider title becomes the key and the observed source family is
+retained as an alias. Review, edit, and validate the output before using it with
+`jmo plan --overrides`; planning never loads suggestions implicitly.
+
 The command validates the current plan manifest, groups unresolved records by source-show identity, and emits schema-version-2 TOML to stdout. It does not scan media, contact the provider, write a destination, or modify the source plan. Review references and concise reasons are emitted as comments.
 
 Observed provider IDs remain comments such as `# observed_tvmaze_id = 45001`; they are **not** promoted into active override decisions automatically. Review the generated file and deliberately add or change identity, aliases, numbering policy, year, or title preference before using it with `plan --overrides`.
@@ -127,6 +134,12 @@ preferred_title = "Example Series"
 ```
 
 Supported `numbering_mode` values are `aired`, `absolute`, `parenthesized-absolute`, `segment-title`, `special`, and `date`.
+
+When a release uses source season numbers that differ from the provider catalog,
+an explicit show override may include `season_map`, for example
+`season_map = { "1" = 24 }`. Keys are source seasons and values are provider
+seasons. This is applied only during catalog lookup, is included in the override
+snapshot hash, and is never inferred automatically.
 
 Supported `title_preference` values are `provider`, `source`, and `override`. `title_preference = "override"` requires `preferred_title`.
 

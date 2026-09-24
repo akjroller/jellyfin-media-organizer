@@ -36,7 +36,9 @@ See [package publishing](docs/publishing.md) for the maintainer setup and trust
 boundary.
 
 If you prefer a source checkout, follow [Install](#install) below first.
-The demo creates a ready, one-video synthetic plan. A typical summary looks like this:
+The demo creates a deterministic synthetic plan with a matched episode, a
+duplicate review group, and an explicit held file. A simple ready-plan summary
+looks like this:
 
 ```text
 records=1
@@ -57,6 +59,17 @@ For safe beta testing and feedback, see [Community beta](docs/community-beta.md)
 JMO is not a universal media manager yet. It is a TV-show-focused, plan-first
 tool for people who want to inspect and review a proposed Jellyfin layout before
 anything can move.
+
+For a real library, the simplest entrypoint is the guided wizard:
+
+```powershell
+.\.venv\Scripts\jmo.exe
+```
+
+With no subcommand, JMO walks through setup, doctor, planning, review, and the
+read-only apply check. It still requires a separate exact confirmation before
+any media can move. Advanced users and automation can continue to use the
+explicit `plan`, `review`, `inspect`, and `apply` commands.
 
 JMO is intentionally conservative: planning and review remain non-mutating, while `jmo apply` is an explicitly gated executor for one exact reviewed plan. Apply permits only same-filesystem, atomic, no-overwrite renames for `matched` and `extra` operation groups. It never copies across filesystems, overwrites, deletes, quarantines, or moves duplicate/held/ignored records.
 
@@ -87,6 +100,13 @@ run to get a concise status summary. `jmo config example` and `jmo overrides
 example` generate starter files for reusable local configuration. `jmo init`
 creates that state layout in one step, and `jmo demo` creates a disposable
 synthetic workspace for learning the workflow without real media.
+
+After initialization, use `jmo run --state-dir <state>` for normal repeatable
+paper runs. It loads the saved roots and provider settings and creates a fresh
+timestamped audit bundle without overwriting prior runs.
+
+Provider details, including the optional TMDb adapter and its credential-safe
+cache behavior, are documented in [providers](docs/providers.md).
 
 `jmo review` consumes a fresh plan-schema-v3 manifest and records explicit review decisions into a resumable session plus a new reviewed override contract. Review can resolve duplicate decisions and held sources as provider-confirmed episodes/specials or explicit extras, but it is also strictly non-mutating: quarantine choices are markers only, and review never moves, deletes, or quarantines media. See the [non-mutating review workflow](docs/review-workflow.md) before using it.
 

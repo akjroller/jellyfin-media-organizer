@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import unicodedata
 from collections import defaultdict
 from collections.abc import Callable, Mapping
@@ -46,6 +47,7 @@ from .models import (
     CompanionStatus,
     MatchEvidence,
     OrganizerPlan,
+    ParseResult,
     PlanEpisode,
     PlanProvenance,
     PlanRecord,
@@ -60,7 +62,13 @@ from .preflight import (
     authorize_destination_root,
     preflight_plan,
 )
-from .providers import MetadataProvider, ProviderEpisode, TvmazeProviderAdapter
+from .providers import (
+    AutoProviderAdapter,
+    MetadataProvider,
+    ProviderEpisode,
+    TmdbProviderAdapter,
+    TvmazeProviderAdapter,
+)
 from .reports import AuditBundle, write_audit_bundle
 from .run_provenance import (
     build_run_provenance,
@@ -79,6 +87,7 @@ from .sidecars import (
     companion_destinations,
     discover_sidecars,
 )
+from .tmdb_cache import TmdbCatalogCache, tmdb_http_getter
 from .tvmaze_cache import (
     CacheRecord,
     CacheState,
@@ -107,6 +116,7 @@ class PlanningConfig:
     overrides_path: Path | None = None
     offline: bool = False
     refresh: bool = False
+    provider_strategy: str = "auto"
     max_path_length: int = 240
     max_component_length: int = 180
 
@@ -115,6 +125,8 @@ class PlanningConfig:
             raise PlanningConfigurationError(
                 "offline and refresh modes cannot be enabled together"
             )
+        if self.provider_strategy not in {"auto", "tvmaze"}:
+            raise PlanningConfigurationError("provider_strategy must be auto or tvmaze")
         DestinationPolicy(
             max_path_length=self.max_path_length,
             max_component_length=self.max_component_length,
@@ -129,6 +141,9 @@ class PlanningConfig:
                 "max_component_length": self.max_component_length,
                 "max_path_length": self.max_path_length,
             },
+            # Keep the existing config identity stable.  Auto mode only adds
+            # optional evidence when a TMDb token is configured; the actual
+            # cache snapshots and plan hash still bind the resulting run.
             "provider": "tvmaze",
         }
         canonical = json.dumps(
@@ -172,6 +187,27 @@ class TrackingTvmazeCatalogCache(TvmazeCatalogCache):
 
     def episode_catalog(self, tvmaze_id: int, getter: JsonGetter) -> CacheRecord:
         return self._track(super().episode_catalog(tvmaze_id, getter))
+
+
+class TrackingTmdbCatalogCache(TmdbCatalogCache):
+    def __init__(
+        self, root: Path, *, offline: bool, refresh: bool, clock: Clock | None = None
+    ) -> None:
+        if clock is None:
+            super().__init__(root, offline=offline, refresh=refresh)
+        else:
+            super().__init__(root, offline=offline, refresh=refresh, clock=clock)
+        self.records: dict[tuple[str, str], CacheRecord] = {}
+
+    def _track(self, record: CacheRecord) -> CacheRecord:
+        self.records[(record.kind.value, record.request_key)] = record
+        return record
+
+    def search_show(self, title: str, getter: JsonGetter) -> CacheRecord:
+        return self._track(super().search_show(title, getter))
+
+    def episode_catalog(self, tmdb_id: int, getter: JsonGetter) -> CacheRecord:
+        return self._track(super().episode_catalog(tmdb_id, getter))
 
 
 def http_json_getter(
@@ -218,6 +254,21 @@ def _combine_evidence(*values: MatchEvidence) -> MatchEvidence:
         candidates=tuple(
             candidate for value in values for candidate in value.candidates
         ),
+    )
+
+
+def _provider_season_parse(  # pragma: no cover - exercised through planning integration
+    parse: ParseResult,
+    season_map: Mapping[int, int],
+) -> tuple[ParseResult, tuple[str, ...]]:
+    """Translate an explicitly configured source season to provider numbering."""
+
+    if parse.season is None or parse.season not in season_map:
+        return parse, ()
+    target = season_map[parse.season]
+    return (
+        replace(parse, season=target),
+        (f"provider-season-remap:S{parse.season:02d}->S{target:02d}",),
     )
 
 
@@ -421,6 +472,17 @@ def _plan_resolved_group(
 ) -> list[PlanRecord]:
     assert resolution.show is not None
     show = resolution.show
+    show_override = overrides.matching_show(
+        show.source_key,
+        tuple(
+            classification.parse.series_hint
+            for source in sources
+            if (
+                classification := classifications[source.relative_path]
+            ).parse.series_hint
+        ),
+    )
+    season_map = dict(show_override.season_map) if show_override is not None else {}
     records: list[PlanRecord] = []
     episode_sources: list[SourceEpisodeInput] = []
     decision_evidence: dict[str, MatchEvidence] = {}
@@ -521,7 +583,15 @@ def _plan_resolved_group(
                 )
             continue
 
-        effective_parse = classification.parse
+        effective_parse, season_remap_reasons = _provider_season_parse(
+            classification.parse, season_map
+        )
+        if season_remap_reasons:
+            decision_evidence[source.relative_path] = MatchEvidence(
+                method="provider-season-remap",
+                confidence=1.0,
+                reasons=season_remap_reasons,
+            )
         if decision is not None:
             effective_parse = decision.apply_to(effective_parse)
             decision_evidence[source.relative_path] = _episode_decision_evidence(
@@ -1197,7 +1267,22 @@ def execute_plan(
         refresh=config.refresh,
         clock=clock,
     )
-    provider = TvmazeProviderAdapter(cache, getter)
+    tvmaze_provider = TvmazeProviderAdapter(cache, getter)
+    tmdb_cache: TrackingTmdbCatalogCache | None = None
+    tmdb_token = os.environ.get("JMO_TMDB_ACCESS_TOKEN", "").strip()
+    if config.provider_strategy == "auto" and tmdb_token:
+        tmdb_cache = TrackingTmdbCatalogCache(
+            cache_dir / "tmdb",
+            offline=config.offline,
+            refresh=config.refresh,
+            clock=clock,
+        )
+        provider: MetadataProvider = AutoProviderAdapter(
+            tvmaze_provider,
+            TmdbProviderAdapter(tmdb_cache, tmdb_http_getter(tmdb_token)),
+        )
+    else:
+        provider = tvmaze_provider
     plan = _build_plan(source_root, config, overrides, cache, provider)
     plan_hash = stable_plan_hash(plan)
     preflight = preflight_plan(
@@ -1208,8 +1293,11 @@ def execute_plan(
         max_path_length=config.max_path_length,
         max_component_length=config.max_component_length,
     )
+    cache_records = list(cache.records.values())
+    if tmdb_cache is not None:
+        cache_records.extend(tmdb_cache.records.values())
     provider_failure = any(
-        record.state is not CacheState.OK for record in cache.records.values()
+        record.state is not CacheState.OK for record in cache_records
     )
     provider_mode = (
         "offline" if config.offline else "refresh" if config.refresh else "online"

@@ -27,6 +27,19 @@ def test_organizer_version(capsys: pytest.CaptureFixture[str]):
     assert capsys.readouterr().out.strip() == f"Jellyfin Media Organizer {__version__}"
 
 
+def test_bare_cli_launches_guided_wizard(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = 0
+
+    def fake_wizard() -> int:
+        nonlocal called
+        called += 1
+        return 17
+
+    monkeypatch.setattr(cli, "run_wizard", fake_wizard)
+    assert main([]) == 17
+    assert called == 1
+
+
 def test_python_module_entrypoint_reports_version(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -173,6 +186,59 @@ unexpected = true
 
     with pytest.raises(ValueError, match="unknown fields"):
         _planning_config(args)
+
+
+def test_run_loads_saved_source_and_uses_fresh_output_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    state = tmp_path / "State"
+    (state / "runs").mkdir(parents=True)
+    (tmp_path / "Shows").mkdir()
+    (state / "planning.toml").write_text(
+        """schema_version = 1
+
+[plan]
+source_root = "../Shows"
+destination_root = "../Organized"
+output_dir = "runs/initial"
+cache_dir = "cache"
+provider_mode = "auto"
+""",
+        encoding="utf-8",
+    )
+    captured: list[object] = []
+
+    def fake_plan(args: object) -> int:
+        captured.append(args)
+        return 0
+
+    monkeypatch.setattr(cli, "_run_plan", fake_plan)
+    assert main(["run", "--state-dir", str(state)]) == 0
+    args = captured[0]
+    assert args.shows_root.resolve() == (tmp_path / "Shows").resolve()
+    assert args.output_dir.parent == state / "runs"
+    assert args.output_dir.name.startswith("run-")
+
+
+def test_run_cannot_cross_review_or_apply_boundary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    state = tmp_path / "State"
+    (state / "runs").mkdir(parents=True)
+    (tmp_path / "Shows").mkdir()
+    (state / "planning.toml").write_text(
+        """schema_version = 1\n\n[plan]\nsource_root = \"../Shows\"\n""",
+        encoding="utf-8",
+    )
+
+    def forbidden(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("jmo run crossed the review/apply boundary")
+
+    monkeypatch.setattr(cli, "execute_apply", forbidden)
+    monkeypatch.setattr(cli, "run_review_system", forbidden)
+    monkeypatch.setattr(cli, "_run_plan", lambda _args: 0)
+
+    assert main(["run", "--state-dir", str(state)]) == 0
 
 
 def _apply_paths(tmp_path: Path) -> tuple[list[str], PreparedApply]:

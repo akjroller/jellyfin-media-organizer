@@ -6,6 +6,7 @@ import sys
 import tomllib
 from collections import Counter
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -20,7 +21,7 @@ from .apply_execution import (
 from .apply_validation import ApplyFilesystemError, validate_apply_roots
 from .models import TerminalStatus
 from .providers import TvmazeProviderAdapter
-from .review import render_override_stub
+from .review import render_override_stub, render_override_suggestions
 from .review_contract import ReviewContractCatalog, load_review_contract
 from .review_execution import (
     PlanningConfig,
@@ -116,6 +117,13 @@ def build_parser() -> argparse.ArgumentParser:
         dest="provider_mode",
         const="online",
     )
+    provider_mode.add_argument(
+        "--auto",
+        action="store_const",
+        dest="provider_mode",
+        const="auto",
+        help="Use TVMaze first and consult TMDb only for unresolved/ambiguous searches.",
+    )
     plan_parser.add_argument("--max-path-length", type=int)
     plan_parser.add_argument("--max-component-length", type=int)
     plan_parser.add_argument("--json", action="store_true", dest="json_output")
@@ -126,6 +134,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print inventory and show-resolution progress to stderr.",
     )
     plan_parser.set_defaults(handler=_run_plan)
+
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run a fresh read-only plan from an initialized JMO state directory.",
+        description=(
+            "Load the source, destination, cache, provider mode, and overrides "
+            "saved by jmo init, then create a new non-mutating audit bundle."
+        ),
+    )
+    run_parser.add_argument("--state-dir", type=Path, required=True)
+    run_parser.add_argument(
+        "--shows-root",
+        type=Path,
+        help="Compatibility fallback for state created before source_root was saved.",
+    )
+    run_parser.add_argument("--json", action="store_true", dest="json_output")
+    run_parser.add_argument("--progress", action="store_true")
+    run_parser.set_defaults(handler=_run_run)
 
     doctor_parser = subparsers.add_parser(
         "doctor",
@@ -154,7 +180,9 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--destination-root", type=Path, required=True)
     init_parser.add_argument("--state-dir", type=Path, required=True)
     init_parser.add_argument(
-        "--provider-mode", choices=("online", "offline", "refresh"), default="online"
+        "--provider-mode",
+        choices=("auto", "online", "offline", "refresh"),
+        default="auto",
     )
     init_parser.set_defaults(handler=_run_init)
 
@@ -376,6 +404,13 @@ def build_parser() -> argparse.ArgumentParser:
     stub_parser.add_argument("plan", type=Path)
     stub_parser.set_defaults(handler=_run_overrides_stub)
 
+    suggest_parser = overrides_subparsers.add_parser(
+        "suggest",
+        help="Emit conservative provider-identity suggestions from a plan.",
+    )
+    suggest_parser.add_argument("plan", type=Path)
+    suggest_parser.set_defaults(handler=_run_overrides_suggest)
+
     example_parser = overrides_subparsers.add_parser(
         "example",
         help="Print or write an empty schema-4 override starter.",
@@ -421,6 +456,7 @@ def _planning_config(args: argparse.Namespace) -> PlanningConfig:
             raise PlanningConfigurationError("config plan must be a table")
         raw_plan = cast(dict[str, object], plan_value)
         allowed = {
+            "source_root",
             "destination_root",
             "output_dir",
             "cache_dir",
@@ -445,8 +481,8 @@ def _planning_config(args: argparse.Namespace) -> PlanningConfig:
 
     provider_mode = cast(str | None, args.provider_mode)
     if provider_mode is None:
-        raw_mode = raw_plan.get("provider_mode", "online")
-        if raw_mode not in {"online", "offline", "refresh"}:
+        raw_mode = raw_plan.get("provider_mode", "auto")
+        if raw_mode not in {"auto", "online", "offline", "refresh"}:
             raise PlanningConfigurationError("config provider_mode is invalid")
         provider_mode = cast(str, raw_mode)
 
@@ -471,6 +507,7 @@ def _planning_config(args: argparse.Namespace) -> PlanningConfig:
         overrides_path=selected_path("overrides", required=False),
         offline=provider_mode == "offline",
         refresh=provider_mode == "refresh",
+        provider_strategy="auto" if provider_mode == "auto" else "tvmaze",
         max_path_length=selected_int("max_path_length", 240),
         max_component_length=selected_int("max_component_length", 180),
     )
@@ -548,6 +585,73 @@ def _run_plan(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def _run_run(args: argparse.Namespace) -> int:
+    """Run one fresh, read-only plan from state saved by ``jmo init``.
+
+    Deliberately delegates only to ``_run_plan``.  This command has no review
+    or apply path and must never acquire an apply journal or confirmation
+    token; the explicit ``jmo apply`` command is the permanent mutation gate.
+    """
+
+    try:
+        state = cast(Path, args.state_dir).expanduser().resolve(strict=True)
+    except OSError as exc:
+        print(
+            f"Run failed safely: cannot open state directory ({exc})", file=sys.stderr
+        )
+        return 2
+    config = state / "planning.toml"
+    if not config.is_file():
+        print(f"Run failed: {config} does not exist", file=sys.stderr)
+        return 2
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    output_dir = state / "runs" / f"run-{stamp}"
+    suffix = 1
+    while output_dir.exists():
+        output_dir = state / "runs" / f"run-{stamp}-{suffix}"
+        suffix += 1
+    plan_args = argparse.Namespace(
+        shows_root=None,
+        config=config,
+        destination_root=None,
+        output_dir=output_dir,
+        cache_dir=None,
+        overrides=None,
+        review_session=None,
+        provider_mode=None,
+        max_path_length=None,
+        max_component_length=None,
+        json_output=bool(args.json_output),
+        verbose=False,
+        progress=bool(args.progress),
+    )
+    try:
+        raw = tomllib.loads(config.read_text(encoding="utf-8"))
+        plan_table = cast(dict[str, object], raw["plan"])
+        source_value = plan_table.get("source_root")
+        if isinstance(source_value, str) and source_value.strip():
+            plan_args.shows_root = _config_path(
+                source_value, base=config.parent, field="source_root"
+            )
+        elif args.shows_root is not None:
+            plan_args.shows_root = cast(Path, args.shows_root)
+        else:
+            raise PlanningConfigurationError(
+                "configured state is missing plan.source_root; pass --shows-root once or rerun jmo init"
+            )
+        return _run_plan(plan_args)
+    except (
+        OSError,
+        UnicodeError,
+        tomllib.TOMLDecodeError,
+        KeyError,
+        TypeError,
+        PlanningConfigurationError,
+    ) as exc:
+        print(f"Run failed safely: {exc}", file=sys.stderr)
+        return 2
+
+
 def _no_interactive_input(_prompt: str) -> str:
     raise ReviewConfigurationError(
         "non-interactive review attempted an unstructured prompt"
@@ -584,6 +688,7 @@ def _run_review(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+
     plan_path = cast(Path, args.plan)
     overrides_path = cast(Path, args.overrides)
     output_path = cast(Path, args.output)
@@ -909,6 +1014,22 @@ def _run_overrides_stub(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_overrides_suggest(args: argparse.Namespace) -> int:
+    path = cast(Path, args.plan)
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        rendered = render_override_suggestions(manifest).decode("utf-8")
+    except OSError as exc:
+        detail = exc.strerror or exc.__class__.__name__
+        print(f"Plan manifest invalid: cannot read file ({detail})", file=sys.stderr)
+        return 2
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        print(f"Plan manifest invalid: {exc}", file=sys.stderr)
+        return 2
+    print(rendered, end="")
+    return 0
+
+
 def _run_doctor(args: argparse.Namespace) -> int:
     return run_doctor(
         cast(Path, args.shows_root),
@@ -966,7 +1087,10 @@ def _run_config_example(args: argparse.Namespace) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the standalone organizer CLI."""
+    effective_argv = list(sys.argv[1:] if argv is None else argv)
+    if not effective_argv:
+        return run_wizard()
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(effective_argv)
     handler = cast(CommandHandler, args.handler)
     return handler(args)

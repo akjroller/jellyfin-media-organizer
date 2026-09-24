@@ -171,6 +171,82 @@ title_preference = "provider"
         load_overrides(path)
 
 
+def test_show_season_map_is_loaded_and_hash_bound(tmp_path: Path):
+    path = tmp_path / "overrides.toml"
+    path.write_text(
+        """schema_version = 4
+
+[[shows]]
+key = "Pokemon Master Journeys The Series"
+tvmaze_id = 590
+season_map = { "1" = 24, "2" = 25 }
+""",
+        encoding="utf-8",
+    )
+    catalog = load_overrides(path)
+    show = catalog.shows[0]
+    assert show.provider_season(1) == 24
+    assert show.provider_season(9) == 9
+    assert b'"season_map":{"1":24,"2":25}' in catalog.canonical_bytes()
+
+
+def test_provider_season_remap_changes_only_catalog_coordinate():
+    from jellyfin_show_organizer.models import ParseResult
+    from jellyfin_show_organizer.planner import _provider_season_parse
+
+    original = ParseResult(series_hint="Example", season=1, episodes=(3,))
+    remapped, reasons = _provider_season_parse(original, {1: 24})
+    assert remapped.series_hint == original.series_hint
+    assert remapped.episodes == original.episodes
+    assert remapped.season == 24
+    assert reasons == ("provider-season-remap:S01->S24",)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"season_map": ((1, 24), (1, 25)), "tvmaze_id": 590}, "unique"),
+        ({"season_map": ((0, 24),), "tvmaze_id": 590}, "positive"),
+        ({"season_map": ((1, 24),)}, "requires"),
+        ({"year": 1799}, "outside"),
+    ],
+)
+def test_show_override_rejects_unsafe_season_map_values(kwargs, message):
+    from jellyfin_show_organizer.overrides import ShowOverride
+
+    with pytest.raises(ValueError, match=message):
+        ShowOverride(key="example", **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("year", '"2024"', "year must be an integer"),
+        ("preferred_title", "7", "preferred_title must be a string"),
+        ("season_map", "[1]", "season_map must be a table"),
+        ("season_map", '{"bad" = 24}', "season_map keys"),
+        ("season_map", '{"1" = "24"}', "season_map values"),
+        ("numbering_mode", '"invalid"', "invalid override numbering_mode"),
+        ("title_preference", '"invalid"', "invalid override title_preference"),
+    ],
+)
+def test_show_override_parser_rejects_invalid_new_fields(
+    tmp_path: Path, field: str, value: str, message: str
+):
+    path = _write(
+        tmp_path / "invalid-show-field.toml",
+        f"""schema_version = 4
+
+[[shows]]
+key = "example"
+tvmaze_id = 590
+{field} = {value}
+""",
+    )
+    with pytest.raises(ValueError, match=message):
+        load_overrides(path)
+
+
 def test_validate_cli_reports_snapshot_without_local_path(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

@@ -21,6 +21,7 @@ from .rollback_execution import (
     total_rollback_members,
 )
 from .run_provenance import detect_source_revision
+from .user_commands import run_wizard
 
 CommandHandler = Callable[[argparse.Namespace], int]
 ROLLBACK_FAILED_EXIT = 31
@@ -241,7 +242,13 @@ def _run_rollback(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # A bare `jmo` is the friendly first-run entrypoint.  Keep the explicit
+    # subcommands available for automation and advanced users, but do not make
+    # a new user discover the wizard command before they can get started.
+    effective_argv = list(sys.argv[1:] if argv is None else argv)
+    if not effective_argv:
+        return run_wizard()
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(effective_argv)
     handler = cast(CommandHandler, args.handler)
     return handler(args)

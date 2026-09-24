@@ -28,6 +28,17 @@ def test_managed_numeric_episode_title_is_not_parsed_as_a_range() -> None:
     assert result.episodes == (6,)
 
 
+def test_year_prefixed_season_tokens_preserve_four_digit_provider_seasons() -> None:
+    result = parse_video_path(
+        "Naruto (2002)/Season 2002/Naruto (2002) S2002E01 - Enter Naruto Uzumaki!.mkv"
+    )
+
+    assert result.series_hint == "Naruto"
+    assert result.year == 2002
+    assert result.season == 2002
+    assert result.episodes == (1,)
+
+
 @pytest.mark.parametrize(
     ("relative_path", "expected"),
     [

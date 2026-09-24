@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import replace
@@ -27,6 +28,7 @@ from .planner import (
     PlanningConfig,
     PlanningConfigurationError,
     PlanningOutcome,
+    TrackingTmdbCatalogCache,
     TrackingTvmazeCatalogCache,
     apply_duplicate_decisions,
     build_plan,
@@ -38,7 +40,13 @@ from .planner import (
     preflight_records,
 )
 from .preflight import authorize_destination_root, preflight_plan
-from .providers import MetadataProvider, ProviderEpisode, TvmazeProviderAdapter
+from .providers import (
+    AutoProviderAdapter,
+    MetadataProvider,
+    ProviderEpisode,
+    TmdbProviderAdapter,
+    TvmazeProviderAdapter,
+)
 from .reports import write_audit_bundle
 from .review_contract import (
     DuplicateGroupAction,
@@ -63,6 +71,7 @@ from .run_provenance import (
 )
 from .schema import stable_plan_hash
 from .sidecars import discover_sidecars
+from .tmdb_cache import tmdb_http_getter
 from .tvmaze_cache import CacheState, Clock, JsonGetter
 
 
@@ -774,7 +783,22 @@ def execute_plan(
         refresh=config.refresh,
         clock=clock,
     )
-    provider = TvmazeProviderAdapter(cache, getter)
+    tvmaze_provider = TvmazeProviderAdapter(cache, getter)
+    tmdb_cache: TrackingTmdbCatalogCache | None = None
+    tmdb_token = os.environ.get("JMO_TMDB_ACCESS_TOKEN", "").strip()
+    if config.provider_strategy == "auto" and tmdb_token:
+        tmdb_cache = TrackingTmdbCatalogCache(
+            cache_dir / "tmdb",
+            offline=config.offline,
+            refresh=config.refresh,
+            clock=clock,
+        )
+        provider: MetadataProvider = AutoProviderAdapter(
+            tvmaze_provider,
+            TmdbProviderAdapter(tmdb_cache, tmdb_http_getter(tmdb_token)),
+        )
+    else:
+        provider = tvmaze_provider
     plan = build_plan(
         source_root,
         config,
@@ -803,8 +827,11 @@ def execute_plan(
         max_path_length=config.max_path_length,
         max_component_length=config.max_component_length,
     )
+    cache_records = list(cache.records.values())
+    if tmdb_cache is not None:
+        cache_records.extend(tmdb_cache.records.values())
     provider_failure = any(
-        record.state is not CacheState.OK for record in cache.records.values()
+        record.state is not CacheState.OK for record in cache_records
     )
     provider_mode = (
         "offline" if config.offline else "refresh" if config.refresh else "online"
