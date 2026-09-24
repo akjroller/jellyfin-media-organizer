@@ -454,13 +454,22 @@ def test_review_display_groups_provider_evidence() -> None:
     _display_record_evidence(
         {
             "show": {"title": "Fabricated Series", "tvmaze_id": 42},
+            "parse": {"season": 1, "episodes": [2]},
             "provider_episodes": [
                 {"season": 1, "number": 2, "title": "Second", "tvmaze_episode_id": 4242}
             ],
             "evidence": {
+                "method": "title-and-coordinate",
+                "confidence": 0.93,
+                "reasons": ["season coordinate agrees"],
                 "candidates": [
-                    {"title": "Fabricated Series", "tvmaze_id": 42, "score": 0.91}
-                ]
+                    {
+                        "title": "Fabricated Series",
+                        "tvmaze_id": 42,
+                        "score": 0.91,
+                        "reasons": ["exact title"],
+                    }
+                ],
             },
         },
         output,
@@ -470,3 +479,7 @@ def test_review_display_groups_provider_evidence() -> None:
     assert "S01, E02, title=Second, provider=tvmaze:4242" in rendered
     assert "title candidates:" in rendered
     assert "confidence=0.91" in rendered
+    assert "source coordinates: S01E02" in rendered
+    assert "match evidence: method=title-and-coordinate; confidence=0.93" in rendered
+    assert "evidence reasons: season coordinate agrees" in rendered
+    assert "evidence: exact title" in rendered

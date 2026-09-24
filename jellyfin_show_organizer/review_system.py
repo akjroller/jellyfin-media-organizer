@@ -470,8 +470,46 @@ def _format_provider_identity(value: object) -> str | None:
     return None
 
 
+def _format_source_coordinates(record: Mapping[str, object]) -> str | None:
+    parse = record.get("parse")
+    if not isinstance(parse, Mapping):
+        return None
+    coordinates: list[str] = []
+    season = parse.get("season")
+    episodes = parse.get("episodes")
+    if isinstance(season, int) and not isinstance(season, bool):
+        if isinstance(episodes, list | tuple) and episodes:
+            episode_values = [
+                value
+                for value in episodes
+                if isinstance(value, int) and not isinstance(value, bool)
+            ]
+            if episode_values:
+                coordinates.extend(
+                    f"S{season:02d}E{value:02d}" for value in episode_values
+                )
+            else:
+                coordinates.append(f"S{season:02d}")
+        else:
+            coordinates.append(f"S{season:02d}")
+    absolute = parse.get("absolute_episode")
+    if isinstance(absolute, int) and not isinstance(absolute, bool):
+        coordinates.append(f"A{absolute:02d}")
+    special = parse.get("special_episode")
+    if isinstance(special, int) and not isinstance(special, bool):
+        coordinates.append(f"Special {special}")
+    date = parse.get("episode_date")
+    if isinstance(date, str) and date:
+        coordinates.append(f"Date {date}")
+    return ", ".join(coordinates) or None
+
+
 def _display_record_evidence(record: Mapping[str, object], output: TextIO) -> None:
     """Render portable matching evidence without requiring another provider call."""
+
+    coordinates = _format_source_coordinates(record)
+    if coordinates is not None:
+        output.write(f"       source coordinates: {coordinates}\n")
 
     show = record.get("show")
     if isinstance(show, Mapping):
@@ -516,6 +554,21 @@ def _display_record_evidence(record: Mapping[str, object], output: TextIO) -> No
 
     evidence = record.get("evidence")
     if isinstance(evidence, Mapping):
+        method = evidence.get("method")
+        confidence = evidence.get("confidence")
+        if method is not None or confidence is not None:
+            output.write(
+                "       match evidence: "
+                f"method={method if isinstance(method, str) else 'unknown'}; "
+                f"confidence={confidence if confidence is not None else 'unknown'}\n"
+            )
+        reasons = evidence.get("reasons")
+        if isinstance(reasons, list | tuple) and reasons:
+            output.write(
+                "       evidence reasons: "
+                + "; ".join(str(reason) for reason in reasons)
+                + "\n"
+            )
         candidates = evidence.get("candidates")
         if isinstance(candidates, list | tuple) and candidates:
             output.write("       title candidates:\n")
@@ -533,6 +586,13 @@ def _display_record_evidence(record: Mapping[str, object], output: TextIO) -> No
                     f"; provider={identity or 'unknown'}"
                     f"; confidence={confidence if confidence is not None else 'unknown'}\n"
                 )
+                reasons = candidate.get("reasons")
+                if isinstance(reasons, list | tuple) and reasons:
+                    output.write(
+                        "           evidence: "
+                        + "; ".join(str(reason) for reason in reasons)
+                        + "\n"
+                    )
 
 
 def _display_duplicate(
