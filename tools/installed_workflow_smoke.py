@@ -264,7 +264,12 @@ def first_run_smoke(root: Path) -> None:
     inspected = json.loads(
         cli(["inspect", str(demo / "State" / "runs" / "demo-run"), "--json"])
     )
-    assert inspected["readiness_state"] == "apply-ready"
+    # The demo intentionally contains held and ambiguous records so that a
+    # first-time user can exercise review before any apply step.  It must be
+    # blocked closed until those decisions are resolved.
+    assert inspected["readiness_state"] == "blocked"
+    assert inspected["held"] == 1
+    assert inspected["suspicious"] == 2
     assert inspected["records"] >= 1
 
 

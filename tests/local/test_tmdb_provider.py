@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 from jellyfin_show_organizer.models import ProviderIdentity
 from jellyfin_show_organizer.providers import (
@@ -45,7 +46,9 @@ def test_tmdb_adapter_normalizes_search_and_seasons(tmp_path: Path) -> None:
             return {"episodes": []}
         raise AssertionError(url)
 
-    adapter = TmdbProviderAdapter(TmdbCatalogCache(tmp_path / "cache"), getter)
+    adapter = TmdbProviderAdapter(
+        TmdbCatalogCache(tmp_path / "cache"), cast(Any, getter)
+    )
     search = adapter.search_shows("Example Show")
     assert search.provider == "tmdb"
     assert search.shows[0].identity == ProviderIdentity("tmdb", "100")
@@ -68,7 +71,7 @@ def test_tmdb_cache_replays_offline_without_getter(tmp_path: Path) -> None:
         raise AssertionError(url)
 
     online = TmdbCatalogCache(tmp_path / "cache")
-    assert online.search_show("Nothing", getter).resolved
+    assert online.search_show("Nothing", cast(Any, getter)).resolved
     offline = TmdbCatalogCache(tmp_path / "cache", offline=True)
     assert offline.search_show(
         "Nothing", lambda *_: (_ for _ in ()).throw(AssertionError())
@@ -104,7 +107,7 @@ def test_auto_provider_does_not_call_tmdb_for_a_unique_tvmaze_match() -> None:
         def search_shows(self, _title: str):  # pragma: no cover
             raise AssertionError("TMDb should not be consulted")
 
-    provider = AutoProviderAdapter(Primary(), Secondary())
+    provider = AutoProviderAdapter(cast(Any, Primary()), cast(Any, Secondary()))
     result = provider.search_shows("Example")
     assert result.shows[0].identity == ProviderIdentity("tvmaze", "1")
     try:
@@ -150,7 +153,9 @@ def test_auto_provider_recovers_one_tvmaze_identity_from_tmdb_title() -> None:
                 shows=(ProviderShow(ProviderIdentity("tmdb", "2"), "Example", 2020),),
             )
 
-    result = AutoProviderAdapter(Primary(), Secondary()).search_shows("Example")
+    result = AutoProviderAdapter(
+        cast(Any, Primary()), cast(Any, Secondary())
+    ).search_shows("Example")
     assert result.shows == (show,)
 
 
@@ -180,5 +185,7 @@ def test_auto_provider_requires_consensus_for_ambiguous_tvmaze_results() -> None
                 shows=(ProviderShow(ProviderIdentity("tmdb", "3"), "Example", 2020),),
             )
 
-    result = AutoProviderAdapter(Primary(), Secondary()).search_shows("Example")
+    result = AutoProviderAdapter(
+        cast(Any, Primary()), cast(Any, Secondary())
+    ).search_shows("Example")
     assert result.shows == candidates[:]

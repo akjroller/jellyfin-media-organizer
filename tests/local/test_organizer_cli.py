@@ -1,7 +1,9 @@
+import argparse
 import runpy
 import sys
 import tomllib
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -214,7 +216,7 @@ provider_mode = "auto"
 
     monkeypatch.setattr(cli, "_run_plan", fake_plan)
     assert main(["run", "--state-dir", str(state)]) == 0
-    args = captured[0]
+    args = cast(argparse.Namespace, captured[0])
     assert args.shows_root.resolve() == (tmp_path / "Shows").resolve()
     assert args.output_dir.parent == state / "runs"
     assert args.output_dir.name.startswith("run-")
