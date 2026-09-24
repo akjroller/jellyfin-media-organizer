@@ -200,6 +200,38 @@ def test_review_status_reports_percentages_and_safe_movement_boundary(
     assert "partial review never authorizes apply" in capsys.readouterr().out
 
 
+def test_review_status_requires_export_inputs(tmp_path: Path, monkeypatch) -> None:
+    session_path = tmp_path / "session.json"
+    session_path.write_bytes(b"synthetic")
+    fake_session = SimpleNamespace(
+        items=[],
+        sha256="a" * 64,
+        plan_sha256="b" * 64,
+        approved_scope_refs=(),
+        complete=False,
+        approved_partial=False,
+    )
+    monkeypatch.setattr(
+        "jellyfin_show_organizer.user_commands.load_review_session",
+        lambda _payload: fake_session,
+    )
+
+    try:
+        run_review_status(session_path, export_path=tmp_path / "export.json")
+    except ValueError as exc:
+        assert "requires --run-dir" in str(exc)
+    else:
+        raise AssertionError("review export without a run directory should fail")
+
+    (tmp_path / "run").mkdir()
+    try:
+        run_review_status(session_path, run_dir=tmp_path / "run")
+    except ValueError as exc:
+        assert "summary.txt" in str(exc)
+    else:
+        raise AssertionError("review status should reject an incomplete run")
+
+
 def test_review_status_can_include_plan_totals_without_private_paths(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:

@@ -22,6 +22,7 @@ from .review_session import (
     ReviewSession,
     load_review_session,
 )
+from .summary_io import read_summary, summary_int
 
 CONFIG_EXAMPLE = """schema_version = 1
 
@@ -332,23 +333,19 @@ def run_inspect(
     if not summary_path.is_file():
         print(f"Inspect failed: {root} does not contain summary.txt")
         return 2
-    values: dict[str, str] = {}
-    for line in summary_path.read_text(encoding="utf-8-sig").splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            values[key] = value
+    values = read_summary(summary_path)
     result = {
         "schema_version": 1,
         "readiness_state": values.get("readiness_state", "not-evaluated"),
         "preflight_ready": values.get("preflight_ready", "unknown"),
-        "records": int(values.get("records", "0")),
-        "matched": int(values.get("matched", "0")),
-        "extra": int(values.get("extra", "0")),
-        "duplicate": int(values.get("duplicate", "0")),
-        "held": int(values.get("held", "0")),
-        "suspicious": int(values.get("suspicious", "0")),
-        "unresolved": int(values.get("unresolved", "0")),
-        "remaining_total": int(values.get("remaining_total", "0")),
+        "records": summary_int(values, "records"),
+        "matched": summary_int(values, "matched"),
+        "extra": summary_int(values, "extra"),
+        "duplicate": summary_int(values, "duplicate"),
+        "held": summary_int(values, "held"),
+        "suspicious": summary_int(values, "suspicious"),
+        "unresolved": summary_int(values, "unresolved"),
+        "remaining_total": summary_int(values, "remaining_total"),
         "plan_sha256": values.get("plan_sha256"),
     }
     if not redact_paths:
@@ -418,21 +415,11 @@ def run_review_status(
             raise ValueError(
                 "review summary run directory does not contain summary.txt"
             )
-        values: dict[str, str] = {}
-        for line in summary_path.read_text(encoding="utf-8-sig").splitlines():
-            if "=" in line:
-                key, value = line.split("=", 1)
-                values[key] = value
+        values = read_summary(summary_path)
 
-        def plan_number(key: str) -> int:
-            try:
-                return int(values.get(key, "0"))
-            except ValueError as exc:
-                raise ValueError(f"audit summary has invalid {key}") from exc
-
-        records = plan_number("records")
+        records = summary_int(values, "records")
         counts = {
-            key: plan_number(key)
+            key: summary_int(values, key)
             for key in (
                 "matched",
                 "extra",
@@ -677,21 +664,11 @@ def run_report(run_dir: Path, output_dir: Path) -> int:
     if not output.parent.is_dir():
         raise ValueError("report output parent directory does not exist")
 
-    values: dict[str, str] = {}
-    for line in summary_path.read_text(encoding="utf-8-sig").splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            values[key] = value
+    values = read_summary(summary_path)
 
-    def number(key: str) -> int:
-        try:
-            return int(values.get(key, "0"))
-        except ValueError as exc:
-            raise ValueError(f"audit summary has invalid {key}") from exc
-
-    records = number("records")
+    records = summary_int(values, "records")
     counts = {
-        key: number(key)
+        key: summary_int(values, key)
         for key in (
             "matched",
             "extra",

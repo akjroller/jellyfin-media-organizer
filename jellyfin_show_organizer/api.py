@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .planner import PlanningConfig, PlanningOutcome
 from .review_execution import execute_plan
+from .summary_io import read_summary, summary_int
 from .tvmaze_cache import Clock, JsonGetter
 
 
@@ -59,29 +60,19 @@ def inspect_audit(run_dir: Path) -> AuditSummary:
     summary = root / "summary.txt"
     if not summary.is_file():
         raise FileNotFoundError(f"audit bundle does not contain summary.txt: {root}")
-    values: dict[str, str] = {}
-    for line in summary.read_text(encoding="utf-8-sig").splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            values[key] = value
-
-    def number(name: str) -> int:
-        try:
-            return int(values.get(name, "0"))
-        except ValueError as exc:
-            raise ValueError(f"audit summary has invalid {name}") from exc
+    values = read_summary(summary)
 
     return AuditSummary(
         run_dir=root,
         readiness_state=values.get("readiness_state", "not-evaluated"),
         preflight_ready=values.get("preflight_ready", "unknown"),
-        records=number("records"),
-        matched=number("matched"),
-        extra=number("extra"),
-        duplicate=number("duplicate"),
-        held=number("held"),
-        suspicious=number("suspicious"),
-        unresolved=number("unresolved"),
-        remaining_total=number("remaining_total"),
+        records=summary_int(values, "records"),
+        matched=summary_int(values, "matched"),
+        extra=summary_int(values, "extra"),
+        duplicate=summary_int(values, "duplicate"),
+        held=summary_int(values, "held"),
+        suspicious=summary_int(values, "suspicious"),
+        unresolved=summary_int(values, "unresolved"),
+        remaining_total=summary_int(values, "remaining_total"),
         plan_sha256=values.get("plan_sha256"),
     )
