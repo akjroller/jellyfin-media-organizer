@@ -55,6 +55,24 @@ The command will not overwrite an existing session on a first run and will not o
 
 The session is persisted atomically after decisions. On interruption, the last successfully written session remains the resume point.
 
+## Shareable evidence export
+
+To inspect or hand off the current review without exposing source paths, export a
+structured evidence snapshot from the same session and audit directory:
+
+```bash
+jmo review-status LocalState/review-session.json \
+  --run-dir LocalState/audit-before-review \
+  --export LocalState/review-evidence.json
+```
+
+The export is read-only and refuses to overwrite an existing file. It is bound to
+the session and plan SHA-256 values and includes review state, show/provider
+identity, parsed coordinates, provider episode IDs, confidence, and evidence
+reasons. Source paths, destinations, and raw candidate filenames are omitted or
+replaced with stable non-reversible candidate references. The artifact does not
+contain provider caches, credentials, approval tokens, or journals.
+
 ### Answers file
 
 `--answers` supplies a non-interactive schema-2 answer bundle. It is bound to the exact starting plan, base override snapshot, starting review-session hash, review reference, and item identity. It cannot silently apply answers to changed candidates or changed source/companion fingerprints.

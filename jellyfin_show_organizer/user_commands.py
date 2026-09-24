@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
+import re
 import textwrap
 from collections import Counter
 from collections.abc import Mapping
@@ -13,7 +15,17 @@ from pathlib import Path
 
 from . import __version__
 from .planner import PlanningConfig
-from .review_session import ReviewItemKind, ReviewItemState, load_review_session
+from .review_session import (
+    ReviewItemKind,
+    ReviewItemState,
+    ReviewSession,
+    load_review_session,
+)
+
+_PRIVATE_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\)[^\s,;]+")
+_PRIVATE_FILE_RE = re.compile(
+    r"(?i)\b[^\s,;]+\.(?:mkv|mp4|m4v|avi|mov|wmv|srt|ass|ssa|nfo|jpg|jpeg|png)\b"
+)
 
 CONFIG_EXAMPLE = """schema_version = 1
 
@@ -325,6 +337,7 @@ def run_review_status(
     *,
     json_output: bool = False,
     run_dir: Path | None = None,
+    export_path: Path | None = None,
 ) -> int:
     """Summarize review progress without exposing reviewed source paths."""
 
@@ -345,6 +358,10 @@ def run_review_status(
     pending_percent = percent(pending)
 
     plan_summary: dict[str, object] | None = None
+    if export_path is not None and run_dir is None:
+        raise ValueError("review export requires --run-dir")
+
+    manifest: Mapping[str, object] | None = None
     if run_dir is not None:
         root = run_dir.expanduser().resolve(strict=True)
         summary_path = root / "summary.txt"
@@ -401,6 +418,16 @@ def run_review_status(
             "readiness_state": values.get("readiness_state", "not-evaluated"),
             "preflight_ready": values.get("preflight_ready", "unknown"),
         }
+        if export_path is not None:
+            manifest_path = root / "plan.json"
+            if not manifest_path.is_file():
+                raise ValueError(
+                    "review export run directory does not contain plan.json"
+                )
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, Mapping):
+                raise ValueError("plan.json root must be an object")
+            manifest = payload
 
     result = {
         "schema_version": 2,
@@ -422,6 +449,9 @@ def run_review_status(
     }
     if plan_summary is not None:
         result["plan_summary"] = plan_summary
+    if export_path is not None:
+        assert manifest is not None
+        _write_review_export(export_path, session, manifest, result)
     if json_output:
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
@@ -477,6 +507,117 @@ def run_review_status(
     else:
         print("Next step: resume the review session with jmo review --resume.")
     return 0
+
+
+def _redact_review_text(value: str) -> str:
+    redacted = _PRIVATE_PATH_RE.sub("<private-path>", value)
+    return _PRIVATE_FILE_RE.sub("<private-file>", redacted)
+
+
+def _safe_review_value(value: object) -> object:
+    if isinstance(value, str):
+        return _redact_review_text(value)
+    if isinstance(value, list):
+        return [_safe_review_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_safe_review_value(item) for item in value]
+    if isinstance(value, Mapping):
+        result: dict[str, object] = {}
+        for key, item in value.items():
+            name = str(key)
+            if name in {"source", "relative_path", "destination", "winner", "losers"}:
+                continue
+            if name == "candidates" and isinstance(item, list | tuple):
+                result[name] = [
+                    (
+                        f"candidate-{index}-"
+                        f"{hashlib.sha256(str(candidate).encode('utf-8')).hexdigest()[:12]}"
+                        if isinstance(candidate, str)
+                        else _safe_review_value(candidate)
+                    )
+                    for index, candidate in enumerate(item, start=1)
+                ]
+                continue
+            result[name] = _safe_review_value(item)
+        return result
+    return value
+
+
+def _review_record_by_source(
+    manifest: Mapping[str, object],
+) -> dict[str, Mapping[str, object]]:
+    records = manifest.get("records")
+    if not isinstance(records, list | tuple):
+        raise ValueError("plan.json records must be an array")
+    result: dict[str, Mapping[str, object]] = {}
+    for value in records:
+        if not isinstance(value, Mapping):
+            continue
+        source = value.get("source")
+        if isinstance(source, Mapping):
+            relative = source.get("relative_path")
+            if isinstance(relative, str):
+                result[relative.replace("\\", "/").casefold()] = value
+    return result
+
+
+def _write_review_export(
+    output_path: Path,
+    session: ReviewSession,
+    manifest: Mapping[str, object],
+    summary: Mapping[str, object],
+) -> None:
+    """Write an immutable, path-free evidence snapshot for offline review."""
+
+    records = _review_record_by_source(manifest)
+    items: list[dict[str, object]] = []
+    for item in session.items:
+        record: Mapping[str, object] | None = None
+        if item.source is not None:
+            record = records.get(item.source.replace("\\", "/").casefold())
+        item_data: dict[str, object] = {
+            "review_ref": item.review_ref,
+            "kind": item.kind.value,
+            "state": item.state.value,
+            "show_key": _redact_review_text(item.show_key),
+            "collision_class": (
+                item.collision_class.value if item.collision_class is not None else None
+            ),
+            "candidate_count": len(item.candidates),
+        }
+        evidence: dict[str, object] = {}
+        if record is not None:
+            for key in (
+                "parse",
+                "show",
+                "provider_episodes",
+                "evidence",
+                "reason",
+                "duplicate",
+            ):
+                if key in record:
+                    evidence[key] = _safe_review_value(record[key])
+        item_data["evidence"] = evidence
+        items.append(item_data)
+    document = {
+        "schema_version": 1,
+        "session_sha256": session.sha256,
+        "plan_sha256": session.plan_sha256,
+        "complete": session.complete,
+        "approved_scope_items": len(session.approved_scope_refs),
+        "summary": _safe_review_value(summary),
+        "items": sorted(items, key=lambda value: str(value["review_ref"])),
+    }
+    output = output_path.expanduser().resolve(strict=False)
+    if output.exists():
+        raise ValueError("review export output already exists")
+    if not output.parent.is_dir():
+        raise ValueError("review export output parent directory does not exist")
+    output.write_text(
+        json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def run_report(run_dir: Path, output_dir: Path) -> int:

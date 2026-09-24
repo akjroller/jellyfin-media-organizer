@@ -235,6 +235,71 @@ def test_review_status_can_include_plan_totals_without_private_paths(
     assert "Companions move only" in output
 
 
+def test_review_status_exports_path_free_evidence_snapshot(
+    tmp_path: Path, monkeypatch
+) -> None:
+    session_path = tmp_path / "session.json"
+    session_path.write_bytes(b"synthetic")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "summary.txt").write_text(
+        "records=1\nmatched=0\nextra=0\nduplicate=0\nheld=1\n"
+        "suspicious=0\nunresolved=0\ncompanions=0\n"
+        "readiness_state=apply-ready\npreflight_ready=true\n",
+        encoding="utf-8",
+    )
+    (run_dir / "plan.json").write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "source": {"relative_path": "Private/secret.mkv"},
+                        "parse": {"season": 1, "episodes": [2]},
+                        "show": {"title": "Example", "provider_id": "42"},
+                        "evidence": {
+                            "method": "synthetic",
+                            "confidence": 0.9,
+                            "candidates": [{"title": "Example", "score": 0.9}],
+                        },
+                        "reason": r"C:\\Users\\akjro\\secret.mkv",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    fake_item = SimpleNamespace(
+        review_ref="held-1",
+        kind=SimpleNamespace(value="held"),
+        state=SimpleNamespace(value="pending"),
+        show_key="Example",
+        source="Private/secret.mkv",
+        collision_class=None,
+        candidates=(),
+    )
+    fake_session = SimpleNamespace(
+        items=[fake_item],
+        sha256="a" * 64,
+        plan_sha256="b" * 64,
+        approved_scope_refs=(),
+        complete=False,
+        approved_partial=False,
+    )
+    monkeypatch.setattr(
+        "jellyfin_show_organizer.user_commands.load_review_session",
+        lambda _payload: fake_session,
+    )
+
+    output = tmp_path / "review-export.json"
+    assert run_review_status(session_path, run_dir=run_dir, export_path=output) == 0
+    document = json.loads(output.read_text(encoding="utf-8"))
+    assert document["session_sha256"] == "a" * 64
+    assert document["items"][0]["evidence"]["parse"]["season"] == 1
+    rendered = output.read_text(encoding="utf-8")
+    assert "secret.mkv" not in rendered
+    assert "C:\\\\Users" not in rendered
+
+
 def test_write_example_refuses_overwrite(tmp_path: Path, capsys) -> None:
     target = tmp_path / "example.toml"
     assert write_example(target, "x\n") == 0

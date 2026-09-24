@@ -269,6 +269,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     review_status_parser.add_argument("session", type=Path)
+    review_status_parser.add_argument(
+        "--run-dir",
+        type=Path,
+        help="Audit directory containing plan.json for evidence-rich export.",
+    )
+    review_status_parser.add_argument(
+        "--export",
+        type=Path,
+        help=(
+            "Write a path-free structured review evidence snapshot. Requires --run-dir "
+            "and refuses to overwrite an existing file."
+        ),
+    )
     review_status_parser.add_argument("--json", action="store_true", dest="json_output")
     review_status_parser.set_defaults(handler=_run_review_status)
 
@@ -699,7 +712,10 @@ def _run_review(args: argparse.Namespace) -> int:
 def _run_review_status(args: argparse.Namespace) -> int:
     try:
         return run_review_status(
-            cast(Path, args.session), json_output=bool(args.json_output)
+            cast(Path, args.session),
+            json_output=bool(args.json_output),
+            run_dir=cast(Path | None, args.run_dir),
+            export_path=cast(Path | None, args.export),
         )
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         print(f"Review status failed safely: {exc}", file=sys.stderr)
