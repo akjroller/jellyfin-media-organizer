@@ -1,13 +1,12 @@
 # Metadata providers
 
-JMO's planner currently uses TVMaze as its default provider. The provider
-boundary is also available for an optional TMDb adapter, so installations that
-already use TMDb can test the same search/catalog normalization without
-changing the default or sharing credentials with JMO.
+JMO's planner defaults to `auto`: it uses TVMaze first and consults the
+optional TMDb adapter only when the TVMaze result is unresolved or ambiguous.
+This preserves the stable TVMaze path for most libraries while allowing a
+second provider to supply independent identity evidence when it can help.
 
-The adapter is intentionally opt-in at the library boundary while its plan
-schema integration is being expanded. It requires a TMDb v4 read access token
-and keeps that token in memory only:
+TMDb comparison is enabled by setting `JMO_TMDB_ACCESS_TOKEN` to a TMDb v4
+read-access token. The token is kept in memory only:
 
 ```python
 from pathlib import Path
@@ -26,6 +25,12 @@ the access token. Set `offline=True` to replay an existing cache without any
 network calls. Missing or incomplete TMDb data remains unresolved rather than
 being converted into an unsafe match.
 
-TMDb is not silently selected by existing plans. TVMaze remains the stable
-default until the provider-neutral plan schema and CLI configuration can carry
-TMDb identities end-to-end.
+With no token, `auto` behaves like the TVMaze-only path and remains fully
+offline-safe. With a token, TMDb identities are recorded as additional
+provider evidence; JMO requires provider consensus before using that evidence
+to resolve an otherwise ambiguous match. A disagreement remains blocked for
+review rather than being silently promoted.
+
+Advanced users can still select the TVMaze-only behavior with the explicit
+`tvmaze` provider strategy in planning configuration. The normal CLI and
+wizard default remains `auto`.
