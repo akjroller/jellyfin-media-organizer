@@ -370,6 +370,8 @@ def test_batch_accept_recommended_confirms_each_evidence_group(
 
     assert session.complete
     assert output.getvalue().count("Evidence group ") == 2
+    assert output.getvalue().count("Shared evidence fingerprint:") == 2
+    assert "Shared evidence:" in output.getvalue()
 
 
 def test_batch_rejection_falls_through_to_interactive_defer(tmp_path: Path) -> None:

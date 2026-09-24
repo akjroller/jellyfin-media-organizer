@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
@@ -68,6 +69,13 @@ def _held_batch_key(record: Mapping[str, object]) -> str:
         separators=(",", ":"),
         default=str,
     )
+
+
+def _evidence_fingerprint(value: object) -> str:
+    payload = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass(frozen=True, slots=True)
@@ -1077,6 +1085,15 @@ def run_review_system(
                 output.write(
                     f"  Evidence group {batch_index} ({len(batch_refs)} items):\n"
                 )
+                batch_group = duplicate_by_ref[batch_refs[0]]
+                output.write(
+                    "  Shared evidence fingerprint: "
+                    f"{_evidence_fingerprint(_duplicate_batch_key(batch_group))}\n"
+                )
+                if batch_group.evidence:
+                    output.write(
+                        "  Shared evidence: " + "; ".join(batch_group.evidence) + "\n"
+                    )
                 for ref in batch_refs:
                     batch_group = duplicate_by_ref[ref]
                     output.write(
@@ -1131,6 +1148,14 @@ def run_review_system(
             for batch_index, batch in enumerate(held_batches.values(), start=1):
                 output.write("Batch leave-untouched sources:\n")
                 output.write(f"  Evidence group {batch_index} ({len(batch)} items):\n")
+                batch_record = batch[0][1]
+                output.write(
+                    "  Shared evidence fingerprint: "
+                    f"{_evidence_fingerprint(_held_batch_key(batch_record))}\n"
+                )
+                shared_reason = batch_record.get("reason")
+                if isinstance(shared_reason, str) and shared_reason:
+                    output.write(f"  Shared reason: {shared_reason}\n")
                 for ref, record in batch:
                     item = session.item(ref)
                     status = record.get("status")

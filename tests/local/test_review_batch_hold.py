@@ -139,6 +139,8 @@ def test_batch_keep_held_marks_selected_ambiguous_sources_untouched(
     assert {hold.source for hold in catalog.source_holds} == {SOURCE_A, SOURCE_B}
     rendered = output.getvalue()
     assert "Batch leave-untouched sources:" in rendered
+    assert "Shared evidence fingerprint:" in rendered
+    assert "Shared reason:" in rendered
     assert SOURCE_A in rendered
     assert SOURCE_B in rendered
     assert "[suspicious]" in rendered
