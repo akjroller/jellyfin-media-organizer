@@ -46,3 +46,11 @@ first PyPI publication succeeds.
 
 No package publication authorizes a media apply. The plan, review, preflight,
 approval-token, journal, and rollback contracts remain unchanged.
+
+## After publication
+
+Once a GitHub Release has published to PyPI, verify the artifact from a
+clean environment that is not a repository checkout. The steps cover
+`jmo --version`, `jmo demo`, `jmo doctor`, and `jmo inspect` on both
+POSIX shells and Windows PowerShell. See
+[Clean PyPI release smoke test](pypi-smoke-test.md).
