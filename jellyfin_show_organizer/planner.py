@@ -955,7 +955,7 @@ def _plan_companions(
 
 
 def _cache_snapshots(
-    cache: TrackingTvmazeCatalogCache,
+    cache: TrackingTvmazeCatalogCache | TrackingTmdbCatalogCache,
 ) -> tuple[CacheSnapshot, ...]:
     return tuple(
         CacheSnapshot(
@@ -1028,6 +1028,7 @@ def _build_plan(
     cache: TrackingTvmazeCatalogCache,
     provider: MetadataProvider,
     *,
+    extra_cache_snapshots: tuple[CacheSnapshot, ...] = (),
     progress: Callable[[str, int, int], None] | None = None,
 ) -> OrganizerPlan:
     inventory = scan_videos(source_root)
@@ -1122,7 +1123,7 @@ def _build_plan(
         tool_version=__version__,
         config_snapshot_id=config.snapshot_id,
         overrides_snapshot_id=overrides.snapshot_id,
-        cache_snapshots=_cache_snapshots(cache),
+        cache_snapshots=(*_cache_snapshots(cache), *extra_cache_snapshots),
     )
     return OrganizerPlan(
         schema_version=PLAN_SCHEMA_VERSION,
@@ -1283,7 +1284,15 @@ def execute_plan(
         )
     else:
         provider = tvmaze_provider
-    plan = _build_plan(source_root, config, overrides, cache, provider)
+    tmdb_snapshots = _cache_snapshots(tmdb_cache) if tmdb_cache is not None else ()
+    plan = _build_plan(
+        source_root,
+        config,
+        overrides,
+        cache,
+        provider,
+        extra_cache_snapshots=tmdb_snapshots,
+    )
     plan_hash = stable_plan_hash(plan)
     preflight = preflight_plan(
         plan_hash,
@@ -1312,6 +1321,8 @@ def execute_plan(
         overrides_configured=config.overrides_path is not None,
         preflight_ready=preflight.ready,
         preflight_finding_count=len(preflight.findings),
+        provider_strategy=config.provider_strategy,
+        provider_names=("tvmaze", "tmdb") if tmdb_cache is not None else ("tvmaze",),
     )
     bundle = write_audit_bundle(
         output_dir,
