@@ -771,7 +771,6 @@ def _compound_title_candidates(
         or parse.season is None
         or len(parse.episodes) != 1
         or not parse.title_hint
-        or not re.search(r"\s(?:-|/|&)\s", parse.title_hint)
     ):
         return None
     normalized_source = f" {_normalize_title(parse.title_hint)} "

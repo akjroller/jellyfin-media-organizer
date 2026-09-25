@@ -313,6 +313,65 @@ def test_repeated_compound_titles_prove_contiguous_episode_ranges() -> None:
     )
 
 
+def test_repeated_compound_titles_without_separator_are_proven_from_catalog() -> None:
+    provider = FixtureProvider(
+        tuple(
+            _episode(f"episode-{number}", 1, number, f"Story {number}A")
+            for number in range(1, 7)
+        )
+    )
+    sources = tuple(
+        SourceEpisodeInput(
+            f"episode-{start}.mkv",
+            ParseResult(
+                season=1,
+                episodes=(start,),
+                title_hint=f"Story {start}A Story {start + 1}A",
+            ),
+        )
+        for start in (1, 3, 5)
+    )
+
+    result = assign_episode_group_with_provider(_show(), sources, provider)
+
+    assert all(
+        assignment.status is AssignmentStatus.MATCHED
+        for assignment in result.assignments
+    )
+    assert [
+        tuple(episode.number for episode in assignment.episodes)
+        for assignment in result.assignments
+    ] == [(1, 2), (3, 4), (5, 6)]
+
+
+def test_single_compound_title_without_separator_remains_suspicious() -> None:
+    provider = FixtureProvider(
+        (
+            _episode("first", 2, 5, "First Story"),
+            _episode("second", 2, 6, "Second Story"),
+        )
+    )
+
+    result = assign_episode_group_with_provider(
+        _show(),
+        (
+            SourceEpisodeInput(
+                "episode.mkv",
+                ParseResult(
+                    season=2,
+                    episodes=(5,),
+                    title_hint="First Story Second Story",
+                ),
+            ),
+        ),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.SUSPICIOUS
+    assert not assignment.episodes
+
+
 def test_selected_full_title_is_not_confused_with_nested_catalog_title() -> None:
     provider = FixtureProvider(
         (
