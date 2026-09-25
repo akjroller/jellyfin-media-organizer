@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import sys
+import tempfile
 import textwrap
 from collections import Counter
 from collections.abc import Mapping
@@ -16,7 +17,9 @@ from pathlib import Path
 from . import __version__
 from .planner import PlanningConfig
 from .privacy import path_free_text
-from .review_execution import execute_plan
+from .provider_aliases import TvmazeAliasProviderAdapter
+from .providers import AutoProviderAdapter, MetadataProvider, TmdbProviderAdapter
+from .review_execution import execute_plan, http_json_getter
 from .review_session import (
     ReviewItemKind,
     ReviewItemState,
@@ -24,6 +27,8 @@ from .review_session import (
     load_review_session,
 )
 from .summary_io import read_summary, summary_int
+from .tmdb_cache import TmdbCatalogCache, tmdb_http_getter
+from .tvmaze_cache import TvmazeCatalogCache
 
 CONFIG_EXAMPLE = """schema_version = 1
 
@@ -91,6 +96,31 @@ def _write_wizard_summary(output, outcome, run_dir: Path) -> None:
     )
 
 
+def _build_review_provider(cache_path: Path, mode: str) -> MetadataProvider:
+    """Build the same provider stack used by planning for guided review."""
+
+    cache = TvmazeCatalogCache(
+        cache_path,
+        offline=mode == "offline",
+        refresh=mode == "refresh",
+    )
+    tvmaze_provider = TvmazeAliasProviderAdapter(cache, http_json_getter)
+    token = os.environ.get("JMO_TMDB_ACCESS_TOKEN", "").strip()
+    if mode != "auto" or not token:
+        return tvmaze_provider
+    return AutoProviderAdapter(
+        tvmaze_provider,
+        TmdbProviderAdapter(
+            TmdbCatalogCache(
+                cache_path / "tmdb",
+                offline=mode == "offline",
+                refresh=mode == "refresh",
+            ),
+            tmdb_http_getter(token),
+        ),
+    )
+
+
 def run_init(
     shows_root: Path,
     destination_root: Path,
@@ -106,13 +136,20 @@ def run_init(
     if not source.is_dir() or source.is_symlink():
         print(f"Init failed: source must be a real existing directory: {source}")
         return 2
-    if not destination.is_dir() or destination.is_symlink():
+    if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
+        print(f"Init failed: destination must be a real directory: {destination}")
+        return 2
+    if not destination.exists() and not destination.parent.is_dir():
         print(
-            f"Init failed: destination must be a real existing directory: {destination}"
+            "Init failed: destination does not exist and its parent directory is "
+            f"missing: {destination.parent}"
         )
         return 2
     try:
-        if os.stat(source).st_dev != os.stat(destination).st_dev:
+        destination_device = os.stat(
+            destination if destination.exists() else destination.parent
+        ).st_dev
+        if os.stat(source).st_dev != destination_device:
             print("Init failed: source and destination must be on the same filesystem")
             return 2
     except OSError as exc:
@@ -129,13 +166,18 @@ def run_init(
     if state.exists():
         print(f"Init failed: refusing to use existing state directory: {state}")
         return 2
-    state.mkdir(parents=True)
-    (state / "cache").mkdir()
-    (state / "runs").mkdir()
-    source_value = os.path.relpath(source, state).replace(os.sep, "/")
-    destination_value = os.path.relpath(destination, state).replace(os.sep, "/")
+    if not destination.exists():
+        destination.mkdir()
+    try:
+        source_value = os.path.relpath(source, state).replace(os.sep, "/")
+    except ValueError:
+        source_value = str(source).replace("\\", "/")
+    try:
+        destination_value = os.path.relpath(destination, state).replace(os.sep, "/")
+    except ValueError:
+        destination_value = str(destination).replace("\\", "/")
     config = textwrap.dedent(
-        f'''\
+        f"""\
         schema_version = 1
 
         [plan]
@@ -147,12 +189,17 @@ def run_init(
         provider_mode = "{provider_mode}"
         max_path_length = 240
         max_component_length = 180
-        '''
+        """
     )
-    (state / "planning.toml").write_text(config, encoding="utf-8", newline="\n")
-    (state / "base-overrides.toml").write_text(
+    state.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{state.name}.", dir=state.parent))
+    (staging / "cache").mkdir()
+    (staging / "runs").mkdir()
+    (staging / "planning.toml").write_text(config, encoding="utf-8", newline="\n")
+    (staging / "base-overrides.toml").write_text(
         OVERRIDES_EXAMPLE, encoding="utf-8", newline="\n"
     )
+    staging.replace(state)
     print(f"Initialized JMO state: {state}")
     print(
         f'Next step: jmo doctor "{source}" --destination-root "{destination}" --output-dir "{state / "runs" / "initial"}" --cache-dir "{state / "cache"}"'
@@ -198,7 +245,10 @@ def run_wizard(*, input_fn=input, output=None) -> int:
     destination_text = ask("Destination directory", destination_default)
     state_default = str(source.parent / f"{source.name}-JMO-State")
     state_text = ask("JMO state directory", state_default)
-    provider = ask("Provider mode (auto/online/offline/refresh)", "auto").casefold()
+    provider = ask(
+        "Provider mode (auto uses TMDb when configured; online/offline/refresh are TVMaze modes)",
+        "auto",
+    ).casefold()
     if provider not in {"auto", "online", "offline", "refresh"}:
         output.write(
             "Wizard cancelled: provider mode must be auto, online, offline, or refresh.\n"
@@ -318,30 +368,44 @@ def run_wizard(*, input_fn=input, output=None) -> int:
     ).casefold() in {"y", "yes"}
     if start_review:
         try:
-            from .providers import TvmazeProviderAdapter
             from .review_contract import load_review_contract
-            from .review_execution import http_json_getter
             from .review_system import run_review_system
-            from .tvmaze_cache import TvmazeCatalogCache
 
             plan_path = run_dir / "plan.json"
             base_override = state / "base-overrides.toml"
-            session_path = state / "review-session.json"
-            reviewed_override = state / "reviewed-overrides.toml"
+            session_path = run_dir / "review-session.json"
+            reviewed_override = run_dir / "reviewed-overrides.toml"
+            resume_session = False
+            if resume_existing:
+                plan_sha = (run_dir / "plan.sha256").read_text(encoding="ascii").strip()
+                prior_sessions = sorted(
+                    state.joinpath("runs").glob("*/review-session.json"),
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+                for candidate in prior_sessions:
+                    if candidate == session_path:
+                        continue
+                    try:
+                        candidate_payload = json.loads(
+                            candidate.read_text(encoding="utf-8")
+                        )
+                    except (OSError, UnicodeError, json.JSONDecodeError):
+                        continue
+                    if candidate_payload.get("plan_sha256") == plan_sha:
+                        session_path = candidate
+                        resume_session = True
+                        break
             base_catalog = load_review_contract(base_override)
-            cache = TvmazeCatalogCache(
-                state / "cache",
-                offline=provider == "offline",
-                refresh=provider == "refresh",
-            )
+            review_provider = _build_review_provider(state / "cache", provider)
             session, _ = run_review_system(
                 json.loads(plan_path.read_text(encoding="utf-8")),
                 base_override.read_bytes(),
                 base_override_snapshot=base_catalog.snapshot_id,
-                provider=TvmazeProviderAdapter(cache, http_json_getter),
+                provider=review_provider,
                 session_path=session_path,
                 output_override_path=reviewed_override,
-                resume=session_path.is_file(),
+                resume=resume_session,
                 input_fn=input_fn,
                 output=output,
             )
@@ -352,11 +416,27 @@ def run_wizard(*, input_fn=input, output=None) -> int:
                 )
                 return 2
             review_session_sha = session.sha256
+            reviewed_run_dir = (
+                state
+                / "runs"
+                / (f"reviewed-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+            )
+            reviewed_suffix = 1
+            while reviewed_run_dir.exists():
+                reviewed_run_dir = (
+                    state
+                    / "runs"
+                    / (
+                        f"reviewed-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                        f"-{reviewed_suffix}"
+                    )
+                )
+                reviewed_suffix += 1
             reviewed_outcome = execute_plan(
                 PlanningConfig(
                     shows_root=source,
                     destination_root=destination,
-                    output_dir=state / "runs" / "reviewed",
+                    output_dir=reviewed_run_dir,
                     cache_dir=state / "cache",
                     overrides_path=reviewed_override,
                     offline=provider == "offline",
@@ -366,7 +446,7 @@ def run_wizard(*, input_fn=input, output=None) -> int:
                 review_session_path=session_path,
             )
             outcome = reviewed_outcome
-            run_dir = state / "runs" / "reviewed"
+            run_dir = reviewed_run_dir
             status = "ready" if outcome.preflight.ready else "blocked"
             output.write(
                 f"\nReviewed plan complete: {status}\n"
@@ -377,84 +457,60 @@ def run_wizard(*, input_fn=input, output=None) -> int:
             output.write(f"\nGuided review stopped safely: {exc}\n")
             return 2
     if outcome.preflight.ready and review_session_sha is not None:
-        if ask("Run the read-only apply check now", "Y").casefold() in {"y", "yes"}:
-            try:
-                from .apply_execution import (
-                    approval_token,
-                    execute_apply,
-                    prepare_apply,
-                    total_moving_members,
-                )
-                from .apply_validation import validate_apply_roots
-                from .run_provenance import detect_source_revision
+        try:
+            from .apply_execution import (
+                approval_token,
+                execute_apply,
+                prepare_apply,
+                total_moving_members,
+            )
+            from .apply_validation import validate_apply_roots
+            from .run_provenance import detect_source_revision
 
-                plan_path = run_dir / "plan.json"
-                preflight_path = run_dir / "preflight.json"
-                provenance_path = run_dir / "run-provenance.json"
-                plan_sha = (run_dir / "plan.sha256").read_text(encoding="ascii").strip()
-                provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-                recorded_revision = provenance["source_revision"]["commit"]
-                source_root, destination_root = validate_apply_roots(
-                    source, destination
+            plan_path = run_dir / "plan.json"
+            preflight_path = run_dir / "preflight.json"
+            provenance_path = run_dir / "run-provenance.json"
+            plan_sha = (run_dir / "plan.sha256").read_text(encoding="ascii").strip()
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            recorded_revision = provenance["source_revision"]["commit"]
+            source_root, destination_root = validate_apply_roots(source, destination)
+            current_revision = detect_source_revision()
+            if (
+                current_revision.state != "git"
+                or current_revision.dirty
+                or current_revision.commit != recorded_revision
+            ):
+                raise ValueError(
+                    "apply check requires the same clean Git revision recorded by the plan"
                 )
-                current_revision = detect_source_revision()
-                if (
-                    current_revision.state != "git"
-                    or current_revision.dirty
-                    or current_revision.commit != recorded_revision
-                ):
-                    raise ValueError(
-                        "apply check requires the same clean Git revision recorded by the plan"
-                    )
-                prepared = prepare_apply(
-                    plan_path,
-                    preflight_path,
-                    provenance_path,
-                    approved_plan_sha256=plan_sha,
-                    approved_review_session_sha256=review_session_sha,
-                    approved_source_revision=recorded_revision,
-                    separate_roots=source_root != destination_root,
-                )
-                apply_result = execute_apply(
-                    prepared,
-                    source_root,
-                    destination_root,
-                    journal_path=None,
-                    check_only=True,
-                    resume=False,
-                )
-                output.write(
-                    "\nApply check passed. Nothing moved.\n"
-                    f"  Operation groups: {apply_result.groups_total}\n"
-                    f"  Files to move:    {total_moving_members(prepared)}\n"
-                    f"  Confirmation token: {approval_token(prepared, source_root, destination_root)}\n"
-                )
-                if (
-                    input_fn(
-                        "Type APPLY to execute this exact reviewed plan now "
-                        "(anything else keeps files untouched): "
-                    ).strip()
-                    == "APPLY"
-                ):
-                    journal_path = run_dir / "apply-journal.jsonl"
-                    applied = execute_apply(
-                        prepared,
-                        source_root,
-                        destination_root,
-                        journal_path=journal_path,
-                        check_only=False,
-                        resume=False,
-                    )
-                    output.write(
-                        "\nApply completed successfully.\n"
-                        f"  Groups completed: {applied.groups_completed}\n"
-                        f"  Files moved:      {applied.members_moved}\n"
-                        f"  Journal:          {journal_path}\n"
-                    )
-                else:
-                    output.write("\nApply not started. Your media remains untouched.\n")
-            except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
-                output.write(f"\nApply check stopped safely: {exc}\n")
+            prepared = prepare_apply(
+                plan_path,
+                preflight_path,
+                provenance_path,
+                approved_plan_sha256=plan_sha,
+                approved_review_session_sha256=review_session_sha,
+                approved_source_revision=recorded_revision,
+                separate_roots=source_root != destination_root,
+            )
+            apply_result = execute_apply(
+                prepared,
+                source_root,
+                destination_root,
+                journal_path=None,
+                check_only=True,
+                resume=False,
+            )
+            output.write(
+                "\nApply check passed. Nothing moved.\n"
+                f"  Operation groups: {apply_result.groups_total}\n"
+                f"  Files to move:    {total_moving_members(prepared)}\n"
+                f"  Confirmation token: {approval_token(prepared, source_root, destination_root)}\n"
+                "The wizard stops at the read-only boundary. Use the explicit "
+                "`jmo apply` command only after inspecting this exact bundle.\n"
+            )
+        except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+            output.write(f"\nApply check stopped safely: {exc}\n")
+            return 2
     output.write(
         f"\nPaper plan complete: {status}\n"
         f"  Audit bundle: {run_dir}\n"

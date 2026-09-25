@@ -63,6 +63,44 @@ def test_ep00_is_not_invented_as_a_regular_episode() -> None:
     assert result.absolute_episode is None
 
 
+def test_filename_canonical_title_is_retained_as_a_conservative_alias() -> None:
+    result = parse_video_path("Dexters Lab/Dexter's Laboratory - Ego Trip [2002].mkv")
+
+    assert result.series_hint == "Dexters Lab"
+    assert result.series_aliases == ("Dexters Lab", "Dexter's Laboratory")
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "expected"),
+    (
+        ("Example Show S03E21 & S03E22.mkv", (21, 22)),
+        ("Example Show 3x21 & 3x22.mkv", (21, 22)),
+        ("Example Show S03E21 & E22 - Two Parts.mkv", (21, 22)),
+    ),
+)
+def test_parser_retains_all_explicit_compound_aired_coordinates(
+    relative_path: str, expected: tuple[int, ...]
+) -> None:
+    result = parse_video_path(relative_path)
+
+    assert result.season == 3
+    assert result.episodes == expected
+
+
+def test_part_suffix_is_title_evidence_not_a_second_episode_coordinate() -> None:
+    result = parse_video_path("Example Show S01E11 Part 1.mkv")
+
+    assert result.season == 1
+    assert result.episodes == (11,)
+    assert result.title_hint == "Part 1"
+
+
+def test_subtitle_suffix_in_directory_does_not_poison_show_title() -> None:
+    result = parse_video_path("Dexters Lab/Dexter's Laboratory - Ego Trip/feature.mkv")
+
+    assert result.series_hint == "Dexter's Laboratory"
+
+
 def test_year_prefixed_season_tokens_preserve_four_digit_provider_seasons() -> None:
     result = parse_video_path(
         "Naruto (2002)/Season 2002/Naruto (2002) S2002E01 - Enter Naruto Uzumaki!.mkv"

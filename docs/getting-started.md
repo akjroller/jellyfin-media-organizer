@@ -72,12 +72,13 @@ creating state. It offers a safe default when it finds one likely `Shows`,
 It runs the read-only doctor and paper plan, prints a plain-language summary of
 what will move and what will stay untouched, offers guided review for duplicate
 and held records, rebuilds the reviewed plan, and can run the read-only apply
-check. If that check passes, it offers the real apply and requires the literal
-`APPLY` confirmation; any other response leaves the media untouched. If a
+check. The wizard stops after that check and prints the exact artifacts for the
+explicit `jmo apply` command; it never performs a media mutation itself. If a
 previous state directory is found, the wizard can resume it into a new
 timestamped audit bundle without overwriting earlier evidence. The wizard
-never deletes, overwrites, or quarantines media, and only moves the exact
-reviewed operation groups after all apply-contract checks pass.
+never moves, deletes, overwrites, or quarantines media. Only the explicit
+`jmo apply` command can move the exact reviewed operation groups after all
+apply-contract checks pass.
 
 The default `auto` mode uses TVMaze first and consults TMDb only when the
 TVMaze result is unresolved or ambiguous. TMDb comparison is enabled only when

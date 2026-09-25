@@ -21,7 +21,8 @@ from .apply_execution import (
 )
 from .apply_validation import ApplyFilesystemError, validate_apply_roots
 from .models import TerminalStatus
-from .providers import TvmazeProviderAdapter
+from .provider_aliases import TvmazeAliasProviderAdapter
+from .providers import AutoProviderAdapter, MetadataProvider, TmdbProviderAdapter
 from .review import render_override_stub, render_override_suggestions
 from .review_contract import ReviewContractCatalog, load_review_contract
 from .review_execution import (
@@ -37,6 +38,7 @@ from .review_system import (
     run_review_system,
 )
 from .run_provenance import detect_source_revision
+from .tmdb_cache import TmdbCatalogCache, tmdb_http_getter
 from .tvmaze_cache import TvmazeCatalogCache
 from .user_commands import (
     CONFIG_EXAMPLE,
@@ -105,18 +107,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_const",
         dest="provider_mode",
         const="offline",
+        help="Use cached TVMaze metadata only; do not make network requests.",
     )
     provider_mode.add_argument(
         "--refresh",
         action="store_const",
         dest="provider_mode",
         const="refresh",
+        help="Refresh TVMaze cache metadata; TMDb auto comparison is disabled.",
     )
     provider_mode.add_argument(
         "--online",
         action="store_const",
         dest="provider_mode",
         const="online",
+        help="Use TVMaze online metadata; TMDb auto comparison is disabled.",
     )
     provider_mode.add_argument(
         "--auto",
@@ -217,7 +222,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Guided first-run setup for a safe paper plan.",
         description=(
             "Walk through source, destination, state, and provider choices, then "
-            "create a non-mutating JMO setup. The wizard never moves media."
+            "create a non-mutating JMO setup. The wizard stops at the read-only "
+            "apply check; only the explicit apply command can move media."
         ),
     )
     wizard_parser.set_defaults(handler=_run_wizard)
@@ -768,12 +774,27 @@ def _run_review(args: argparse.Namespace) -> int:
                 "--approve-partial requires an explicit --show, --kind, or --ref scope"
             )
 
+        cache_path = cache_dir.expanduser().resolve(strict=False)
         cache = TvmazeCatalogCache(
-            cache_dir.expanduser().resolve(strict=False),
+            cache_path,
             offline=bool(args.offline),
             refresh=False,
         )
-        provider = TvmazeProviderAdapter(cache, http_json_getter)
+        tvmaze_provider = TvmazeAliasProviderAdapter(cache, http_json_getter)
+        tmdb_token = os.environ.get("JMO_TMDB_ACCESS_TOKEN", "").strip()
+        provider: MetadataProvider = tvmaze_provider
+        if tmdb_token:
+            provider = AutoProviderAdapter(
+                tvmaze_provider,
+                TmdbProviderAdapter(
+                    TmdbCatalogCache(
+                        cache_path / "tmdb",
+                        offline=bool(args.offline),
+                        refresh=False,
+                    ),
+                    tmdb_http_getter(tmdb_token),
+                ),
+            )
         session, _active = run_review_system(
             manifest,
             override_payload,

@@ -16,9 +16,15 @@ _SXE = re.compile(
     rf"(?i)S(?P<season>{_SEASON_NUMBER})[ ._-]*E(?P<episode>\d{{1,3}})(?!\d)"
     r"(?P<segment>[A-Za-z](?!\d))?"
     r"(?P<tail>(?:(?:[ ._-]*E\d{1,3}(?!\d))|"
+    r"(?:[ &+,/-]+S\d{1,4}[ ._-]*E\d{1,3}(?!\d))|"
+    r"(?:[ &+,]+E?\d{1,3}(?!\d))|"
     r"(?:[ ._-]*-[ ._-]*E?\d{1,3}(?!\d)))*)"
 )
 _X_NOTATION = re.compile(r"(?i)(?<!\d)(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?!\d)")
+_X_NOTATION_CHAIN = re.compile(
+    r"(?i)(?<!\d)(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?!\d)"
+    r"(?P<tail>(?:\s*(?:&|and|,)\s*(?:(?P=season)x)?\d{1,3})*)"
+)
 _EPISODE_WORD = re.compile(
     r"(?i)(?<![A-Za-z0-9])episode[ ._-]*(?P<episode>\d{1,3})"
     r"(?P<segment>[A-Za-z])?(?![A-Za-z0-9])"
@@ -101,6 +107,32 @@ def _series_aliases(series: str | None, source: str) -> tuple[str, ...]:
     return aliases
 
 
+def _filename_series_aliases(series: str | None, stem: str) -> tuple[str, ...]:
+    """Return a conservative folder/filename title pair.
+
+    Some release trees use a shorthand folder (for example ``Dexters Lab``)
+    while the file carries the full canonical title before a subtitle
+    separator (``Dexter's Laboratory - Ego Trip``).  Treating that filename
+    prefix as an alias is safe only when both spellings are retained: the
+    resolver must find the same provider identity for both, otherwise the
+    group remains unresolved.
+    """
+
+    if series is None or not series.strip():
+        return ()
+    separator = re.search(r"\s+-\s+", stem)
+    if separator is None:
+        return ()
+    candidate, _year = _series_and_year(stem[: separator.start()])
+    if candidate is None:
+        return ()
+    if _normalize_text(candidate).casefold() == _normalize_text(series).casefold():
+        return ()
+    if len(re.findall(r"[^\W\d_]+", candidate, flags=re.UNICODE)) < 2:
+        return ()
+    return (series, candidate)
+
+
 def _series_and_year(value: str) -> tuple[str | None, int | None]:
     series = _normalize_text(value)
     if not series:
@@ -137,7 +169,20 @@ def _episode_list(first: int, tail: str) -> tuple[int, ...]:
             return tuple(range(first, last + 1))
 
     episodes = [first]
-    for value in re.findall(r"\d{1,3}", tail):
+    # A compound token may repeat the season (``S03E21 & S03E22``) or use
+    # compact x-notation (``3x21 & 3x22``).  Do not treat the repeated season
+    # number as an episode coordinate.
+    coordinate_matches = tuple(
+        re.finditer(r"(?i)(?:S\d{1,4}\s*E|\d{1,2}x|E)\s*(\d{1,3})", tail)
+    )
+    for match in coordinate_matches:
+        episode = int(match.group(1))
+        if episode not in episodes:
+            episodes.append(episode)
+    remainder = tail
+    for match in reversed(coordinate_matches):
+        remainder = remainder[: match.start()] + remainder[match.end() :]
+    for value in re.findall(r"\d{1,3}", remainder):
         episode = int(value)
         if episode not in episodes:
             episodes.append(episode)
@@ -198,6 +243,18 @@ def _fallback_series(path: PurePosixPath) -> tuple[str | None, int | None]:
         normalized = _normalize_text(component)
         if not normalized or _GENERIC_SEASON_DIR.fullmatch(normalized):
             continue
+        # Release trees sometimes put an episode/special subtitle after the
+        # show title in a directory name (``Show Name - OVA``). Keep the title
+        # prefix as the primary hint; the filename alias path still preserves
+        # the full component when it is useful evidence.
+        separator = re.search(r"\s+-\s+", component)
+        if separator is not None:
+            prefix, _prefix_year = _series_and_year(component[: separator.start()])
+            if (
+                prefix is not None
+                and len(re.findall(r"[^\W\d_]+", prefix, flags=re.UNICODE)) >= 2
+            ):
+                return prefix, _prefix_year
         series, year = _series_and_year(component)
         if series:
             return series, year
@@ -556,7 +613,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
             title_hint=_title_hint(stem, title_start),
         )
 
-    match = _X_NOTATION.search(stem)
+    match = _X_NOTATION_CHAIN.search(stem)
     if match is not None:
         source = stem[: match.start()]
         series, year = _series_for_match(stem, path, match)
@@ -564,7 +621,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
             series_hint=series,
             series_aliases=_series_aliases(series, source),
             season=int(match.group("season")),
-            episodes=(int(match.group("episode")),),
+            episodes=_episode_list(int(match.group("episode")), match.group("tail")),
             year=year,
             embedded_tvmaze_id=embedded_id,
             title_hint=_title_hint(stem, match.end()),
@@ -752,6 +809,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
     series, year = _fallback_series(path)
     return ParseResult(
         series_hint=series,
+        series_aliases=_filename_series_aliases(series, stem),
         year=year,
         embedded_tvmaze_id=embedded_id,
     )
