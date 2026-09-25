@@ -2,6 +2,12 @@
 
 All notable public changes will be documented in this file. The project follows Semantic Versioning.
 
+## 0.4.1 - 2026-09-25
+
+- Corrected automatic provider reporting in the live CLI planning path so
+  `jmo plan --auto` and run provenance identify the adapters actually used.
+- Added an end-to-end regression test for the CLI-to-planner provider handoff.
+
 ## 0.4.0 - 2026-09-24
 
 - Added saved-configuration `jmo run` for repeatable, read-only planning after
