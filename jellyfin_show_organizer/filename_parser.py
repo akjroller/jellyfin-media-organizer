@@ -106,20 +106,26 @@ def _series_and_year(value: str) -> tuple[str | None, int | None]:
     if not series:
         return None, None
 
+    # Release names commonly leave a separator immediately before a season
+    # token (for example ``Show (2023) - S01``). Remove it before looking for
+    # a trailing year so punctuation and release metadata do not become part
+    # of the show identity.
+    series = series.strip(" -_.[]()")
+
     release_match = _RELEASE_TAIL.search(series)
     if release_match is not None and release_match.start() > 0:
-        series = series[: release_match.start()].strip()
+        series = series[: release_match.start()].strip(" -_.[]()")
 
     season_match = _SEASON_NOISE.search(series)
     if season_match is not None and season_match.start() > 0:
-        series = series[: season_match.start()].strip()
+        series = series[: season_match.start()].strip(" -_.[]()")
 
     year_match = _TRAILING_YEAR.search(series)
     if year_match is None:
         return series or None, None
 
     year = int(year_match.group("year"))
-    series = series[: year_match.start()].strip()
+    series = series[: year_match.start()].strip(" -_.[]()")
     return series or None, year
 
 
