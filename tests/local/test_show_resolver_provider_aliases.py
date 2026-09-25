@@ -247,6 +247,115 @@ def test_low_confidence_text_can_be_rescued_by_one_unique_group_catalog() -> Non
     assert set(provider.catalog_calls) == {ALPHA, BETA}
 
 
+def test_group_catalog_title_evidence_breaks_equal_text_candidates() -> None:
+    alpha_catalog = _catalog(
+        ALPHA,
+        (
+            ProviderEpisode(
+                identity=ProviderIdentity("fixture", "alpha-one"),
+                season=1,
+                number=1,
+                title="Alpha Episode One",
+            ),
+            ProviderEpisode(
+                identity=ProviderIdentity("fixture", "alpha-two"),
+                season=1,
+                number=2,
+                title="Alpha Episode Two",
+            ),
+            ProviderEpisode(
+                identity=ProviderIdentity("fixture", "alpha-three"),
+                season=1,
+                number=3,
+                title="Alpha Episode Three",
+            ),
+            ProviderEpisode(
+                identity=ProviderIdentity("fixture", "alpha-four"),
+                season=1,
+                number=4,
+                title="Alpha Episode Four",
+            ),
+        ),
+    )
+    beta_catalog = _catalog(
+        BETA,
+        (
+            ProviderEpisode(
+                identity=ProviderIdentity("fixture", "beta-one"),
+                season=1,
+                number=1,
+                title="Target Episode One",
+            ),
+            ProviderEpisode(
+                identity=ProviderIdentity("fixture", "beta-two"),
+                season=1,
+                number=2,
+                title="Target Episode Two",
+            ),
+            ProviderEpisode(
+                identity=ProviderIdentity("fixture", "beta-three"),
+                season=1,
+                number=3,
+                title="Target Episode Three",
+            ),
+            ProviderEpisode(
+                identity=ProviderIdentity("fixture", "beta-four"),
+                season=1,
+                number=4,
+                title="Different Episode Four",
+            ),
+        ),
+    )
+    provider = AliasProvider(
+        shows=(
+            ProviderShow(ALPHA, "Different Alpha", None),
+            ProviderShow(BETA, "Different Beta", None),
+        ),
+        aliases={
+            ALPHA: _aliases(ALPHA, "Short Alternate Name"),
+            BETA: _aliases(BETA, "Short Alternate Name"),
+        },
+        catalogs={ALPHA: alpha_catalog, BETA: beta_catalog},
+    )
+
+    result = resolve_show_group_with_provider(
+        "Short Alternate Name",
+        (
+            ParseResult(
+                series_hint="Short Alternate Name",
+                season=1,
+                episodes=(1,),
+                title_hint="Target Episode One",
+            ),
+            ParseResult(
+                series_hint="Short Alternate Name",
+                season=1,
+                episodes=(2,),
+                title_hint="Target Episode Two",
+            ),
+            ParseResult(
+                series_hint="Short Alternate Name",
+                season=1,
+                episodes=(3,),
+                title_hint="Target Episode Three",
+            ),
+            ParseResult(
+                series_hint="Short Alternate Name",
+                season=1,
+                episodes=(4,),
+                title_hint="Target Episode Four",
+            ),
+        ),
+        load_overrides(),
+        provider,
+    )
+
+    assert result.status is ResolutionStatus.MATCHED
+    assert result.show is not None
+    assert result.show.provider_identity == BETA
+    assert "catalog-rescue:unique-title-group-candidate" in result.evidence.reasons
+
+
 def test_catalog_rescue_remains_ambiguous_when_multiple_candidates_fit() -> None:
     shared = (
         _episode("shared", "one", 1, 1),
