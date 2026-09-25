@@ -46,6 +46,7 @@ CSV_HEADER = (
     "season",
     "episodes",
     "absolute_episode",
+    "absolute_episodes",
     "match_method",
     "confidence",
     "reasons",
@@ -179,6 +180,11 @@ def _record_row(record: PlanRecord) -> dict[str, str]:
         "absolute_episode": (
             str(parse.absolute_episode)
             if parse is not None and parse.absolute_episode is not None
+            else ""
+        ),
+        "absolute_episodes": (
+            "|".join(str(episode) for episode in parse.absolute_episodes)
+            if parse is not None
             else ""
         ),
         "match_method": evidence.method if evidence is not None else "",

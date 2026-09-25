@@ -270,10 +270,14 @@ def test_compound_catalog_titles_do_not_collapse_to_one_episode() -> None:
     )
 
     assignment = result.assignments[0]
-    assert assignment.status is AssignmentStatus.SUSPICIOUS
-    assert not assignment.episodes
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert tuple(episode.number for episode in assignment.episodes) == (5, 6)
     assert (
         "catalog-coordinate-title-conflict:contained-catalog-titles:2"
+        in assignment.evidence.reasons
+    )
+    assert (
+        "catalog-compound-title-remap:unique-title-evidence"
         in assignment.evidence.reasons
     )
 

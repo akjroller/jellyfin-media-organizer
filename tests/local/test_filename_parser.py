@@ -95,6 +95,13 @@ def test_part_suffix_is_title_evidence_not_a_second_episode_coordinate() -> None
     assert result.title_hint == "Part 1"
 
 
+def test_episode_word_range_retains_both_absolute_coordinates() -> None:
+    result = parse_video_path("Example Show Episode 1-2.mkv")
+
+    assert result.absolute_episode is None
+    assert result.absolute_episodes == (1, 2)
+
+
 def test_subtitle_suffix_in_directory_does_not_poison_show_title() -> None:
     result = parse_video_path("Dexters Lab/Dexter's Laboratory - Ego Trip/feature.mkv")
 
@@ -186,6 +193,15 @@ def test_parser_handles_version_suffixed_absolute_episode():
     assert parsed == ParseResult(
         series_hint="Revision Rangers",
         absolute_episode=1,
+    )
+
+
+def test_parser_represents_episode_absolute_range_separately() -> None:
+    parsed = parse_video_path("synthetic/Orbit Quest/Orbit Quest Episode 1-2.mkv")
+
+    assert parsed == ParseResult(
+        series_hint="Orbit Quest",
+        absolute_episodes=(1, 2),
     )
 
 

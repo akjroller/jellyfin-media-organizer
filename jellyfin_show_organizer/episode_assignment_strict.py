@@ -372,7 +372,7 @@ def _expected_family(mode: NumberingMode) -> str:
 def _evidence_family(parse: ParseResult, mode: NumberingMode) -> str:
     has_aired = parse.season is not None or bool(parse.episodes)
     has_complete_aired = parse.season is not None and bool(parse.episodes)
-    has_absolute = parse.absolute_episode is not None
+    has_absolute = parse.absolute_episode is not None or bool(parse.absolute_episodes)
     has_special = parse.special_kind is not None or parse.special_episode is not None
     has_date = parse.episode_date is not None
 
@@ -405,9 +405,12 @@ def _evidence_family(parse: ParseResult, mode: NumberingMode) -> str:
 
 
 def _dual_aired_reason(parse: ParseResult) -> str | None:
-    if parse.absolute_episode is None:
+    if parse.absolute_episode is None and not parse.absolute_episodes:
         return None
-    return f"dual-numbering-evidence:secondary-absolute:{parse.absolute_episode}"
+    values = parse.absolute_episodes or (parse.absolute_episode,)
+    return "dual-numbering-evidence:secondary-absolute:" + ",".join(
+        str(value) for value in values
+    )
 
 
 def _dual_absolute_reason(parse: ParseResult) -> str | None:
@@ -562,7 +565,16 @@ def _absolute_assignment(
     request_key: str,
 ) -> SourceEpisodeAssignment:
     parse = source.parse
-    if parse.absolute_episode is None:
+    absolutes = tuple(
+        value
+        for value in (
+            parse.absolute_episodes
+            if parse.absolute_episodes
+            else (parse.absolute_episode,)
+        )
+        if value is not None
+    )
+    if not absolutes:
         return _assignment(
             source.source_key,
             AssignmentStatus.UNRESOLVED,
@@ -592,18 +604,29 @@ def _absolute_assignment(
         for episode in catalog.episodes
         if episode.season > 0 and episode.number is not None
     )
-    absolute = parse.absolute_episode
-    if absolute <= 0 or absolute > len(regular):
+    invalid = tuple(
+        absolute for absolute in absolutes if absolute <= 0 or absolute > len(regular)
+    )
+    if invalid:
         return _assignment(
             source.source_key,
             AssignmentStatus.UNRESOLVED,
             "episode-catalog",
             f"numbering-mode:{show.numbering_mode.value}",
-            f"missing-absolute-catalog-entry:{absolute}",
+            f"missing-absolute-catalog-entry:{invalid[0]}",
             f"catalog-request:{request_key}",
         )
 
-    episode = regular[absolute - 1]
+    episodes = tuple(regular[absolute - 1] for absolute in absolutes)
+    if len({episode.identity for episode in episodes}) != len(episodes):
+        return _assignment(
+            source.source_key,
+            AssignmentStatus.SUSPICIOUS,
+            "episode-catalog",
+            f"numbering-mode:{show.numbering_mode.value}",
+            "duplicate-absolute-provider-identity",
+            f"catalog-request:{request_key}",
+        )
     reasons = [
         f"numbering-mode:{show.numbering_mode.value}",
         f"catalog-request:{request_key}",
@@ -611,18 +634,19 @@ def _absolute_assignment(
     dual_reason = _dual_absolute_reason(parse)
     if dual_reason is not None:
         reasons.append(dual_reason)
-    reasons.extend(
-        (
-            f"absolute-match:{absolute}->S{episode.season:02d}E{episode.number:02d}",
-            _episode_identity_reason(episode),
+    for absolute, episode in zip(absolutes, episodes, strict=True):
+        reasons.extend(
+            (
+                f"absolute-match:{absolute}->S{episode.season:02d}E{episode.number:02d}",
+                _episode_identity_reason(episode),
+            )
         )
-    )
     return _assignment(
         source.source_key,
         AssignmentStatus.MATCHED,
         "episode-catalog",
         *reasons,
-        episodes=(episode,),
+        episodes=episodes,
         confidence=1.0,
     )
 
@@ -647,6 +671,7 @@ def _special_assignment(
         parse.season is not None
         or parse.episodes
         or parse.absolute_episode is not None
+        or parse.absolute_episodes
         or parse.segment_hint is not None
         or parse.episode_date is not None
     ):
@@ -710,7 +735,6 @@ def _special_assignment(
         f"special-number:{parse.special_episode}",
         f"special-match:{parse.special_kind.upper()}{parse.special_episode}"
         f"->S{episode.season:02d}E{episode.number:02d}",
-        _episode_identity_reason(episode),
         f"catalog-request:{request_key}",
         episodes=(episode,),
         confidence=1.0,
@@ -737,6 +761,7 @@ def _date_assignment(
         parse.season is not None
         or parse.episodes
         or parse.absolute_episode is not None
+        or parse.absolute_episodes
         or parse.segment_hint is not None
         or parse.special_kind is not None
     ):

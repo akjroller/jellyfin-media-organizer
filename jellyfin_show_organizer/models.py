@@ -136,6 +136,7 @@ class ParseResult:
     season: int | None = None
     episodes: tuple[int, ...] = ()
     absolute_episode: int | None = None
+    absolute_episodes: tuple[int, ...] = ()
     special_kind: str | None = None
     special_episode: int | None = None
     episode_date: str | None = None
@@ -164,6 +165,14 @@ class ParseResult:
             raise ValueError("episodes cannot contain negative values")
         if self.absolute_episode is not None and self.absolute_episode < 0:
             raise ValueError("absolute_episode cannot be negative")
+        if any(episode <= 0 for episode in self.absolute_episodes):
+            raise ValueError("absolute_episodes must contain positive values")
+        if self.absolute_episode is not None and self.absolute_episodes:
+            raise ValueError(
+                "absolute_episode and absolute_episodes are mutually exclusive"
+            )
+        if len(set(self.absolute_episodes)) != len(self.absolute_episodes):
+            raise ValueError("absolute_episodes must not contain duplicates")
         if (self.special_kind is None) != (self.special_episode is None):
             raise ValueError(
                 "special_kind and special_episode must be provided together"

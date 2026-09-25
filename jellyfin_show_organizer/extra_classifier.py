@@ -112,6 +112,7 @@ def _strong_episode_evidence(parsed: ParseResult) -> bool:
     return bool(
         (parsed.season is not None and parsed.episodes)
         or parsed.absolute_episode is not None
+        or parsed.absolute_episodes
     )
 
 
