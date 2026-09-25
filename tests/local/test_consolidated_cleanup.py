@@ -83,6 +83,27 @@ def test_show_identity_folds_diacritics_without_lowering_thresholds() -> None:
     assert resolution.show.provider_identity == accent_id
 
 
+@pytest.mark.parametrize(
+    ("source", "catalog"),
+    (
+        ("Pokémon", "Pokemon"),
+        ("The Fairly OddParents", "Fairly OddParents"),
+        ("Ed, Edd n’ Eddy", "Ed Edd n' Eddy"),
+        ("My Life as a Teenage Robot", "My Life as a Teenage Robot"),
+        ("Jimmy Neutron: Boy Genius", "Jimmy Neutron Boy Genius"),
+        ("Dave the Barbarian", "Dave-the-Barbarian"),
+    ),
+)
+def test_show_identity_folds_reusable_title_variants(source: str, catalog: str) -> None:
+    assert normalize_show_identity(source) == normalize_show_identity(catalog)
+
+
+def test_show_identity_does_not_collapse_different_titles() -> None:
+    assert normalize_show_identity("Jimmy Neutron") != normalize_show_identity(
+        "Jimmy Neutron: Boy Genius"
+    )
+
+
 def test_diacritic_fold_preserves_provider_ambiguity_guard() -> None:
     one = ProviderIdentity("fixture", "one")
     two = ProviderIdentity("fixture", "two")

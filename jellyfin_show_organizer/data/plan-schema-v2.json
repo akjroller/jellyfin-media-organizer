@@ -138,6 +138,13 @@
           ],
           "minimum": 0
         },
+        "absolute_episodes": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
         "special_kind": {
           "enum": [
             "ova",

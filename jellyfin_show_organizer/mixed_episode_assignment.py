@@ -20,7 +20,7 @@ from .episode_assignment_strict import (
     _protect_provider_episode_identity,
     assign_episode_group_with_provider as _assign_strict_group,
 )
-from .models import CanonicalShow, MatchEvidence, NumberingMode
+from .models import CanonicalShow, MatchEvidence, NumberingMode, ProviderIdentity
 from .providers import (
     MetadataProvider,
     ProviderEpisode,
@@ -227,11 +227,15 @@ def _special_fallback_assignment(
     unique_matches: list[tuple[str, ProviderEpisode]] = []
     if parse.title_hint is not None:
         normalized_title = _normalize_title(parse.title_hint)
-        title_matches = tuple(
-            episode
-            for episode in candidates
-            if _normalize_title(episode.title) == normalized_title
-        )
+        title_matches: tuple[ProviderEpisode, ...]
+        if normalized_title in {"bonus", "extra", "special", "ova", "oad", "preview"}:
+            title_matches = ()
+        else:
+            title_matches = tuple(
+                episode
+                for episode in candidates
+                if _normalize_title(episode.title) == normalized_title
+            )
         if len(title_matches) > 1:
             return SourceEpisodeAssignment(
                 source_key=source.source_key,
@@ -782,6 +786,13 @@ def _compound_title_candidates(
         and len(_normalize_title(episode.title).split()) >= 2
         and f" {_normalize_title(episode.title)} " in normalized_source
     ]
+    identities_by_title: dict[str, set[ProviderIdentity]] = {}
+    for episode in contained:
+        identities_by_title.setdefault(_normalize_title(episode.title), set()).add(
+            episode.identity
+        )
+    if any(len(identities) > 1 for identities in identities_by_title.values()):
+        return None
     unique = {episode.identity: episode for episode in contained}
     ordered = tuple(sorted(unique.values(), key=lambda episode: episode.number or 0))
     if len(ordered) < 2 or any(
@@ -808,13 +819,43 @@ def _apply_compound_title_remap(
         is not None
     }
     if len(candidates) < 3:
+        candidates = {
+            source_key: episodes
+            for source_key, episodes in candidates.items()
+            if (
+                source := next(
+                    source for source in sources if source.source_key == source_key
+                )
+            ).parse.title_hint
+            is not None
+            and re.search(
+                r"\s(?:-|&|and)\s",
+                source.parse.title_hint,
+                flags=re.IGNORECASE,
+            )
+            is not None
+        }
+    if not candidates:
         return assignments
     identities = [
         episode.identity for episodes in candidates.values() for episode in episodes
     ]
     if len(identities) != len(set(identities)):
         return assignments
+    claimed_elsewhere = {
+        episode.identity
+        for assignment in assignments
+        if assignment.source_key not in candidates
+        for episode in assignment.episodes
+    }
+    if claimed_elsewhere.intersection(identities):
+        return assignments
     remapped: list[SourceEpisodeAssignment] = []
+    remap_reason = (
+        "catalog-compound-title-remap:group-proven"
+        if len(candidates) >= 3
+        else "catalog-compound-title-remap:unique-title-evidence"
+    )
     for assignment in assignments:
         episodes = candidates.get(assignment.source_key)
         if episodes is None:
@@ -830,7 +871,7 @@ def _apply_compound_title_remap(
                     confidence=1.0,
                     reasons=(
                         *assignment.evidence.reasons,
-                        "catalog-compound-title-remap:group-proven",
+                        remap_reason,
                         f"catalog-compound-title-count:{len(episodes)}",
                         "catalog-compound-title-coordinates:"
                         + ",".join(

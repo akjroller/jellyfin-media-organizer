@@ -96,6 +96,7 @@ def normalize_show_identity(value: str) -> str:
         character for character in decomposed if unicodedata.category(character) != "Mn"
     ).casefold()
     normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
+    normalized = re.sub(r"^the\s+", "", normalized)
     return " ".join(normalized.split())
 
 

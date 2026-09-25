@@ -27,7 +27,8 @@ _X_NOTATION_CHAIN = re.compile(
 )
 _EPISODE_WORD = re.compile(
     r"(?i)(?<![A-Za-z0-9])episode[ ._-]*(?P<episode>\d{1,3})"
-    r"(?P<segment>[A-Za-z])?(?![A-Za-z0-9])"
+    r"(?P<segment>[A-Za-z])?"
+    r"(?:\s*[-&]\s*(?P<last>\d{1,3}))?(?![A-Za-z0-9])"
 )
 _EPISODE_TOKEN = re.compile(
     r"(?i)(?<![A-Za-z0-9])Ep[ ._-]*(?P<episode>\d{1,3})"
@@ -678,7 +679,16 @@ def parse_video_path(relative_path: str) -> ParseResult:
         return ParseResult(
             series_hint=series,
             series_aliases=_series_aliases(series, source),
-            absolute_episode=int(match.group("episode")),
+            absolute_episode=(
+                int(match.group("episode")) if match.group("last") is None else None
+            ),
+            absolute_episodes=(
+                ()
+                if match.group("last") is None
+                else tuple(
+                    range(int(match.group("episode")), int(match.group("last")) + 1)
+                )
+            ),
             segment_hint=(match.group("segment") or None),
             year=year,
             embedded_tvmaze_id=embedded_id,

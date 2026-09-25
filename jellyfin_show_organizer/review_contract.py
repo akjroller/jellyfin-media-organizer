@@ -72,6 +72,7 @@ _FIELD_ORDER: dict[str, tuple[str, ...]] = {
         "season",
         "episodes",
         "absolute_episode",
+        "absolute_episodes",
         "special_kind",
         "special_episode",
         "episode_date",

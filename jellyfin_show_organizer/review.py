@@ -82,7 +82,9 @@ def _numbering_mode(record: Mapping[str, object]) -> str:
         return "special"
     if _string(parse.get("episode_date")) is not None:
         return "date"
-    if _integer(parse.get("absolute_episode")) is not None:
+    if _integer(parse.get("absolute_episode")) is not None or parse.get(
+        "absolute_episodes"
+    ):
         return "absolute"
     if _string(parse.get("segment_hint")) is not None:
         return "segment-title"

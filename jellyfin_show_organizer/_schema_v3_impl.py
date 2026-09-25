@@ -80,6 +80,8 @@ def _serialize_record_v1(record: PlanRecord) -> dict[str, Any]:
 
     parse = payload.get("parse")
     if isinstance(parse, dict):
+        if not parse.get("absolute_episodes"):
+            parse.pop("absolute_episodes", None)
         parse.pop("series_aliases", None)
         embedded = parse.pop("embedded_provider_identity", None)
         if embedded is not None:

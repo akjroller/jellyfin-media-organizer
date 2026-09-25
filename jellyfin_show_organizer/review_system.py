@@ -503,6 +503,15 @@ def _format_source_coordinates(record: Mapping[str, object]) -> str | None:
     absolute = parse.get("absolute_episode")
     if isinstance(absolute, int) and not isinstance(absolute, bool):
         coordinates.append(f"A{absolute:02d}")
+    absolute_range = parse.get("absolute_episodes")
+    if isinstance(absolute_range, list) and absolute_range:
+        values = [
+            value
+            for value in absolute_range
+            if isinstance(value, int) and not isinstance(value, bool)
+        ]
+        if values:
+            coordinates.append("A" + "-A".join(f"{value:02d}" for value in values))
     special = parse.get("special_episode")
     if isinstance(special, int) and not isinstance(special, bool):
         coordinates.append(f"Special {special}")

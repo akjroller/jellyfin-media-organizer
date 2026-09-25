@@ -110,6 +110,175 @@ def test_special_can_coexist_with_primary_aired_numbering() -> None:
     assert provider.catalog_calls == 1
 
 
+def test_s00e01_is_not_assigned_by_aired_numbering() -> None:
+    provider = FixtureProvider(
+        (
+            _episode(
+                "special-1", season=0, number=1, title="Preview", episode_type="special"
+            ),
+        )
+    )
+
+    result = assign_episode_group_with_provider(
+        _show(),
+        (
+            SourceEpisodeInput(
+                "preview.mkv",
+                ParseResult(season=0, episodes=(1,), title_hint="Preview"),
+            ),
+        ),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.SUSPICIOUS
+    assert assignment.episodes == ()
+    assert (
+        "numbering-policy-conflict:expected-aired:observed-special"
+        in assignment.evidence.reasons
+    )
+
+
+def test_special_title_fallback_uses_unique_provider_special() -> None:
+    provider = FixtureProvider(
+        (
+            _episode(
+                "special-7",
+                season=0,
+                number=7,
+                title="Moon Flight",
+                episode_type="special",
+            ),
+        )
+    )
+
+    result = assign_episode_group_with_provider(
+        _show(NumberingMode.SPECIAL),
+        (
+            SourceEpisodeInput(
+                "moon.mkv",
+                ParseResult(
+                    special_kind="ova",
+                    special_episode=1,
+                    title_hint="Moon Flight",
+                ),
+            ),
+        ),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].identity.value == "special-7"
+    assert "special-fallback-title-match:moon flight" in assignment.evidence.reasons
+
+
+def test_special_airdate_fallback_uses_unique_special() -> None:
+    provider = FixtureProvider(
+        (
+            _episode(
+                "special-2",
+                season=0,
+                number=2,
+                title="Winter OAD",
+                episode_type="special",
+            ),
+        )
+    )
+    provider.episodes = (
+        provider.episodes[0].__class__(
+            identity=provider.episodes[0].identity,
+            season=0,
+            number=2,
+            title="Winter OAD",
+            episode_type="special",
+            airdate="2024-01-02",
+        ),
+    )
+
+    result = assign_episode_group_with_provider(
+        _show(NumberingMode.SPECIAL),
+        (SourceEpisodeInput("winter.mkv", ParseResult(episode_date="2024-01-02")),),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.MATCHED
+    assert assignment.episodes[0].identity.value == "special-2"
+    assert "catalog-special-airdate-fallback:unique" in assignment.evidence.reasons
+
+
+def test_special_title_fallback_remains_suspicious_when_ambiguous() -> None:
+    provider = FixtureProvider(
+        (
+            _episode(
+                "special-a",
+                season=0,
+                number=1,
+                title="Bonus Flight",
+                episode_type="special",
+            ),
+            _episode(
+                "special-b",
+                season=0,
+                number=2,
+                title="Bonus Flight",
+                episode_type="special",
+            ),
+        )
+    )
+
+    result = assign_episode_group_with_provider(
+        _show(NumberingMode.SPECIAL),
+        (
+            SourceEpisodeInput(
+                "bonus.mkv",
+                ParseResult(
+                    special_kind="ova",
+                    special_episode=9,
+                    title_hint="Bonus Flight",
+                ),
+            ),
+        ),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.SUSPICIOUS
+    assert (
+        "special-fallback-title-ambiguous:bonus flight" in assignment.evidence.reasons
+    )
+
+
+def test_generic_special_title_does_not_select_a_catalog_entry() -> None:
+    provider = FixtureProvider(
+        (
+            _episode(
+                "special-1",
+                season=0,
+                number=1,
+                title="Bonus",
+                episode_type="special",
+            ),
+        )
+    )
+
+    result = assign_episode_group_with_provider(
+        _show(NumberingMode.SPECIAL),
+        (
+            SourceEpisodeInput(
+                "bonus.mkv",
+                ParseResult(special_kind="ova", special_episode=9, title_hint="Bonus"),
+            ),
+        ),
+        provider,
+    )
+
+    assignment = result.assignments[0]
+    assert assignment.status is AssignmentStatus.UNRESOLVED
+    assert assignment.episodes == ()
+
+
 def test_ambiguous_special_does_not_poison_primary_episode_assignment() -> None:
     provider = FixtureProvider(
         (

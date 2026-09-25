@@ -100,6 +100,29 @@ def test_absolute_assignment_uses_regular_catalog_order_and_skips_specials(
     assert all(assignment.episodes[0].season > 0 for assignment in result.assignments)
 
 
+def test_absolute_range_assigns_all_regular_provider_episodes(tmp_path: Path) -> None:
+    result = assign_episode_group(
+        _show(NumberingMode.ABSOLUTE),
+        (
+            SourceEpisodeInput(
+                "range.mkv",
+                ParseResult(absolute_episodes=(1, 2)),
+            ),
+        ),
+        TvmazeCatalogCache(tmp_path / "cache"),
+        CountingGetter(),
+    )
+
+    assert result.status is AssignmentStatus.MATCHED
+    assignment = result.assignments[0]
+    assert [episode.tvmaze_episode_id for episode in assignment.episodes] == [
+        1001,
+        1002,
+    ]
+    assert "absolute-match:1->S01E01" in assignment.evidence.reasons
+    assert "absolute-match:2->S01E02" in assignment.evidence.reasons
+
+
 def test_parenthesized_absolute_records_explicit_policy(tmp_path: Path) -> None:
     result = assign_episode_group(
         _show(NumberingMode.PARENTHESIZED_ABSOLUTE),

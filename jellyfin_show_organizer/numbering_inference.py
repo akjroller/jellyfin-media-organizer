@@ -41,7 +41,9 @@ def _has_any_aired(parse: ParseResult) -> bool:
 
 
 def _has_complete_absolute(parse: ParseResult) -> bool:
-    return parse.absolute_episode is not None and parse.absolute_episode > 0
+    return bool(parse.absolute_episodes) or (
+        parse.absolute_episode is not None and parse.absolute_episode > 0
+    )
 
 
 def _usable_numbering_parses(
@@ -58,7 +60,11 @@ def _usable_numbering_parses(
         parse
         for parse in parses
         if not _has_other_numbering(parse)
-        and (_has_any_aired(parse) or parse.absolute_episode is not None)
+        and (
+            _has_any_aired(parse)
+            or parse.absolute_episode is not None
+            or bool(parse.absolute_episodes)
+        )
     )
 
 
@@ -78,7 +84,9 @@ def _partition_numbering_parses(
         has_aired = _has_any_aired(parse)
         aired_complete = _has_complete_aired(parse)
         absolute_complete = _has_complete_absolute(parse)
-        has_absolute = parse.absolute_episode is not None
+        has_absolute = parse.absolute_episode is not None or bool(
+            parse.absolute_episodes
+        )
 
         if aired_complete and absolute_complete:
             dual.append(parse)
@@ -119,9 +127,14 @@ def _candidate_observations(
 
     if absolute_complete:
         absolute_values = {
-            str(parse.absolute_episode)
+            str(value)
             for parse in relevant
-            if parse.absolute_episode is not None
+            for value in (
+                parse.absolute_episodes
+                if parse.absolute_episodes
+                else (parse.absolute_episode,)
+            )
+            if value is not None
         }
         if absolute_values:
             observations.append(

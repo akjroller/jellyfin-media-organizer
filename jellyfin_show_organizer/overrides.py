@@ -228,7 +228,10 @@ def _decision_family(parse: ParseResult) -> str:
         family
         for family, present in (
             ("aired", parse.season is not None or bool(parse.episodes)),
-            ("absolute", parse.absolute_episode is not None),
+            (
+                "absolute",
+                parse.absolute_episode is not None or bool(parse.absolute_episodes),
+            ),
             (
                 "special",
                 parse.special_kind is not None or parse.special_episode is not None,
@@ -293,9 +296,15 @@ class EpisodeDecisionOverride:
             NumberingMode.ABSOLUTE,
             NumberingMode.PARENTHESIZED_ABSOLUTE,
         }:
-            if self.parse.absolute_episode is None or self.parse.absolute_episode <= 0:
+            if (
+                not (
+                    self.parse.absolute_episode is not None
+                    and self.parse.absolute_episode > 0
+                )
+                and not self.parse.absolute_episodes
+            ):
                 raise ValueError(
-                    "absolute episode decisions require a positive absolute_episode"
+                    "absolute episode decisions require positive absolute evidence"
                 )
         elif self.numbering_mode is NumberingMode.SEGMENT_TITLE:
             if (
@@ -352,6 +361,7 @@ class EpisodeDecisionOverride:
             season=self.parse.season,
             episodes=self.parse.episodes,
             absolute_episode=self.parse.absolute_episode,
+            absolute_episodes=self.parse.absolute_episodes,
             special_kind=self.parse.special_kind,
             special_episode=self.parse.special_episode,
             episode_date=self.parse.episode_date,
@@ -569,6 +579,7 @@ class OverrideCatalog:
             payload["episode_decisions"] = [
                 {
                     "absolute_episode": decision.parse.absolute_episode,
+                    "absolute_episodes": list(decision.parse.absolute_episodes),
                     "episode_date": decision.parse.episode_date,
                     "episodes": list(decision.parse.episodes),
                     "numbering_mode": decision.numbering_mode.value,
@@ -790,6 +801,7 @@ def _parse_episode_decision(raw: dict[str, Any]) -> EpisodeDecisionOverride:
         "season",
         "episodes",
         "absolute_episode",
+        "absolute_episodes",
         "special_kind",
         "special_episode",
         "episode_date",
@@ -810,6 +822,13 @@ def _parse_episode_decision(raw: dict[str, Any]) -> EpisodeDecisionOverride:
         _is_plain_int(episode) for episode in raw_episodes
     ):
         raise ValueError("episode decision episodes must be a list of integers")
+    raw_absolute_episodes = raw.get("absolute_episodes", [])
+    if not isinstance(raw_absolute_episodes, list) or not all(
+        _is_plain_int(episode) for episode in raw_absolute_episodes
+    ):
+        raise ValueError(
+            "episode decision absolute_episodes must be a list of integers"
+        )
 
     reasons = raw.get("reasons", ["explicit local episode decision"])
     if not isinstance(reasons, list) or not all(
@@ -829,6 +848,7 @@ def _parse_episode_decision(raw: dict[str, Any]) -> EpisodeDecisionOverride:
         season=_optional_int(raw, "season"),
         episodes=tuple(raw_episodes),
         absolute_episode=_optional_int(raw, "absolute_episode"),
+        absolute_episodes=tuple(raw_absolute_episodes),
         special_kind=_optional_string(raw, "special_kind"),
         special_episode=_optional_int(raw, "special_episode"),
         episode_date=_optional_string(raw, "episode_date"),
