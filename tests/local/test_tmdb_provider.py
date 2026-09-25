@@ -17,6 +17,7 @@ from jellyfin_show_organizer.tmdb_cache import (
     TmdbCatalogCache,
     tmdb_http_getter,
 )
+from jellyfin_show_organizer.tvmaze_cache import CacheState
 
 
 def test_tmdb_adapter_normalizes_search_and_seasons(tmp_path: Path) -> None:
@@ -77,6 +78,23 @@ def test_tmdb_cache_replays_offline_without_getter(tmp_path: Path) -> None:
         "Nothing", lambda *_: (_ for _ in ()).throw(AssertionError())
     ).resolved
     assert len(calls) == 1
+
+
+def test_tmdb_cache_corruption_is_not_replayed_offline(tmp_path: Path) -> None:
+    cache_root = tmp_path / "cache"
+    online = TmdbCatalogCache(cache_root)
+    online.search_show("Example", cast(Any, lambda *_: {"results": []}))
+    cached_file = next((cache_root / "search").glob("*.json"))
+    cached_file.write_text("{not-json", encoding="utf-8")
+
+    offline = TmdbCatalogCache(cache_root, offline=True)
+    record = offline.search_show(
+        "Example",
+        cast(Any, lambda *_: (_ for _ in ()).throw(AssertionError())),
+    )
+
+    assert record.state is CacheState.CORRUPT
+    assert not record.resolved
 
 
 def test_tmdb_http_getter_rejects_missing_token() -> None:
@@ -176,6 +194,41 @@ def test_auto_provider_recovers_one_tvmaze_identity_from_tmdb_title() -> None:
         cast(Any, Primary()), cast(Any, Secondary())
     ).search_shows("Example")
     assert result.shows == (show,)
+
+
+def test_auto_provider_preserves_ambiguous_provider_disagreement() -> None:
+    candidates = (
+        ProviderShow(ProviderIdentity("tvmaze", "1"), "Alpha", 2020),
+        ProviderShow(ProviderIdentity("tvmaze", "3"), "Gamma", 2020),
+    )
+
+    class Primary:
+        provider_name = "tvmaze"
+
+        def search_shows(self, _title: str) -> ProviderSearchSnapshot:
+            return ProviderSearchSnapshot(
+                provider="tvmaze",
+                request_key="search:example",
+                cache_snapshot_id="tvmaze",
+                shows=candidates,
+            )
+
+    class Secondary:
+        def search_shows(self, _title: str) -> ProviderSearchSnapshot:
+            return ProviderSearchSnapshot(
+                provider="tmdb",
+                request_key="search:example",
+                cache_snapshot_id="tmdb",
+                shows=(ProviderShow(ProviderIdentity("tmdb", "2"), "Beta", 2020),),
+            )
+
+    result = AutoProviderAdapter(
+        cast(Any, Primary()), cast(Any, Secondary())
+    ).search_shows("Example")
+
+    assert result.resolved
+    assert result.shows == candidates
+    assert len(result.shows) != 1
 
 
 def test_auto_provider_requires_consensus_for_ambiguous_tvmaze_results() -> None:
