@@ -227,11 +227,15 @@ def _special_fallback_assignment(
     unique_matches: list[tuple[str, ProviderEpisode]] = []
     if parse.title_hint is not None:
         normalized_title = _normalize_title(parse.title_hint)
-        title_matches = tuple(
-            episode
-            for episode in candidates
-            if _normalize_title(episode.title) == normalized_title
-        )
+        title_matches: tuple[ProviderEpisode, ...]
+        if normalized_title in {"bonus", "extra", "special", "ova", "oad", "preview"}:
+            title_matches = ()
+        else:
+            title_matches = tuple(
+                episode
+                for episode in candidates
+                if _normalize_title(episode.title) == normalized_title
+            )
         if len(title_matches) > 1:
             return SourceEpisodeAssignment(
                 source_key=source.source_key,

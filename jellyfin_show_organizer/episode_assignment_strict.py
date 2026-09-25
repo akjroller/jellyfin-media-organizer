@@ -75,6 +75,11 @@ def _normalize_title(value: str) -> str:
     return " ".join(normalized.split())
 
 
+def _is_generic_special_title(value: str) -> bool:
+    normalized = _normalize_title(value)
+    return normalized in {"bonus", "extra", "special", "ova", "oad", "preview"}
+
+
 _SEGMENT_NEAR_TITLE_THRESHOLD = 0.92
 _SEGMENT_NEAR_TITLE_GAP = 0.08
 _SEGMENT_MIN_NEAR_TITLE_LENGTH = 8
@@ -376,6 +381,24 @@ def _evidence_family(parse: ParseResult, mode: NumberingMode) -> str:
     has_special = parse.special_kind is not None or parse.special_episode is not None
     has_date = parse.episode_date is not None
 
+    if (
+        parse.season == 0
+        and bool(parse.episodes)
+        and not (
+            has_absolute or has_special or has_date or parse.segment_hint is not None
+        )
+    ):
+        return "special"
+
+    if (
+        mode is NumberingMode.SPECIAL
+        and has_date
+        and not (
+            has_aired or has_absolute or has_special or parse.segment_hint is not None
+        )
+    ):
+        return "special"
+
     if parse.segment_hint is not None:
         if has_absolute or has_special or has_date:
             return "conflict"
@@ -436,6 +459,15 @@ def _aired_assignment(
             "episode-catalog",
             f"numbering-mode:{show.numbering_mode.value}",
             "missing-aired-numbering-evidence",
+            f"catalog-request:{request_key}",
+        )
+    if parse.season <= 0:
+        return _assignment(
+            source.source_key,
+            AssignmentStatus.SUSPICIOUS,
+            "episode-catalog",
+            f"numbering-mode:{show.numbering_mode.value}",
+            "season-zero-requires-special-numbering",
             f"catalog-request:{request_key}",
         )
     if (
@@ -658,7 +690,80 @@ def _special_assignment(
     request_key: str,
 ) -> SourceEpisodeAssignment:
     parse = source.parse
-    if parse.special_kind is None or parse.special_episode is None:
+    special_kind = parse.special_kind
+    special_episode = parse.special_episode
+    if (
+        special_kind is None
+        and special_episode is None
+        and parse.season == 0
+        and len(parse.episodes) == 1
+    ):
+        special_kind = "season-zero"
+        special_episode = parse.episodes[0]
+    special_candidates = tuple(
+        episode
+        for episode in catalog.episodes
+        if episode.season == 0
+        or (episode.episode_type is not None and episode.episode_type != "regular")
+    )
+    if special_kind is None or special_episode is None:
+        if (
+            (parse.season is not None and parse.season != 0)
+            or (parse.episodes and parse.season != 0)
+            or parse.absolute_episode is not None
+            or parse.absolute_episodes
+            or parse.segment_hint is not None
+        ):
+            return _assignment(
+                source.source_key,
+                AssignmentStatus.SUSPICIOUS,
+                "episode-catalog",
+                f"numbering-mode:{show.numbering_mode.value}",
+                "conflicting-numbering-evidence",
+                f"catalog-request:{request_key}",
+            )
+        title_matches = tuple(
+            episode
+            for episode in special_candidates
+            if parse.title_hint is not None
+            and not _is_generic_special_title(parse.title_hint)
+            and _normalize_title(episode.title) == _normalize_title(parse.title_hint)
+        )
+        date_matches = tuple(
+            episode
+            for episode in special_candidates
+            if parse.episode_date is not None and episode.airdate == parse.episode_date
+        )
+        evidence = [
+            f"numbering-mode:{show.numbering_mode.value}",
+            f"catalog-request:{request_key}",
+        ]
+        unique_matches = {
+            episode.identity: episode for episode in (*title_matches, *date_matches)
+        }
+        if len(unique_matches) > 1 or len(title_matches) > 1 or len(date_matches) > 1:
+            return _assignment(
+                source.source_key,
+                AssignmentStatus.SUSPICIOUS,
+                "episode-catalog",
+                *evidence,
+                "ambiguous-special-fallback-evidence",
+            )
+        if len(unique_matches) == 1:
+            episode = next(iter(unique_matches.values()))
+            if title_matches:
+                evidence.append("catalog-special-title-fallback:unique")
+            if date_matches:
+                evidence.append("catalog-special-airdate-fallback:unique")
+            evidence.append(_episode_identity_reason(episode))
+            return _assignment(
+                source.source_key,
+                AssignmentStatus.MATCHED,
+                "episode-catalog",
+                *evidence,
+                episodes=(episode,),
+                confidence=1.0,
+            )
         return _assignment(
             source.source_key,
             AssignmentStatus.UNRESOLVED,
@@ -668,8 +773,8 @@ def _special_assignment(
             f"catalog-request:{request_key}",
         )
     if (
-        parse.season is not None
-        or parse.episodes
+        (parse.season is not None and parse.season != 0)
+        or (parse.episodes and parse.season != 0)
         or parse.absolute_episode is not None
         or parse.absolute_episodes
         or parse.segment_hint is not None
@@ -687,7 +792,7 @@ def _special_assignment(
     candidates = tuple(
         episode
         for episode in catalog.episodes
-        if episode.number == parse.special_episode
+        if episode.number == special_episode
         and (
             episode.season == 0
             or (episode.episode_type is not None and episode.episode_type != "regular")
@@ -699,14 +804,14 @@ def _special_assignment(
             AssignmentStatus.UNRESOLVED,
             "episode-catalog",
             f"numbering-mode:{show.numbering_mode.value}",
-            f"special-kind:{parse.special_kind}",
-            f"missing-special-catalog-entry:{parse.special_episode}",
+            f"special-kind:{special_kind}",
+            f"missing-special-catalog-entry:{special_episode}",
             f"catalog-request:{request_key}",
         )
 
     selected = candidates
     if len(candidates) > 1:
-        kind_token = f" {parse.special_kind} "
+        kind_token = f" {special_kind} "
         kind_matches = tuple(
             episode
             for episode in candidates
@@ -720,8 +825,8 @@ def _special_assignment(
                 AssignmentStatus.SUSPICIOUS,
                 "episode-catalog",
                 f"numbering-mode:{show.numbering_mode.value}",
-                f"special-kind:{parse.special_kind}",
-                f"ambiguous-special-catalog-entry:{parse.special_episode}",
+                f"special-kind:{special_kind}",
+                f"ambiguous-special-catalog-entry:{special_episode}",
                 f"catalog-request:{request_key}",
             )
 
@@ -731,9 +836,9 @@ def _special_assignment(
         AssignmentStatus.MATCHED,
         "episode-catalog",
         f"numbering-mode:{show.numbering_mode.value}",
-        f"special-kind:{parse.special_kind}",
-        f"special-number:{parse.special_episode}",
-        f"special-match:{parse.special_kind.upper()}{parse.special_episode}"
+        f"special-kind:{special_kind}",
+        f"special-number:{special_episode}",
+        f"special-match:{special_kind.upper()}{special_episode}"
         f"->S{episode.season:02d}E{episode.number:02d}",
         _episode_identity_reason(episode),
         f"catalog-request:{request_key}",
