@@ -836,6 +836,14 @@ def execute_plan(
     provider_mode = (
         "offline" if config.offline else "refresh" if config.refresh else "online"
     )
+    # This module owns the CLI's live planning path.  Keep the reported
+    # provider identity tied to the adapter actually constructed above; the
+    # planner module has the same contract, but reporting only from there
+    # would leave the CLI/provenance stale when this compatibility path runs.
+    actual_provider_strategy = config.provider_strategy
+    actual_provider_names = (
+        ("tvmaze", "tmdb") if tmdb_cache is not None else ("tvmaze",)
+    )
     run_provenance = build_run_provenance(
         plan,
         source_revision=detect_source_revision(),
@@ -846,6 +854,8 @@ def execute_plan(
         overrides_configured=config.overrides_path is not None,
         preflight_ready=preflight.ready,
         preflight_finding_count=len(preflight.findings),
+        provider_strategy=actual_provider_strategy,
+        provider_names=actual_provider_names,
     )
     bundle = write_audit_bundle(
         output_dir,
@@ -862,4 +872,7 @@ def execute_plan(
         preflight=preflight,
         bundle=bundle,
         provider_failure=provider_failure,
+        provider_strategy=actual_provider_strategy,
+        provider_names=actual_provider_names,
+        tmdb_available=tmdb_cache is not None,
     )
