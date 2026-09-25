@@ -40,12 +40,12 @@ from .planner import (
     preflight_records,
 )
 from .preflight import authorize_destination_root, preflight_plan
+from .provider_aliases import TvmazeAliasProviderAdapter
 from .providers import (
     AutoProviderAdapter,
     MetadataProvider,
     ProviderEpisode,
     TmdbProviderAdapter,
-    TvmazeProviderAdapter,
 )
 from .reports import write_audit_bundle
 from .review_contract import (
@@ -783,7 +783,9 @@ def execute_plan(
         refresh=config.refresh,
         clock=clock,
     )
-    tvmaze_provider = TvmazeProviderAdapter(cache, getter)
+    # Keep automatic planning on the alias-capable TVMaze adapter so the
+    # resolver can use provider AKA metadata before falling back to review.
+    tvmaze_provider = TvmazeAliasProviderAdapter(cache, getter)
     tmdb_cache: TrackingTmdbCatalogCache | None = None
     tmdb_token = os.environ.get("JMO_TMDB_ACCESS_TOKEN", "").strip()
     if config.provider_strategy == "auto" and tmdb_token:

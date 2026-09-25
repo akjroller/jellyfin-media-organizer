@@ -238,6 +238,14 @@ class AutoProviderAdapter:
     ) -> ProviderEpisodeCatalog:
         return self._tvmaze.episode_catalog(show_identity)
 
+    def show_aliases(self, show_identity: ProviderIdentity) -> Any:
+        """Expose primary-provider AKA evidence to the resolver."""
+
+        loader = getattr(self._tvmaze, "show_aliases", None)
+        if not callable(loader):
+            raise ValueError("primary provider does not support show aliases")
+        return loader(show_identity)
+
 
 def _tvmaze_show_candidates(response: object) -> tuple[ProviderShow, ...]:
     if not isinstance(response, list):

@@ -62,12 +62,12 @@ from .preflight import (
     authorize_destination_root,
     preflight_plan,
 )
+from .provider_aliases import TvmazeAliasProviderAdapter
 from .providers import (
     AutoProviderAdapter,
     MetadataProvider,
     ProviderEpisode,
     TmdbProviderAdapter,
-    TvmazeProviderAdapter,
 )
 from .reports import AuditBundle, write_audit_bundle
 from .run_provenance import (
@@ -1271,7 +1271,7 @@ def execute_plan(
         refresh=config.refresh,
         clock=clock,
     )
-    tvmaze_provider = TvmazeProviderAdapter(cache, getter)
+    tvmaze_provider = TvmazeAliasProviderAdapter(cache, getter)
     tmdb_cache: TrackingTmdbCatalogCache | None = None
     tmdb_token = os.environ.get("JMO_TMDB_ACCESS_TOKEN", "").strip()
     if config.provider_strategy == "auto" and tmdb_token:
