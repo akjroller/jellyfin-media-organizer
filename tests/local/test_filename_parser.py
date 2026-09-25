@@ -28,6 +28,18 @@ def test_managed_numeric_episode_title_is_not_parsed_as_a_range() -> None:
     assert result.episodes == (6,)
 
 
+def test_sxe_strips_release_separator_after_year() -> None:
+    result = parse_video_path(
+        "[BlackRabbit] Shangri-La Frontier (2023) - S01 [Bluray-1080p]/"
+        "[BlackRabbit] Shangri-La Frontier (2023) - S01E01.mkv"
+    )
+
+    assert result.series_hint == "Shangri-La Frontier"
+    assert result.year == 2023
+    assert result.season == 1
+    assert result.episodes == (1,)
+
+
 def test_ep_token_uses_descriptive_ancestor_season() -> None:
     result = parse_video_path(
         "[Exiled-Destiny]_Sekirei_Season_2_Pure_Engagement_[BD_1080P]/"
