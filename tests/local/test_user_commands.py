@@ -84,11 +84,46 @@ def test_init_creates_reusable_state_without_overwriting(
     assert "refusing" in capsys.readouterr().out.lower()
 
 
+def test_init_keeps_absolute_paths_when_relative_path_is_unavailable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "Shows"
+    destination = tmp_path / "Organized"
+    state = tmp_path / "state"
+    source.mkdir()
+    destination.mkdir()
+
+    import jellyfin_show_organizer.user_commands as commands
+
+    original_relpath = commands.os.path.relpath
+
+    def cross_volume_relpath(path, start):
+        if Path(path) in {source, destination}:
+            raise ValueError("path is on mount D:, start on mount C:")
+        return original_relpath(path, start)
+
+    monkeypatch.setattr(commands.os.path, "relpath", cross_volume_relpath)
+    assert run_init(source, destination, state) == 0
+    config = tomllib.loads((state / "planning.toml").read_text(encoding="utf-8"))
+    assert config["plan"]["source_root"] == str(source).replace("\\", "/")
+    assert config["plan"]["destination_root"] == str(destination).replace("\\", "/")
+
+
+def test_init_creates_missing_destination_leaf(tmp_path: Path) -> None:
+    source = tmp_path / "Shows"
+    destination = tmp_path / "Organized"
+    source.mkdir()
+    assert run_init(source, destination, tmp_path / "state") == 0
+    assert destination.is_dir()
+
+
 def test_init_rejects_invalid_roots_and_mode(tmp_path: Path, capsys) -> None:
     source = tmp_path / "Shows"
     source.mkdir()
-    assert run_init(source, tmp_path / "missing", tmp_path / "state") == 2
-    assert "destination" in capsys.readouterr().out.lower()
+    missing_destination = tmp_path / "missing"
+    assert run_init(source, missing_destination, tmp_path / "state") == 0
+    assert missing_destination.is_dir()
+    capsys.readouterr()
     destination = tmp_path / "Organized"
     destination.mkdir()
     assert run_init(source, destination, tmp_path / "state", provider_mode="bad") == 2
@@ -375,6 +410,98 @@ def test_wizard_resumes_existing_setup_without_overwriting_audit_state(
     text = output.getvalue()
     assert "Existing JMO setup detected" in text
     assert "jmo plan" in text
+
+
+def test_wizard_ready_path_stops_after_check_only(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "Shows"
+    destination = tmp_path / "Organized"
+    state = tmp_path / "JMO-State"
+    source.mkdir()
+    destination.mkdir()
+    (source / "Episode.mkv").write_bytes(b"synthetic")
+
+    import jellyfin_show_organizer.apply_execution as apply_execution
+    import jellyfin_show_organizer.review_contract as review_contract
+    import jellyfin_show_organizer.review_system as review_system
+    import jellyfin_show_organizer.user_commands as commands
+
+    def fake_outcome():
+        return SimpleNamespace(
+            plan=SimpleNamespace(records=()),
+            preflight=SimpleNamespace(ready=True),
+        )
+
+    def fake_execute_plan(config, *args, **kwargs):
+        config.output_dir.mkdir(parents=True)
+        (config.output_dir / "plan.json").write_text("{}\n", encoding="utf-8")
+        (config.output_dir / "plan.sha256").write_text("a" * 64, encoding="ascii")
+        (config.output_dir / "preflight.json").write_text("{}\n", encoding="utf-8")
+        (config.output_dir / "run-provenance.json").write_text(
+            '{"source_revision":{"commit":"' + "b" * 40 + '"}}\n',
+            encoding="utf-8",
+        )
+        return fake_outcome()
+
+    monkeypatch.setattr(commands, "execute_plan", fake_execute_plan)
+    monkeypatch.setattr(
+        review_contract,
+        "load_review_contract",
+        lambda _path: SimpleNamespace(snapshot_id="snapshot"),
+    )
+    monkeypatch.setattr(
+        review_system,
+        "run_review_system",
+        lambda *args, **kwargs: (
+            SimpleNamespace(complete=True, sha256="c" * 64),
+            b"schema_version = 5\n",
+        ),
+    )
+    monkeypatch.setattr(
+        review_contract,
+        "load_review_contract",
+        lambda _path: SimpleNamespace(snapshot_id="snapshot"),
+    )
+
+    check_only_calls: list[bool] = []
+    monkeypatch.setattr(
+        apply_execution,
+        "prepare_apply",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+
+    def fake_apply(*args, **kwargs):
+        check_only_calls.append(bool(kwargs["check_only"]))
+        return SimpleNamespace(groups_total=1)
+
+    monkeypatch.setattr(
+        apply_execution,
+        "execute_apply",
+        fake_apply,
+    )
+    monkeypatch.setattr(apply_execution, "total_moving_members", lambda _prepared: 1)
+    monkeypatch.setattr(
+        apply_execution, "approval_token", lambda *args, **kwargs: "token"
+    )
+    import jellyfin_show_organizer.apply_validation as apply_validation
+    import jellyfin_show_organizer.run_provenance as run_provenance
+
+    monkeypatch.setattr(
+        apply_validation,
+        "validate_apply_roots",
+        lambda source_root, destination_root: (source_root, destination_root),
+    )
+    monkeypatch.setattr(
+        run_provenance,
+        "detect_source_revision",
+        lambda: SimpleNamespace(state="git", dirty=False, commit="b" * 40),
+    )
+
+    output = StringIO()
+    answers = iter((str(source), str(destination), str(state), "offline", "Y", "Y"))
+    assert run_wizard(input_fn=lambda _prompt: next(answers), output=output) == 0
+    assert check_only_calls == [True]
+    assert "read-only boundary" in output.getvalue()
+    assert not list(state.rglob("apply-journal.jsonl"))
 
 
 def test_write_example_refuses_overwrite(tmp_path: Path, capsys) -> None:

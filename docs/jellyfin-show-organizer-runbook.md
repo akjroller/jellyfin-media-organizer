@@ -270,7 +270,10 @@ Use fabricated canonical show names and paths in tests, including Windows-reserv
 
 ### Add a metadata provider
 
-TVMaze remains the initial provider. A second provider should not be added by spreading raw provider response dictionaries or provider-specific IDs through parser, assignment, destination, duplicate, reporting, or preflight code. Provider abstraction work should be introduced as a separately versioned/reviewed boundary when it is actually needed.
+TVMaze remains the primary provider and TMDb is available through the reviewed
+provider-neutral boundary. A provider should not be added by spreading raw
+response dictionaries or provider-specific IDs through parser, assignment,
+destination, duplicate, reporting, or preflight code.
 
 ## Development and CI checklist
 

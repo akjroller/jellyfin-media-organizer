@@ -2,6 +2,14 @@
 
 All notable public changes will be documented in this file. The project follows Semantic Versioning.
 
+## Unreleased
+
+- Improved conservative show-title extraction for release trees whose folder
+  names contain subtitle text, while preserving conflicting title evidence as
+  unresolved instead of guessing.
+- Hardened guided setup so it only performs read-only checks and leaves any
+  mutating apply operation behind an explicit `jmo apply` command.
+
 ## 0.4.1 - 2026-09-25
 
 - Corrected automatic provider reporting in the live CLI planning path so
@@ -64,4 +72,9 @@ records are reviewed; it never silently authorizes an apply.
 
 ## Unreleased
 
-No unreleased changes.
+- Made the guided wizard stop at the read-only apply-check boundary; only the
+  explicit `jmo apply` command can mutate media.
+- Made wizard setup safe for Windows state directories on another volume and
+  staged initialization so failed writes do not publish partial state.
+- Updated first-run, security, provider, and PyPI smoke-test documentation for
+  the current release and provider boundary.

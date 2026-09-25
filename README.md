@@ -9,14 +9,14 @@ reads your library, never calls a provider, and never changes files outside the
 demo directory.
 
 PyPI is the preferred installation source, and the current
-[v0.4.0 release](https://pypi.org/project/jellyfin-media-organizer/0.4.0/)
+[v0.4.1 release](https://pypi.org/project/jellyfin-media-organizer/0.4.1/)
 is available there. Start in a writable working directory with Python 3.12
 installed (or adjust `-3.12` to a newer installed version). No environment
 activation is needed.
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install "jellyfin-media-organizer==0.4.0"
+.\.venv\Scripts\python.exe -m pip install "jellyfin-media-organizer==0.4.1"
 ```
 
 After installation succeeds, run the same disposable demo workflow:
@@ -67,10 +67,10 @@ For a real library, the simplest entrypoint is the guided wizard:
 ```
 
 With no subcommand, JMO walks through setup, doctor, planning, review, and the
-read-only apply check. If that check passes, the wizard offers the real apply
-and requires the literal `APPLY` confirmation; any other response leaves the
-media untouched. Advanced users and automation can continue to use the
-explicit `plan`, `review`, `inspect`, and `apply` commands.
+read-only apply check. The wizard stops there and prints the exact artifacts for
+the explicit `jmo apply` command; it never performs a media mutation itself.
+Advanced users and automation can continue to use the explicit `plan`, `review`,
+`inspect`, and `apply` commands.
 
 JMO is intentionally conservative: planning and review remain non-mutating, while `jmo apply` is an explicitly gated executor for one exact reviewed plan. Apply permits only same-filesystem, atomic, no-overwrite renames for `matched` and `extra` operation groups. It never copies across filesystems, overwrites, deletes, quarantines, or moves duplicate/held/ignored records.
 
@@ -84,7 +84,7 @@ JMO is intentionally conservative: planning and review remain non-mutating, whil
 - data-driven aliases and numbering policies;
 - persistent TVMaze cache primitives for deterministic/offline replay;
 - canonical TVMaze show resolution with fail-closed ambiguity handling;
-- a namespaced metadata-provider boundary while TVMaze remains the configured provider;
+- a namespaced metadata-provider boundary with TVMaze and optional TMDb support;
 - end-to-end, show-grouped plan generation with cached provider metadata;
 - companion subtitle planning and duplicate-safe operation groups;
 - immutable JSON/CSV/text audit bundles with provenance and stable hashes;
@@ -264,7 +264,7 @@ docs/                      architecture and operating guidance
 
 JMO uses Semantic Versioning. Pull-request CI builds and verifies both wheel and source-distribution installs in isolated environments. Verified artifacts can be built by the deliberate release-artifact workflow or a matching version tag; the repository does not automatically publish packages to a package registry.
 
-The `v0.1.0` version tag was the first verified release. The `v0.1.1` patch release added the reviewed-duplicate winner fix, `v0.2.0` added onboarding, review-status, reporting, and contributor-workflow foundations, `v0.3.0` added guided review workflows and quarantine hardening, `v0.3.1` added the protected PyPI publication path, and `v0.4.0` adds guided run plus the optional second provider. A GitHub Release is published separately from the tag and does not itself approve or authorize any media run. The presence of `jmo apply` in source remains subject to the explicit apply safety contract.
+The `v0.1.0` version tag was the first verified release. The `v0.1.1` patch release added the reviewed-duplicate winner fix, `v0.2.0` added onboarding, review-status, reporting, and contributor-workflow foundations, `v0.3.0` added guided review workflows and quarantine hardening, `v0.3.1` added the protected PyPI publication path, `v0.4.0` added guided run plus the optional second provider, and `v0.4.1` corrected provider reporting in the live CLI. A GitHub Release is published separately from the tag and does not itself approve or authorize any media run. The presence of `jmo apply` in source remains subject to the explicit apply safety contract.
 
 See the [release policy](docs/releasing.md) for the version source of truth, supported runtime matrix, tag rules, artifact verification process, and privacy boundary.
 

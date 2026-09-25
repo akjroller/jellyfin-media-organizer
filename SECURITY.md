@@ -2,7 +2,9 @@
 
 ## Supported versions
 
-Jellyfin Media Organizer has not published a release yet. Security fixes are made on the current `main` branch while the apply executor remains explicitly gated and unreleased.
+The current supported release is `v0.4.1`. Security fixes are made on the
+current `main` branch while the apply executor remains explicitly gated behind
+the reviewed-plan and exact-confirmation contract.
 
 ## Reporting a vulnerability
 

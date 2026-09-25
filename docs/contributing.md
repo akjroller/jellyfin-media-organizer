@@ -89,7 +89,9 @@ Unsupported adjacent files remain untouched unless a later explicit feature hand
 
 ## Metadata providers
 
-TVMaze remains the initial configured provider. Provider-specific response shapes belong behind `jellyfin_show_organizer/providers.py`.
+TVMaze remains the primary provider, with optional TMDb support selected by the
+provider-neutral adapter boundary. Provider-specific response shapes belong
+behind `jellyfin_show_organizer/providers.py`.
 
 Use `ProviderIdentity`, normalized provider show/episode models, provider-scoped snapshots, and the `MetadataProvider` protocol rather than spreading raw provider fields through parser, assignment, destination, duplicate, report, or preflight code.
 
@@ -111,6 +113,6 @@ Apply changes must preserve exact plan/review/revision/root approval, status-gat
 
 Keep examples copy/pasteable and platform-neutral. Windows examples should invoke the virtual environment executables directly rather than requiring PowerShell activation or execution-policy changes.
 
-Normal pull-request CI verifies installable artifacts but does not publish packages. The `v0.1.0` version tag was the first verified release, `v0.1.1` was the reviewed-duplicate patch release, `v0.2.0` added onboarding/reporting, `v0.3.0` added guided review workflows, `v0.3.1` added protected PyPI publication, and `v0.4.0` adds guided run plus the optional second provider. Publishing a GitHub Release remains a separate deliberate step. No release authorizes media mutation outside the apply safety contract.
+Normal pull-request CI verifies installable artifacts but does not publish packages. The `v0.1.0` version tag was the first verified release, `v0.1.1` was the reviewed-duplicate patch release, `v0.2.0` added onboarding/reporting, `v0.3.0` added guided review workflows, `v0.3.1` added protected PyPI publication, `v0.4.0` added guided run plus the optional second provider, and `v0.4.1` corrected provider reporting in the live CLI. Publishing a GitHub Release remains a separate deliberate step. No release authorizes media mutation outside the apply safety contract.
 
 See `docs/releasing.md` for version, tag, and artifact rules.

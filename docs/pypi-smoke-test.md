@@ -4,8 +4,8 @@ Use this checklist after a published release to confirm the package works
 outside a repository checkout. The commands install from PyPI into a fresh
 virtual environment. They do not mutate a real library.
 
-The current published package version is `0.4.0`. Tags and GitHub Releases
-use the `v<version>` form, for example `v0.4.0`. That tag must match
+The current published package version is `0.4.1`. Tags and GitHub Releases
+use the `v<version>` form, for example `v0.4.1`. That tag must match
 `jellyfin_show_organizer.__version__` before the release workflow publishes.
 See [Release and versioning policy](releasing.md) and
 [Package publishing](publishing.md).
@@ -26,11 +26,11 @@ apply and never touches a real library.
 ```bash
 python3.12 -m venv /tmp/jmo-pypi-smoke
 /tmp/jmo-pypi-smoke/bin/python -m pip install --upgrade pip
-/tmp/jmo-pypi-smoke/bin/python -m pip install jellyfin-media-organizer==0.4.0
+/tmp/jmo-pypi-smoke/bin/python -m pip install jellyfin-media-organizer==0.4.1
 /tmp/jmo-pypi-smoke/bin/jmo --version
 ```
 
-Expect `Jellyfin Media Organizer 0.4.0`. Then:
+Expect `Jellyfin Media Organizer 0.4.1`. Then:
 
 ```bash
 /tmp/jmo-pypi-smoke/bin/jmo demo --output /tmp/jmo-pypi-demo
@@ -52,11 +52,11 @@ rm -rf /tmp/jmo-pypi-smoke /tmp/jmo-pypi-demo
 ```powershell
 py -3.12 -m venv $env:TEMP\jmo-pypi-smoke
 & "$env:TEMP\jmo-pypi-smoke\Scripts\python.exe" -m pip install --upgrade pip
-& "$env:TEMP\jmo-pypi-smoke\Scripts\python.exe" -m pip install jellyfin-media-organizer==0.4.0
+& "$env:TEMP\jmo-pypi-smoke\Scripts\python.exe" -m pip install jellyfin-media-organizer==0.4.1
 & "$env:TEMP\jmo-pypi-smoke\Scripts\jmo.exe" --version
 ```
 
-Expect `Jellyfin Media Organizer 0.4.0`. Then:
+Expect `Jellyfin Media Organizer 0.4.1`. Then:
 
 ```powershell
 & "$env:TEMP\jmo-pypi-smoke\Scripts\jmo.exe" demo --output "$env:TEMP\jmo-pypi-demo"
@@ -73,7 +73,7 @@ Remove-Item -Recurse -Force "$env:TEMP\jmo-pypi-smoke", "$env:TEMP\jmo-pypi-demo
 ## Version strategy
 
 Pin the installed package to the release you are checking
-(`jellyfin-media-organizer==0.4.0` above). After a later release, update the
+(`jellyfin-media-organizer==0.4.1` above). After a later release, update the
 pin and the expected `jmo --version` string to the new
 `jellyfin_show_organizer.__version__` value. Do not smoke-test a checkout
 install (`pip install .`) when the goal is to verify the published artifact.
