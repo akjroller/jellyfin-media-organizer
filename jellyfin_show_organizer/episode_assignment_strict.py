@@ -735,6 +735,7 @@ def _special_assignment(
         f"special-number:{parse.special_episode}",
         f"special-match:{parse.special_kind.upper()}{parse.special_episode}"
         f"->S{episode.season:02d}E{episode.number:02d}",
+        _episode_identity_reason(episode),
         f"catalog-request:{request_key}",
         episodes=(episode,),
         confidence=1.0,

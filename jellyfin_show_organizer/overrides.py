@@ -228,7 +228,10 @@ def _decision_family(parse: ParseResult) -> str:
         family
         for family, present in (
             ("aired", parse.season is not None or bool(parse.episodes)),
-            ("absolute", parse.absolute_episode is not None or bool(parse.absolute_episodes)),
+            (
+                "absolute",
+                parse.absolute_episode is not None or bool(parse.absolute_episodes),
+            ),
             (
                 "special",
                 parse.special_kind is not None or parse.special_episode is not None,
@@ -293,10 +296,13 @@ class EpisodeDecisionOverride:
             NumberingMode.ABSOLUTE,
             NumberingMode.PARENTHESIZED_ABSOLUTE,
         }:
-            if not (
-                self.parse.absolute_episode is not None
-                and self.parse.absolute_episode > 0
-            ) and not self.parse.absolute_episodes:
+            if (
+                not (
+                    self.parse.absolute_episode is not None
+                    and self.parse.absolute_episode > 0
+                )
+                and not self.parse.absolute_episodes
+            ):
                 raise ValueError(
                     "absolute episode decisions require positive absolute evidence"
                 )
@@ -820,7 +826,9 @@ def _parse_episode_decision(raw: dict[str, Any]) -> EpisodeDecisionOverride:
     if not isinstance(raw_absolute_episodes, list) or not all(
         _is_plain_int(episode) for episode in raw_absolute_episodes
     ):
-        raise ValueError("episode decision absolute_episodes must be a list of integers")
+        raise ValueError(
+            "episode decision absolute_episodes must be a list of integers"
+        )
 
     reasons = raw.get("reasons", ["explicit local episode decision"])
     if not isinstance(reasons, list) or not all(
