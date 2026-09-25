@@ -331,12 +331,14 @@ def catalog_group_rescue(
 
     outcomes: dict[ProviderIdentity, NumberingMode | None] = {}
     candidate_reasons: dict[ProviderIdentity, tuple[str, ...]] = {}
+    catalogs: dict[ProviderIdentity, ProviderEpisodeCatalog] = {}
     indeterminate = False
 
     for candidate in sorted(ranked, key=lambda item: item.provider_identity.key):
         catalog = provider.episode_catalog(candidate.provider_identity)
         if expected_mode is NumberingMode.SEGMENT_TITLE:
             compatible, reasons = _segment_catalog_compatibility(parses, catalog)
+            catalogs[candidate.provider_identity] = catalog
             candidate_reasons[candidate.provider_identity] = reasons
             if compatible is None:
                 indeterminate = True
@@ -346,6 +348,7 @@ def catalog_group_rescue(
             continue
 
         inference = infer_group_numbering_mode(parses, catalog)
+        catalogs[candidate.provider_identity] = catalog
         candidate_reasons[candidate.provider_identity] = (
             f"catalog-rescue-request:{catalog.request_key}",
             *inference.reasons,
@@ -373,6 +376,68 @@ def catalog_group_rescue(
             candidates=enriched,
             reasons=("catalog-rescue:indeterminate-candidate-catalog",),
         )
+
+    # When several aired files carry episode titles, use the complete catalog
+    # as a second group-level identity signal. This is intentionally stricter
+    # than ordinary title similarity: every candidate catalog must be loaded,
+    # the candidate must already support the inferred numbering mode, and one
+    # candidate must explain a clear majority of coordinate/title observations.
+    title_observations = tuple(
+        {
+            (parse.season, episode, _normalize(parse.title_hint))
+            for parse in parses
+            if parse.season is not None
+            and len(parse.episodes) == 1
+            and parse.title_hint is not None
+            and _normalize(parse.title_hint)
+            for episode in parse.episodes
+        }
+    )
+    if expected_mode is NumberingMode.AIRED and len(title_observations) >= 2:
+        title_scores: dict[ProviderIdentity, int] = {}
+        for identity, mode in outcomes.items():
+            if mode is None:
+                continue
+            catalog = catalogs[identity]
+            by_coordinate = {
+                (episode.season, episode.number): _normalize(episode.title)
+                for episode in catalog.episodes
+                if episode.number is not None
+            }
+            title_scores[identity] = sum(
+                by_coordinate.get((season, episode)) == title
+                for season, episode, title in title_observations
+            )
+        ranked_titles = sorted(
+            title_scores.items(), key=lambda item: (-item[1], item[0].key)
+        )
+        if ranked_titles:
+            winner, winner_score = ranked_titles[0]
+            runner_score = ranked_titles[1][1] if len(ranked_titles) > 1 else 0
+            required = max(2, (len(title_observations) * 3 + 3) // 4)
+            if winner_score >= required and winner_score > runner_score:
+                winner_mode = outcomes[winner]
+                assert winner_mode is not None
+                enriched = tuple(
+                    replace(
+                        candidate,
+                        reasons=(
+                            *candidate.reasons,
+                            f"catalog-title-group-score:{title_scores.get(candidate.provider_identity, 0)}/{len(title_observations)}",
+                        ),
+                    )
+                    for candidate in enriched
+                )
+                return CatalogGroupRescue(
+                    winner=winner,
+                    numbering_mode=winner_mode,
+                    candidates=enriched,
+                    reasons=(
+                        "catalog-rescue:unique-title-group-candidate",
+                        f"catalog-rescue-title-group-winner:{winner.key}",
+                        f"catalog-rescue-title-group-score:{winner_score}/{len(title_observations)}",
+                    ),
+                )
 
     winners = tuple(
         (identity, mode)

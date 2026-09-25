@@ -1051,7 +1051,20 @@ def _attempt_structural_resolution(
                 aired_rescue=aired_rescue,
             )
 
-    if tie_break is None and aired_rescue is None:
+    has_group_title_evidence = (
+        sum(
+            parse.season is not None
+            and len(parse.episodes) == 1
+            and bool(parse.title_hint and parse.title_hint.strip())
+            for parse in parse_group
+        )
+        >= 2
+    )
+    if (
+        (tie_break is None or tie_break.winner is None)
+        and (aired_rescue is None or aired_rescue.winner is None)
+        and (tie_break is None or has_group_title_evidence)
+    ):
         group_rescue = catalog_group_rescue(provider, parse_group, active_ranked)
         if (
             group_rescue is not None
