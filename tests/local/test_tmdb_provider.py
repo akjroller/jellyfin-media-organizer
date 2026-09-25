@@ -118,6 +118,25 @@ def test_auto_provider_does_not_call_tmdb_for_a_unique_tvmaze_match() -> None:
         raise AssertionError("episode lookup did not delegate to TVMaze")
 
 
+def test_auto_provider_delegates_primary_alias_evidence() -> None:
+    expected = object()
+
+    class Primary:
+        provider_name = "tvmaze"
+
+        def show_aliases(self, _identity: ProviderIdentity) -> object:
+            return expected
+
+        def search_shows(self, _title: str):  # pragma: no cover
+            raise AssertionError
+
+        def episode_catalog(self, _identity: ProviderIdentity):  # pragma: no cover
+            raise AssertionError
+
+    provider = AutoProviderAdapter(cast(Any, Primary()), None)
+    assert provider.show_aliases(ProviderIdentity("tvmaze", "1")) is expected
+
+
 def test_auto_provider_recovers_one_tvmaze_identity_from_tmdb_title() -> None:
     show = ProviderShow(ProviderIdentity("tvmaze", "1"), "Example", 2020)
 
