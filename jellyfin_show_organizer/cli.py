@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tomllib
 from collections import Counter
@@ -558,6 +559,18 @@ def _run_plan(args: argparse.Namespace) -> int:
         "preflight_ready": outcome.preflight.ready,
         "preflight_findings": len(outcome.preflight.findings),
         "provider_failure": outcome.provider_failure,
+        "provider": {
+            "strategy": config.provider_strategy,
+            "tmdb_token_configured": bool(
+                os.environ.get("JMO_TMDB_ACCESS_TOKEN", "").strip()
+            ),
+            "providers": (
+                ["tvmaze", "tmdb"]
+                if config.provider_strategy == "auto"
+                and os.environ.get("JMO_TMDB_ACCESS_TOKEN", "").strip()
+                else ["tvmaze"]
+            ),
+        },
         "exit_code": exit_code,
     }
     if bool(args.json_output):
@@ -569,6 +582,15 @@ def _run_plan(args: argparse.Namespace) -> int:
             f"records={len(outcome.plan.records)} "
             f"findings={len(outcome.preflight.findings)}"
         )
+        if config.provider_strategy == "auto":
+            if os.environ.get("JMO_TMDB_ACCESS_TOKEN", "").strip():
+                print("Provider strategy: auto (TVMaze + TMDb available)")
+            else:
+                print(
+                    "Provider strategy: auto (TVMaze only; TMDb token not configured)"
+                )
+        else:
+            print(f"Provider strategy: {config.provider_strategy} (TVMaze only)")
         print(f"Audit bundle: {config.output_dir.resolve(strict=False)}")
         if outcome.preflight.ready:
             print(
