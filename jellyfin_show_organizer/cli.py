@@ -560,16 +560,12 @@ def _run_plan(args: argparse.Namespace) -> int:
         "preflight_findings": len(outcome.preflight.findings),
         "provider_failure": outcome.provider_failure,
         "provider": {
-            "strategy": config.provider_strategy,
+            "strategy": outcome.provider_strategy,
             "tmdb_token_configured": bool(
                 os.environ.get("JMO_TMDB_ACCESS_TOKEN", "").strip()
             ),
-            "providers": (
-                ["tvmaze", "tmdb"]
-                if config.provider_strategy == "auto"
-                and os.environ.get("JMO_TMDB_ACCESS_TOKEN", "").strip()
-                else ["tvmaze"]
-            ),
+            "providers": list(outcome.provider_names),
+            "tmdb_available": outcome.tmdb_available,
         },
         "exit_code": exit_code,
     }
@@ -582,8 +578,8 @@ def _run_plan(args: argparse.Namespace) -> int:
             f"records={len(outcome.plan.records)} "
             f"findings={len(outcome.preflight.findings)}"
         )
-        if config.provider_strategy == "auto":
-            if os.environ.get("JMO_TMDB_ACCESS_TOKEN", "").strip():
+        if outcome.provider_strategy == "auto":
+            if outcome.tmdb_available:
                 print("Provider strategy: auto (TVMaze + TMDb available)")
             else:
                 print(
