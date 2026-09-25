@@ -190,6 +190,37 @@ unexpected = true
         _planning_config(args)
 
 
+def test_plan_cli_preserves_auto_provider_strategy_into_executor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    captured: list[object] = []
+
+    def fake_execute(config: object, **_kwargs: object) -> object:
+        captured.append(config)
+        raise cli.PlanningConfigurationError("stop after capturing config")
+
+    monkeypatch.setattr(cli, "execute_plan", fake_execute)
+    code = main(
+        [
+            "plan",
+            str(tmp_path / "Shows"),
+            "--destination-root",
+            str(tmp_path / "Organized"),
+            "--output-dir",
+            str(tmp_path / "audit"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--auto",
+            "--json",
+        ]
+    )
+
+    assert code == cli.PLAN_CONFIGURATION_EXIT
+    assert len(captured) == 1
+    config = cast(cli.PlanningConfig, captured[0])
+    assert config.provider_strategy == "auto"
+
+
 def test_run_loads_saved_source_and_uses_fresh_output_dir(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
