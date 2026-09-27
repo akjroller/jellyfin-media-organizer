@@ -183,6 +183,33 @@ def test_rendered_provenance_is_canonical_path_free_and_hash_linked() -> None:
     assert "overrides_path" not in text
 
 
+def test_provenance_records_the_constructed_auto_provider_set() -> None:
+    provenance = build_run_provenance(
+        _plan(),
+        source_revision=SourceRevision(state="git", commit=_COMMIT, dirty=False),
+        provider_mode="online",
+        provider_failure=False,
+        max_path_length=240,
+        max_component_length=180,
+        overrides_configured=False,
+        preflight_ready=False,
+        preflight_finding_count=1,
+        provider_strategy="auto",
+        provider_names=("tvmaze", "tmdb"),
+    )
+
+    assert provenance.to_dict()["provider"] == {
+        "name": "tvmaze",
+        "strategy": "auto",
+        "providers": ["tvmaze", "tmdb"],
+        "mode": "online",
+        "failure": False,
+        "cache_snapshot_count": 2,
+        "cache_states": {"ok": 1, "stale": 1},
+        "cache_kinds": {"episodes": 1, "search": 1},
+    }
+
+
 def test_run_provenance_does_not_change_plan_or_decision_hashes() -> None:
     plan = _plan()
     plan_hash = stable_plan_hash(plan)
