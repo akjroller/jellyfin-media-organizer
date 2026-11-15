@@ -4,6 +4,11 @@ All notable public changes will be documented in this file. The project follows 
 
 ## Unreleased
 
+- `jmo apply --resume` no longer gets stuck after an automatic group rollback
+  whose completion could not be journaled (for example because the journal
+  device failed after the media was already restored). Resume now recognizes
+  a member that is verifiably back at its source, records the recovered
+  rollback, and moves it again; any other state still fails closed.
 - `jmo apply` (including `--check-only` and `--resume`), `jmo rollback`, and
   the quarantine commands now prove the destination filesystem supports
   atomic no-overwrite rename before moving anything, using a temporary probe
