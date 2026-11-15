@@ -89,6 +89,10 @@ Do not bypass the failure or move files manually. A changed plan/review hash, di
 
 Regenerate and review the plan when its inputs changed. Use `jmo apply --check-only` again with the final clean revision and exact artifacts. It must succeed immediately before obtaining a new confirmation token.
 
+### "this filesystem does not support atomic no-overwrite rename"
+
+Apply only moves files with a rename that refuses to replace an existing file. Many network mounts (NFS, SMB/CIFS, and FUSE filesystems such as rclone or sshfs) do not support that on Linux, so JMO stops before moving anything. Do not work around it by copying files manually. Run JMO on the machine that hosts the library, where the files are on a local filesystem, or move the library to a filesystem that supports it. If the error mentions a writable destination instead, check permissions on the destination root. A leftover `.jmo-rename-probe-*` directory can only remain after a crash; it contains nothing but probe files and is safe to delete.
+
 ## Apply was interrupted
 
 Keep the journal and adjacent lock file. The lock file is persistent, but its operating-system lock is released when the process exits. Run the same exact command with the same artifacts, approval values, roots, journal, and confirmation token, adding `--resume`.

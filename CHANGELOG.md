@@ -4,6 +4,12 @@ All notable public changes will be documented in this file. The project follows 
 
 ## Unreleased
 
+- `jmo apply` (including `--check-only` and `--resume`), `jmo rollback`, and
+  the quarantine commands now prove the destination filesystem supports
+  atomic no-overwrite rename before moving anything, using a temporary probe
+  directory they remove again. NFS, SMB, and FUSE mounts that reject
+  `RENAME_NOREPLACE` now fail early with a clear explanation instead of a raw
+  "Invalid argument" partway through an apply.
 - Video containers JMO does not organize yet (`.m4v`, `.ts`, `.m2ts`,
   `.webm`, `.mov`, `.wmv`, and others) are now reported instead of being
   dropped silently. They and excluded samples are listed in a new

@@ -6,7 +6,10 @@ import pytest
 
 from jellyfin_show_organizer import quarantine_execution
 from jellyfin_show_organizer.apply_contract import ApplyContract
-from jellyfin_show_organizer.apply_execution import PreparedApply
+from jellyfin_show_organizer.apply_execution import (
+    ApplyExecutionError,
+    PreparedApply,
+)
 from jellyfin_show_organizer.models import SourceFingerprint
 from jellyfin_show_organizer.quarantine_contract import (
     QuarantineGroup,
@@ -345,3 +348,35 @@ def test_restore_crash_after_atomic_move_is_adopted_on_resume(
     )
     assert resumed.groups_completed == 3
     assert resumed.members_recovered == 1
+
+
+def test_quarantine_probes_the_quarantine_root_before_any_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, organized, quarantine, prepared = _fixture(tmp_path)
+    probed: list[Path] = []
+
+    def failing_probe(directory: Path) -> None:
+        probed.append(directory)
+        raise ApplyExecutionError("synthetic unsupported filesystem")
+
+    monkeypatch.setattr(quarantine_execution, "probe_no_replace_rename", failing_probe)
+
+    with pytest.raises(ApplyExecutionError, match="synthetic unsupported"):
+        execute_quarantine(
+            prepared, source, organized, quarantine, journal_path=None, check_only=True
+        )
+    with pytest.raises(
+        (ApplyExecutionError, QuarantineExecutionError), match="synthetic unsupported"
+    ):
+        execute_quarantine(
+            prepared,
+            source,
+            organized,
+            quarantine,
+            journal_path=tmp_path / "quarantine.jsonl",
+        )
+
+    assert probed == [quarantine.resolve(), quarantine.resolve()]
+    assert not (tmp_path / "quarantine.jsonl").exists()
+    assert list(quarantine.iterdir()) == []
