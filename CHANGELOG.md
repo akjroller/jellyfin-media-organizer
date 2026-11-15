@@ -4,6 +4,11 @@ All notable public changes will be documented in this file. The project follows 
 
 ## Unreleased
 
+- Fixed episode titles that begin with a number (for example
+  `S01E04 5 Years Gone`) and space-separated resolutions (`S01E01 720p`)
+  being parsed as an extra episode, which could plan a single episode as a
+  two-part `S01E04-E05` match. Zero-padded and tightly attached
+  continuations (`S01E01 & 02`, `S01E09-10`) remain multi-episode.
 - Improved conservative show-title extraction for release trees whose folder
   names contain subtitle text, while preserving conflicting title evidence as
   unresolved instead of guessing.

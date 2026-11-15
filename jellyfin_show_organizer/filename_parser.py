@@ -12,18 +12,36 @@ _LEADING_TAGS = re.compile(r"^(?:\[[^\]]+\][ ._-]*)+")
 _TRAILING_YEAR = re.compile(r"(?:^|[\s(])(?P<year>(?:18|19|20|21)\d{2})\)?$")
 _TVMAZE_ID = re.compile(r"(?i)(?:\[?tvmaze(?:[ ._-]?id)?[ ._-]?)(?P<id>\d+)\]?")
 _SEASON_NUMBER = r"(?:\d{1,2}|(?:18|19|20|21)\d{2})"
+# A bare continuation number (no ``E`` marker) directly attached to its
+# separator (``E01-02``, ``E01&02``) is unambiguous.  It must never run into
+# letters (``720p``, ``2nd``).
+_TIGHT_BARE_EPISODE = r"\d{1,3}(?![\dA-Za-z])"
+# Once whitespace separates the continuation (``S01E04 - 5 Years Gone``,
+# ``S01E07 + 8 Mile``), an unpadded number followed by a word is far more
+# likely to start the episode title than to name a second episode.  Zero-padded
+# numbers (``S01E01 & 02 Title``) keep their episode meaning; an unpadded number
+# is accepted only when no word follows it.
+_SPACED_BARE_EPISODE = (
+    r"(?:0\d{1,2}(?![\dA-Za-z])|\d{1,3}(?![\dA-Za-z])(?![ ._]*[^\W\d_]))"
+)
 _SXE = re.compile(
     rf"(?i)S(?P<season>{_SEASON_NUMBER})[ ._-]*E(?P<episode>\d{{1,3}})(?!\d)"
     r"(?P<segment>[A-Za-z](?!\d))?"
     r"(?P<tail>(?:(?:[ ._-]*E\d{1,3}(?!\d))|"
     r"(?:[ &+,/-]+S\d{1,4}[ ._-]*E\d{1,3}(?!\d))|"
-    r"(?:[ &+,]+E?\d{1,3}(?!\d))|"
-    r"(?:[ ._-]*-[ ._-]*E?\d{1,3}(?!\d)))*)"
+    r"(?:\s*[&+,][ &+,]*E\d{1,3}(?!\d))|"
+    rf"(?:[&+,]+{_TIGHT_BARE_EPISODE})|"
+    rf"(?:\s*[&+,][ &+,]*{_SPACED_BARE_EPISODE})|"
+    r"(?:[ ._-]*-[ ._-]*E\d{1,3}(?!\d))|"
+    rf"(?:[._]*-[._]*{_TIGHT_BARE_EPISODE})|"
+    rf"(?:[ ._-]*-[ ._-]*{_SPACED_BARE_EPISODE}))*)"
 )
 _X_NOTATION = re.compile(r"(?i)(?<!\d)(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?!\d)")
 _X_NOTATION_CHAIN = re.compile(
     r"(?i)(?<!\d)(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?!\d)"
-    r"(?P<tail>(?:\s*(?:&|and|,)\s*(?:(?P=season)x)?\d{1,3})*)"
+    r"(?P<tail>(?:(?:\s*(?:&|and|,)\s*(?P=season)x\d{1,3}(?!\d))|"
+    rf"(?:[&,]{_TIGHT_BARE_EPISODE})|"
+    rf"(?:\s*(?:&|and|,)\s*{_SPACED_BARE_EPISODE}))*)"
 )
 _EPISODE_WORD = re.compile(
     r"(?i)(?<![A-Za-z0-9])episode[ ._-]*(?P<episode>\d{1,3})"
@@ -226,6 +244,9 @@ def _title_hint(stem: str, start: int) -> str | None:
     value = stem[start:]
     value = _TVMAZE_ID.sub(" ", value)
     value = _normalize_text(value)
+    # A conjunction left over from a rejected episode continuation
+    # (``S01E07 + 8 Mile``) is separator noise, not part of the title.
+    value = value.lstrip(" &+,-")
     if not value:
         return None
 

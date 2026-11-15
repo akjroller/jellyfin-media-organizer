@@ -363,3 +363,51 @@ def test_parser_is_deterministic_and_does_not_require_filesystem_state():
     path = "synthetic/River Patrol/River.Patrol.S01E03-E04.Double.Current.mkv"
 
     assert parse_video_path(path) == parse_video_path(path)
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "episodes", "title_hint"),
+    [
+        ("Example/Example S01E04 5 Years Gone.mkv", (4,), "5 Years Gone"),
+        ("Example/Example - S03E01 - 2 Days Later.mkv", (1,), "2 Days Later"),
+        ("Example/Example S02E05 10 Things.mkv", (5,), "10 Things"),
+        ("Example/Example S01E07 + 8 Mile.mkv", (7,), "8 Mile"),
+        ("Example/Example S01E01, 3 Little Pigs.mkv", (1,), "3 Little Pigs"),
+        ("Example/Example S01E01 & 24 Hours.mkv", (1,), "24 Hours"),
+        ("Example/Example 2x05 and 6 More.mkv", (5,), "and 6 More"),
+        ("Example/Example S01E01 720p.mkv", (1,), None),
+        ("Example/Example S01E01 480p WEB-DL.mkv", (1,), None),
+    ],
+)
+def test_numeric_title_or_resolution_after_coordinate_is_not_a_second_episode(
+    relative_path: str, episodes: tuple[int, ...], title_hint: str | None
+) -> None:
+    result = parse_video_path(relative_path)
+
+    assert result.episodes == episodes
+    assert result.title_hint == title_hint
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "episodes", "title_hint"),
+    [
+        ("Example/Example S01E01 + 2.mkv", (1, 2), None),
+        ("Example/Example S01E01 - 02.mkv", (1, 2), None),
+        ("Example/Example S01E01-03.mkv", (1, 2, 3), None),
+        ("Example/Example.S01E01-E03.mkv", (1, 2, 3), None),
+        ("Example/Example S01E09-10 Title.mkv", (9, 10), "Title"),
+        ("Example/Example.S01E01-02.Title.mkv", (1, 2), "Title"),
+        ("Example/Example S01E01 & 02 Title.mkv", (1, 2), "Title"),
+        ("Example/Example S01E09 & 10 - Title.mkv", (9, 10), "Title"),
+        ("Example/Example S01E01 - 02 - Title.mkv", (1, 2), "Title"),
+        ("Example/Example 1x01 & 1x02.mkv", (1, 2), None),
+        ("Example/Example 1x01&02 Title.mkv", (1, 2), "Title"),
+    ],
+)
+def test_explicit_multi_episode_continuations_are_preserved(
+    relative_path: str, episodes: tuple[int, ...], title_hint: str | None
+) -> None:
+    result = parse_video_path(relative_path)
+
+    assert result.episodes == episodes
+    assert result.title_hint == title_hint
