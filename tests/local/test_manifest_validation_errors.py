@@ -209,13 +209,6 @@ V3_CASES: dict[str, Mutation] = {
     "overrides version wrong type": _set("overrides_version", "1"),
     "records not an array": _set("records", {}),
     "companions not an array": _set("companions", {}),
-}
-
-
-# Forbidden by the published JSON schema (plan-schema-v2.json $defs, reused by
-# v3) but not yet enforced by validate_manifest. Apply never reads these
-# fields. Strict xfail: each case starts failing loudly once enforced.
-V3_KNOWN_VALIDATOR_GAPS: dict[str, Mutation] = {
     "show has extra field": _add_field("records.0.show"),
     "show id not an integer": _set("records.0.show.tvmaze_id", "4242"),
     "show numbering mode unknown": _set("records.0.show.numbering_mode", "lunar"),
@@ -227,6 +220,21 @@ V3_KNOWN_VALIDATOR_GAPS: dict[str, Mutation] = {
     "evidence candidate has extra field": _add_field("records.0.evidence.candidates.0"),
     "companion extension missing dot": _set("companions.0.extension", "srt"),
     "provenance config id malformed": _set("provenance.config_snapshot_id", "x"),
+    "show id zero": _set("records.0.show.tvmaze_id", 0),
+    "show year too early": _set("records.0.show.year", 1700),
+    "parse special kind unknown": _set("records.0.parse.special_kind", "movie"),
+    "parse episode date malformed": _set("records.0.parse.episode_date", "2024/1/1"),
+    "parse episode negative": _set("records.0.parse.episodes", [-1]),
+    "evidence method empty": _set("records.0.evidence.method", ""),
+    "evidence candidate score above one": _set(
+        "records.0.evidence.candidates.0.score", 1.5
+    ),
+    "evidence candidate id not an integer": _set(
+        "records.0.evidence.candidates.0.tvmaze_id", "4242"
+    ),
+    "provenance snapshot id malformed": _set(
+        "provenance.cache_snapshots.0.snapshot_id", "not-a-digest"
+    ),
 }
 
 
@@ -245,15 +253,6 @@ def test_corrupted_v2_manifest_is_rejected(v2_manifest: Manifest, case: str) -> 
 @pytest.mark.parametrize("case", sorted(V3_CASES))
 def test_corrupted_v3_manifest_is_rejected(v3_manifest: Manifest, case: str) -> None:
     _rejected(v3_manifest, V3_CASES[case])
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="validate_manifest does not yet enforce these plan-schema $defs rules",
-)
-@pytest.mark.parametrize("case", sorted(V3_KNOWN_VALIDATOR_GAPS))
-def test_known_v3_validator_gaps(v3_manifest: Manifest, case: str) -> None:
-    _rejected(v3_manifest, V3_KNOWN_VALIDATOR_GAPS[case])
 
 
 def test_apply_group_derivation_rejects_corrupted_manifests(

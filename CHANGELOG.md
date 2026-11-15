@@ -4,6 +4,11 @@ All notable public changes will be documented in this file. The project follows 
 
 ## Unreleased
 
+- Plan validation now enforces the published plan schema inside each
+  record's `show`, `parse`, and `evidence` objects, companion extensions,
+  and provenance digests. Plans written by JMO already conform; only
+  hand-edited or corrupted plan files are newly rejected, before review or
+  apply can use them.
 - `jmo apply --resume` no longer gets stuck after an automatic group rollback
   whose completion could not be journaled (for example because the journal
   device failed after the media was already restored). Resume now recognizes
