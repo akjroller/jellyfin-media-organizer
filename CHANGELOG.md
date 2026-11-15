@@ -4,6 +4,11 @@ All notable public changes will be documented in this file. The project follows 
 
 ## Unreleased
 
+- Added `jmo prune-empty-dirs` to remove the source folders a completed apply
+  left empty, as a separate step with `--check-only`, an exact confirmation
+  token, and its own journal. Only completely empty folders that held moved
+  files (and their parents below the Shows root) are removed, deepest first.
+  `jmo restore-pruned-dirs` recreates them so `jmo rollback` keeps working.
 - Jellyfin episode files now move with their episode: `<video filename>.nfo`
   and `<video filename>-thumb.<image>` are renamed to the new episode filename
   in the same operation group, so apply and rollback treat them like

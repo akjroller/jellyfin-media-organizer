@@ -15,6 +15,7 @@ COMMAND_ADAPTERS = {
     "entrypoint",
     "apply_scope_cli",
     "quarantine_cli",
+    "prune_cli",
     "__main__",
 }
 

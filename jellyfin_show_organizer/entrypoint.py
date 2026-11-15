@@ -12,6 +12,7 @@ from .apply_execution import ApplyExecutionError, prepare_apply
 from .apply_scope import ApplyScopeError
 from .apply_scope_cli import bind_optional_scope, register_apply_scope_commands
 from .apply_validation import ApplyFilesystemError, validate_apply_roots
+from .prune_cli import register_prune_commands
 from .quarantine_cli import register_quarantine_commands
 from .rollback_execution import (
     RollbackExecutionError,
@@ -86,6 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     rollback_parser.add_argument("--json", action="store_true", dest="json_output")
     rollback_parser.set_defaults(handler=_run_rollback)
     register_quarantine_commands(subparsers)
+    register_prune_commands(subparsers)
     return parser
 
 

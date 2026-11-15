@@ -122,7 +122,7 @@ If `--confirm-apply` is omitted, a real interactive terminal must type the compl
 - No-op detection uses exact relative names only when the validated roots are the same. Separate-root imports retain unchanged relative names as moving operations. Case-only changes are not silently skipped; an existing destination on an insensitive filesystem remains a blocker.
 - The move primitive is an atomic no-overwrite rename: native non-replacing rename on Windows, `renameat2(RENAME_NOREPLACE)` on Linux, or `renamex_np(RENAME_EXCL)` on macOS. Unsupported hosts fail closed.
 - Before any move, `jmo apply` (including `--check-only` and `--resume`), `jmo rollback`, `jmo quarantine`, and `jmo quarantine-restore` probe that primitive inside a uniquely named `.jmo-rename-probe-*` directory under the destination (or quarantine) root: one rename to a free name must succeed, and a rename onto an existing name must be refused with both files intact. The probe touches only its own scratch entries and removes them whether it passes or fails. Many NFS, SMB/CIFS, and FUSE network mounts reject `RENAME_NOREPLACE`; those now fail before any journal entry or move with a message naming the filesystem limitation, and the same message is reported if a rename is rejected mid-run (after the group's automatic rollback).
-- Apply does not perform cross-filesystem copy-and-delete, overwrite, source-directory cleanup, duplicate deletion, or quarantine. Separate `quarantine-plan`, `quarantine`, and `quarantine-restore` commands implement explicitly approved reversible duplicate handling; see [First run](first-run.md#recovery-and-support-boundaries).
+- Apply does not perform cross-filesystem copy-and-delete, overwrite, source-directory cleanup, duplicate deletion, or quarantine. Empty source folders can be removed afterwards with the separate `prune-empty-dirs` command (see below). Separate `quarantine-plan`, `quarantine`, and `quarantine-restore` commands implement explicitly approved reversible duplicate handling; see [First run](first-run.md#recovery-and-support-boundaries).
 
 ## Journal and group recovery
 
@@ -139,3 +139,17 @@ If automatic rollback cannot prove the source/destination state, JMO refuses to 
 ## Final verification
 
 Before reporting success, apply verifies every approved moving member at its destination with its source absent. Keep the journal with the approved plan, preflight, provenance, review session, and override artifacts. Do not publish those private artifacts.
+
+## Empty source folder cleanup
+
+After a completed apply, the source folders that held the moved files are often left empty. `jmo prune-empty-dirs` removes them, as a separate, explicitly confirmed step:
+
+```bash
+jmo prune-empty-dirs --source-root ExampleMedia/Shows --apply-journal LocalState/apply.jsonl --check-only
+jmo prune-empty-dirs --source-root ExampleMedia/Shows --apply-journal LocalState/apply.jsonl --journal LocalState/prune.jsonl --confirm-prune '<exact-token-from-check-only>'
+```
+
+- Only folders that held files moved by that one completed apply journal, and their parents, are candidates. The Shows root itself is never removed.
+- A folder is removed only when it is completely empty, deepest first, with `rmdir`, which the operating system refuses for any folder that is not empty. A leftover file of any kind, including hidden ones such as `Thumbs.db` or `.DS_Store`, keeps the folder and its parents.
+- `--check-only` lists the exact folders and prints a token bound to that list, the source root, and the apply journal. A real run requires that token and a new journal outside the source root, and refuses if anything changed since the check.
+- `jmo rollback` needs the original source folders. If you pruned and then want to roll back, run `jmo restore-pruned-dirs --source-root ExampleMedia/Shows --prune-journal LocalState/prune.jsonl` first; it recreates exactly the folders the prune removed and is safe to repeat.
