@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__
+from .inventory import VIDEO_EXTENSIONS
 from .planner import PlanningConfig
 from .privacy import path_free_text
 from .provider_aliases import TvmazeAliasProviderAdapter
@@ -64,9 +65,7 @@ def _discover_library_candidates() -> list[Path]:
                 continue
             try:
                 has_video = any(
-                    item.is_file()
-                    and item.suffix.casefold()
-                    in {".mkv", ".mp4", ".avi", ".m4v", ".ts", ".mov"}
+                    item.is_file() and item.suffix.casefold() in VIDEO_EXTENSIONS
                     for item in child.rglob("*")
                 )
             except OSError:
@@ -297,9 +296,7 @@ def run_wizard(*, input_fn=input, output=None) -> int:
             return 0
         try:
             has_media = any(
-                item.is_file()
-                and item.suffix.casefold()
-                in {".mkv", ".mp4", ".avi", ".m4v", ".ts", ".mov"}
+                item.is_file() and item.suffix.casefold() in VIDEO_EXTENSIONS
                 for item in source.rglob("*")
             )
         except OSError:

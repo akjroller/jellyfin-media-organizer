@@ -77,9 +77,9 @@ JMO is intentionally conservative: planning and review remain non-mutating, whil
 ## Current capabilities
 
 - deterministic parsing of common season/episode, absolute, special/OVA-OAD, and date-based filename patterns;
-- read-only inventory scanning for `.mkv`, `.mp4`, and `.avi` files, with other
-  video containers (such as `.m4v`, `.ts`, `.webm`) and samples reported in
-  `skipped.csv` instead of being silently dropped;
+- read-only inventory scanning for `.mkv`, `.mp4`, `.avi`, `.m4v`, `.mov`, `.webm`, `.wmv`, `.ts`, `.m2ts`, `.mts`, `.mpg`, and `.mpeg` files, with disc images, Blu-ray/DVD
+  folder structures, rarer containers, and samples reported in `skipped.csv`
+  instead of being silently dropped;
 - explicit handling of samples, unreadable entries, blocked links, extras, and ambiguous evidence;
 - deterministic inventory reconciliation;
 - versioned organizer plan models and immutable JSON schema contracts;

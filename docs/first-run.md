@@ -56,7 +56,7 @@ Every audit bundle includes `remaining.csv`. It is the authoritative list of ent
 - held videos and ignored companions are intentional leftovers;
 - suspicious or unresolved videos and unresolved companions are blocking leftovers.
 
-`skipped.csv` lists video files the inventory found but did not plan: samples, and video containers JMO does not organize yet (such as `.m4v`, `.ts`, or `.webm`). They are never moved. `summary.txt` counts them as `skipped_samples` and `skipped_unsupported_videos`, and `jmo plan` prints a warning when unsupported videos were skipped.
+`skipped.csv` lists video files the inventory found but did not plan: samples, disc images and files inside Blu-ray/DVD folder structures (`BDMV`, `VIDEO_TS`), and rarer containers JMO does not organize yet (such as `.flv` or `.rmvb`). They are never moved. `summary.txt` counts them as `skipped_samples` and `skipped_unsupported_videos`, and `jmo plan` prints a warning when unsupported videos were skipped.
 
 `summary.txt` reports `readiness_state=not-evaluated|apply-ready|blocked`, `apply_safe`, `library_fully_organized`, and remaining totals. `apply_safe=true` means the approved movement subset may cross the apply boundary. It does **not** mean the source tree becomes empty. `library_fully_organized=true` is only reported when no planned leftovers remain at all.
 

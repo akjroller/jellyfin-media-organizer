@@ -4,6 +4,12 @@ All notable public changes will be documented in this file. The project follows 
 
 ## Unreleased
 
+- JMO now organizes `.m4v`, `.mov`, `.webm`, `.wmv`, `.ts`, `.m2ts`, `.mts`,
+  `.mpg`, and `.mpeg` files in addition to `.mkv`, `.mp4`, and `.avi`, keeping
+  each file's extension. The same episode in two containers goes to duplicate
+  review as before. Disc images (`.iso`), DVD streams (`.vob`), anything inside
+  a `BDMV`, `VIDEO_TS`, or `HVDVD_TS` folder, and rarer containers stay in
+  `skipped.csv` and are never moved.
 - Plan validation now enforces the published plan schema inside each
   record's `show`, `parse`, and `evidence` objects, companion extensions,
   and provenance digests. Plans written by JMO already conform; only
