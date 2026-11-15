@@ -612,7 +612,7 @@ def _run_plan(args: argparse.Namespace) -> int:
                 )
             )
             print(
-                f"Skipped {unsupported_videos} video file(s) in formats JMO does "
+                f"Skipped {unsupported_videos} video file(s) that JMO does "
                 f"not organize yet ({extensions}); they are listed in skipped.csv "
                 "and will not be moved."
             )

@@ -65,8 +65,8 @@ def _library(tmp_path: Path, *, with_skipped: bool) -> tuple[Path, Path]:
     destination.mkdir(parents=True)
     _touch(shows / SERIES / f"{SERIES} S01E01.mkv")
     if with_skipped:
-        _touch(shows / SERIES / f"{SERIES} S01E02.m4v")
-        _touch(shows / SERIES / f"{SERIES} S01E03.TS")
+        _touch(shows / SERIES / f"{SERIES} S01E02.flv")
+        _touch(shows / SERIES / f"{SERIES} S01E03.VOB")
         _touch(shows / SERIES / "Sample" / f"{SERIES} S01E01.mkv")
     return shows, destination
 
@@ -96,17 +96,17 @@ def test_scan_reports_unsupported_video_containers(tmp_path: Path) -> None:
     records = scan_videos(authorize_shows_root(shows))
     by_path = {record.relative_path: record for record in records}
 
-    m4v = by_path[f"{SERIES}/{SERIES} S01E02.m4v"]
-    assert m4v.status is InventoryStatus.UNSUPPORTED_VIDEO
-    assert m4v.reason == "unsupported-extension:.m4v"
-    assert m4v.fingerprint is None
-    ts = by_path[f"{SERIES}/{SERIES} S01E03.TS"]
-    assert ts.status is InventoryStatus.UNSUPPORTED_VIDEO
-    assert ts.extension == ".ts"
+    flv = by_path[f"{SERIES}/{SERIES} S01E02.flv"]
+    assert flv.status is InventoryStatus.UNSUPPORTED_VIDEO
+    assert flv.reason == "unsupported-extension:.flv"
+    assert flv.fingerprint is None
+    vob = by_path[f"{SERIES}/{SERIES} S01E03.VOB"]
+    assert vob.status is InventoryStatus.UNSUPPORTED_VIDEO
+    assert vob.extension == ".vob"
     assert f"{SERIES}/poster.jpg" not in by_path
     assert f"{SERIES}/notes.txt" not in by_path
     with pytest.raises(ValueError):
-        m4v.to_source_file()
+        flv.to_source_file()
 
     skipped = skipped_inventory_records(records)
     assert {record.status for record in skipped} == {
@@ -116,8 +116,8 @@ def test_scan_reports_unsupported_video_containers(tmp_path: Path) -> None:
     assert len(skipped) == 3
 
     reconciled = {item.relative_path: item for item in reconcile_inventory(records)}
-    assert reconciled[m4v.relative_path].status is ReconciliationStatus.UNSUPPORTED
-    assert reconciled[m4v.relative_path].reason == "unsupported-extension:.m4v"
+    assert reconciled[flv.relative_path].status is ReconciliationStatus.UNSUPPORTED
+    assert reconciled[flv.relative_path].reason == "unsupported-extension:.flv"
 
 
 def test_skipped_files_are_reported_and_do_not_block_the_plan(tmp_path: Path) -> None:
@@ -149,8 +149,8 @@ def test_skipped_files_are_reported_and_do_not_block_the_plan(tmp_path: Path) ->
         if companion.status is CompanionStatus.IGNORED
     }
     assert set(ignored) == {
-        f"{SERIES}/{SERIES} S01E02.m4v",
-        f"{SERIES}/{SERIES} S01E03.TS",
+        f"{SERIES}/{SERIES} S01E02.flv",
+        f"{SERIES}/{SERIES} S01E03.VOB",
     }
     assert {companion.reason for companion in ignored.values()} == {
         "unsupported-video-container"
@@ -167,8 +167,8 @@ def test_skipped_files_are_reported_and_do_not_block_the_plan(tmp_path: Path) ->
         )
     )
     assert [(row["source"], row["status"]) for row in rows] == [
-        (f"{SERIES}/{SERIES} S01E02.m4v", "unsupported-video"),
-        (f"{SERIES}/{SERIES} S01E03.TS", "unsupported-video"),
+        (f"{SERIES}/{SERIES} S01E02.flv", "unsupported-video"),
+        (f"{SERIES}/{SERIES} S01E03.VOB", "unsupported-video"),
         (f"{SERIES}/Sample/{SERIES} S01E01.mkv", "excluded-sample"),
     ]
     clean_rows = (tmp_path / "clean" / "audit" / "skipped.csv").read_text(
@@ -229,7 +229,7 @@ def test_cli_warns_about_unsupported_videos(
 
     out = capsys.readouterr().out
     assert "Skipped 2 video file(s)" in out
-    assert "(.m4v, .ts)" in out
+    assert "(.flv, .vob)" in out
     assert "skipped.csv" in out
 
 

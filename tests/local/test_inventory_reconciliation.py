@@ -46,7 +46,7 @@ def test_reconciliation_assigns_one_explained_terminal_status_per_path():
         "Series/Linked.mp4",
         "Series/Broken.avi",
         "Series/Missing.mkv",
-        "Series/Legacy.wmv",
+        "Series/Legacy.flv",
     )
 
     reconciled = reconcile_inventory(inventory, expected)
@@ -58,7 +58,7 @@ def test_reconciliation_assigns_one_explained_terminal_status_per_path():
     assert by_path["Series/Linked.mp4"].status is ReconciliationStatus.UNREADABLE
     assert by_path["Series/Broken.avi"].status is ReconciliationStatus.UNREADABLE
     assert by_path["Series/Missing.mkv"].status is ReconciliationStatus.MISSING
-    assert by_path["Series/Legacy.wmv"].status is ReconciliationStatus.UNSUPPORTED
+    assert by_path["Series/Legacy.flv"].status is ReconciliationStatus.UNSUPPORTED
     assert all(record.reason for record in reconciled)
     assert len(reconciled) == len(
         {record.relative_path.casefold() for record in reconciled}

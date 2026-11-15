@@ -9,8 +9,27 @@ from pathlib import Path, PurePosixPath
 from .models import SourceFile, SourceFingerprint
 from .paths import is_link
 
-VIDEO_EXTENSIONS = frozenset({".avi", ".mkv", ".mp4"})
-# Video containers Jellyfin can play that JMO does not plan yet.  They are
+# Single-file video containers JMO plans.  The container never affects
+# matching: duplicates are grouped by provider episode identity, so an .mkv and
+# an .m4v of the same episode go through the normal reviewed-duplicate path.
+VIDEO_EXTENSIONS = frozenset(
+    {
+        ".avi",
+        ".m2ts",
+        ".m4v",
+        ".mkv",
+        ".mov",
+        ".mp4",
+        ".mpeg",
+        ".mpg",
+        ".mts",
+        ".ts",
+        ".webm",
+        ".wmv",
+    }
+)
+# Video files Jellyfin can play that JMO does not plan yet: disc images and
+# DVD streams (one file is not one episode), and rarer containers.  They are
 # reported as skipped instead of silently disappearing from the inventory.
 UNSUPPORTED_VIDEO_EXTENSIONS = frozenset(
     {
@@ -19,24 +38,18 @@ UNSUPPORTED_VIDEO_EXTENSIONS = frozenset(
         ".divx",
         ".flv",
         ".iso",
-        ".m2ts",
         ".m2v",
-        ".m4v",
-        ".mov",
-        ".mpeg",
-        ".mpg",
-        ".mts",
         ".ogm",
         ".ogv",
         ".rm",
         ".rmvb",
-        ".ts",
         ".vob",
-        ".webm",
-        ".wmv",
         ".wtv",
     }
 )
+# Blu-ray and DVD folder structures hold stream pieces, not episodes.  Any
+# video file below one of these folders is reported as skipped.
+DISC_STRUCTURE_DIRECTORY_NAMES = frozenset({"bdmv", "video_ts", "hvdvd_ts"})
 IGNORED_DIRECTORY_NAMES = frozenset(
     {
         "artwork",
@@ -106,6 +119,13 @@ def _is_sample(relative_path: str) -> bool:
     if any(part.casefold() in {"sample", "samples"} for part in path.parts[:-1]):
         return True
     return bool(_SAMPLE_TOKEN.search(path.stem))
+
+
+def _inside_disc_structure(root: Path, path: Path) -> bool:
+    relative_parents = path.relative_to(root).parts[:-1]
+    return any(
+        part.casefold() in DISC_STRUCTURE_DIRECTORY_NAMES for part in relative_parents
+    )
 
 
 def _fingerprint(entry: os.DirEntry[str]) -> SourceFingerprint:
@@ -188,15 +208,24 @@ def scan_videos(root: AuthorizedShowsRoot) -> tuple[InventoryRecord, ...]:
                     walk(path)
                 continue
 
-            if extension not in VIDEO_EXTENSIONS:
-                if extension in UNSUPPORTED_VIDEO_EXTENSIONS:
+            if extension not in VIDEO_EXTENSIONS or _inside_disc_structure(
+                root.path, path
+            ):
+                if (
+                    extension in VIDEO_EXTENSIONS
+                    or extension in UNSUPPORTED_VIDEO_EXTENSIONS
+                ):
                     records.append(
                         InventoryRecord(
                             relative_path=path.relative_to(root.path).as_posix(),
                             extension=extension,
                             status=InventoryStatus.UNSUPPORTED_VIDEO,
                             fingerprint=None,
-                            reason=f"unsupported-extension:{extension}",
+                            reason=(
+                                f"disc-structure:{extension}"
+                                if extension in VIDEO_EXTENSIONS
+                                else f"unsupported-extension:{extension}"
+                            ),
                         )
                     )
                 continue
