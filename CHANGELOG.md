@@ -4,6 +4,12 @@ All notable public changes will be documented in this file. The project follows 
 
 ## Unreleased
 
+- `jmo apply` (including `--check-only` and `--resume`), `jmo rollback`, and
+  the quarantine commands now prove the destination filesystem supports
+  atomic no-overwrite rename before moving anything, using a temporary probe
+  directory they remove again. NFS, SMB, and FUSE mounts that reject
+  `RENAME_NOREPLACE` now fail early with a clear explanation instead of a raw
+  "Invalid argument" partway through an apply.
 - Improved conservative show-title extraction for release trees whose folder
   names contain subtitle text, while preserving conflicting title evidence as
   unresolved instead of guessing.

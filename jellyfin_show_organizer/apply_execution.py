@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -10,7 +11,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO, cast
+from typing import BinaryIO, NoReturn, cast
+from uuid import uuid4
 
 from .apply_contract import (
     ApplyApproval,
@@ -54,6 +56,30 @@ _EVENTS = frozenset(
 
 class ApplyExecutionError(RuntimeError):
     """Raised when execution or recovery cannot continue safely."""
+
+
+class UnsupportedRenameError(ApplyExecutionError):
+    """The filesystem cannot perform an atomic rename that refuses to overwrite."""
+
+
+UNSUPPORTED_RENAME_MESSAGE = (
+    "this filesystem does not support atomic no-overwrite rename (common on "
+    "NFS, SMB/CIFS, and FUSE network mounts); JMO cannot move media here safely. "
+    "Run JMO on the machine that hosts the files, or use a local filesystem"
+)
+# errno values a filesystem or kernel uses to say "this rename flag is not
+# supported" rather than "this particular rename failed".
+_UNSUPPORTED_RENAME_ERRNOS = frozenset(
+    value
+    for value in (
+        errno.EINVAL,
+        errno.ENOSYS,
+        getattr(errno, "EOPNOTSUPP", None),
+        getattr(errno, "ENOTSUP", None),
+    )
+    if value is not None
+)
+_RENAME_PROBE_PREFIX = ".jmo-rename-probe-"
 
 
 @dataclass(frozen=True, slots=True)
@@ -519,7 +545,14 @@ def _verify_source(
 
 
 def _atomic_rename_no_replace(source: Path, destination: Path) -> None:
+    """Atomically rename ``source`` to ``destination``, never replacing a file.
+
+    Raises :class:`UnsupportedRenameError` when the host or filesystem cannot
+    provide that guarantee, and ``FileExistsError`` when ``destination`` exists.
+    """
+
     if os.name == "nt":
+        # MoveFileEx without MOVEFILE_REPLACE_EXISTING refuses to overwrite.
         os.rename(source, destination)
         return
 
@@ -544,12 +577,80 @@ def _atomic_rename_no_replace(source: Path, destination: Path) -> None:
         function.restype = ctypes.c_int
         result = function(source_bytes, destination_bytes, 0x00000004)
     else:
-        raise ApplyExecutionError(
-            "this host has no supported atomic no-overwrite rename primitive"
+        raise UnsupportedRenameError(
+            "this host has no supported atomic no-overwrite rename primitive; "
+            + UNSUPPORTED_RENAME_MESSAGE
         )
     if result != 0:
-        error = ctypes.get_errno()
-        raise OSError(error, os.strerror(error), str(destination))
+        _raise_rename_errno(ctypes.get_errno(), destination)
+
+
+def _raise_rename_errno(error: int, destination: Path) -> NoReturn:
+    """Translate a failed rename syscall, naming unsupported filesystems clearly."""
+
+    if error in _UNSUPPORTED_RENAME_ERRNOS:
+        raise UnsupportedRenameError(
+            f"{UNSUPPORTED_RENAME_MESSAGE} ({os.strerror(error)})"
+        )
+    raise OSError(error, os.strerror(error), str(destination))
+
+
+def probe_no_replace_rename(directory: Path) -> None:
+    """Prove that ``directory`` supports the rename every JMO mutation relies on.
+
+    Inside a fresh, uniquely named scratch directory the probe renames one file
+    to an unused name, then checks that renaming a second file onto that name is
+    refused and leaves both files intact.  Only the probe's own scratch entries
+    are created, and they are removed whether the probe passes or fails.  Media
+    and every other entry in ``directory`` are never touched.
+    """
+
+    scratch = directory / f"{_RENAME_PROBE_PREFIX}{uuid4().hex}"
+    try:
+        scratch.mkdir()
+    except OSError as exc:
+        raise ApplyExecutionError(
+            "could not create a temporary rename-probe directory in the "
+            f"destination root ({type(exc).__name__}); check that it is writable"
+        ) from exc
+    moved = scratch / "moved"
+    original = scratch / "original"
+    blocker = scratch / "blocker"
+    try:
+        original.write_bytes(b"original")
+        _atomic_rename_no_replace(original, moved)
+        if os.path.lexists(original) or moved.read_bytes() != b"original":
+            raise UnsupportedRenameError(
+                "rename probe did not move its file; " + UNSUPPORTED_RENAME_MESSAGE
+            )
+        blocker.write_bytes(b"blocker")
+        try:
+            _atomic_rename_no_replace(blocker, moved)
+        except FileExistsError:
+            pass
+        else:
+            raise UnsupportedRenameError(
+                "rename probe overwrote an existing file; " + UNSUPPORTED_RENAME_MESSAGE
+            )
+        if moved.read_bytes() != b"original" or blocker.read_bytes() != b"blocker":
+            raise UnsupportedRenameError(
+                "rename probe changed an existing file; " + UNSUPPORTED_RENAME_MESSAGE
+            )
+    except OSError as exc:
+        raise ApplyExecutionError(
+            f"rename probe failed in the destination root: {type(exc).__name__}: "
+            f"{exc.strerror or exc}"
+        ) from exc
+    finally:
+        for entry in (original, moved, blocker):
+            try:
+                entry.unlink(missing_ok=True)
+            except OSError:
+                pass
+        try:
+            scratch.rmdir()
+        except OSError:
+            pass
 
 
 def _ensure_parent_directories(
@@ -724,6 +825,7 @@ def execute_apply(
         if resume:
             raise ApplyExecutionError("--check-only cannot be combined with --resume")
         revalidate_apply_contract(contract, source_root, destination_root)
+        probe_no_replace_rename(destination_root)
         return ApplyExecutionResult(
             plan_sha256=contract.plan_sha256,
             review_session_sha256=prepared.review_session_sha256,
@@ -752,6 +854,7 @@ def execute_apply(
     moved_count = 0
     recovered_count = 0
     try:
+        probe_no_replace_rename(destination_root)
         journal = _Journal(journal_path, prepared, resume=resume)
         if not resume:
             revalidate_apply_contract(contract, source_root, destination_root)
@@ -877,8 +980,9 @@ def execute_apply(
                         "operation group failed and automatic rollback is incomplete; "
                         + recovery
                     ) from exc
+                reason = f": {exc}" if isinstance(exc, UnsupportedRenameError) else ""
                 raise ApplyExecutionError(
-                    "operation group failed and was rolled back safely"
+                    "operation group failed and was rolled back safely" + reason
                 ) from exc
 
         for group in contract.groups:
