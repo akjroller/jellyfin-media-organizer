@@ -15,7 +15,7 @@ The current project boundary is deliberately narrow:
 7. assign episode identities from one canonical cached catalog per source-show group;
 8. construct deterministic Jellyfin destination paths from canonical assignments and extra decisions;
 9. build versioned plan records;
-10. reconcile every expected source into an explained terminal status;
+10. account for every inventoried video with an explained outcome: a terminal plan status, or a `skipped.csv` entry;
 11. audit and explicitly review the completed plan;
 12. optionally execute only its exact approved moving groups through the journaled apply boundary.
 
@@ -33,7 +33,7 @@ The current project boundary is deliberately narrow:
 - `destination.py` — deterministic Jellyfin-relative destination construction and cross-platform sanitization/collision keys.
 - `duplicate_classifier.py` and `release_quality.py` — duplicate grouping and conservative winner evidence without deletion authority.
 - `models.py` and `overrides.py` — typed cross-stage contracts and versioned local decisions.
-- `reconciliation.py`, `review.py`, and `reports.py` — complete terminal accounting, review references/stubs, and atomic audit-bundle serialization.
+- `review.py` and `reports.py` — review references/stubs and atomic audit-bundle serialization, including the complete terminal accounting in `summary.txt`, `remaining.csv`, and `skipped.csv`.
 - `decision_hash.py`, `schema.py`, and `run_provenance.py` — versioned manifest validation, stable plan/decision identity, and path-free run context.
 - `preflight.py` — whole-plan safety validation before review or mutation.
 - `apply_contract.py`, `apply_validation.py`, and `apply_execution.py` — exact approval binding, status-gated operation groups, live-state validation, atomic no-overwrite moves, durable journaling, rollback, resume, and final verification.
@@ -109,7 +109,7 @@ Extra decisions map to explicit Jellyfin-compatible folders. Known categories su
 
 Every path component is Unicode-normalized and sanitized against Windows-invalid characters, control characters, trailing dots/spaces, and reserved device names while remaining valid on POSIX. Invalid characters are encoded rather than merely dropped so unrelated logical names do not silently collapse to the same sanitized component. Literal escape characters are themselves escaped, making this mapping deterministic. Configurable component/path limits use deterministic hash-suffixed shortening. If the configured limits cannot produce a safe path, destination construction returns unresolved rather than guessing.
 
-Each ready destination carries a Unicode-normalized, case-folded collision key. This means collisions are detected consistently during planning on Windows and POSIX, including case-only differences. Collision discovery reports every source/path set that converges on a logical destination; it does not choose winners or mutate files. Duplicate resolution remains a later stage.
+Each ready destination carries a Unicode-normalized, case-folded collision key. This means collisions are detected consistently during planning on Windows and POSIX, including case-only differences. Duplicate classification and preflight group sources by this key, so every set of sources converging on one logical destination is reported; destination construction itself does not choose winners or mutate files.
 
 The destination layer performs no filesystem access, creates no directories, and writes no media.
 

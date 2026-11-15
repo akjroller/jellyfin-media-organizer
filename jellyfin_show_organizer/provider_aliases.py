@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 from .models import ProviderIdentity
-from .providers import MetadataProvider, TvmazeProviderAdapter
+from .providers import TvmazeProviderAdapter
 from .tvmaze_alias_cache import TvmazeAliasCache
 from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
 
@@ -34,13 +34,6 @@ class ProviderAliasSnapshot:
     @property
     def resolved(self) -> bool:
         return self.unresolved_reason is None
-
-
-class AliasMetadataProvider(MetadataProvider, Protocol):
-    def show_aliases(
-        self,
-        show_identity: ProviderIdentity,
-    ) -> ProviderAliasSnapshot: ...
 
 
 def _tvmaze_aliases(response: object) -> tuple[tuple[str, ...], tuple[str, ...]]:

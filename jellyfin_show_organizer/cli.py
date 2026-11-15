@@ -9,7 +9,7 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from . import __version__
 from .apply_execution import (
@@ -64,8 +64,14 @@ REVIEW_INCOMPLETE_EXIT = 12
 APPLY_FAILED_EXIT = 30
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the standalone organizer command-line parser."""
+def build_parser(
+    extensions: Sequence[Callable[[Any], None]] = (),
+) -> argparse.ArgumentParser:
+    """Build the organizer command-line parser.
+
+    ``extensions`` register further subcommands (apply scope, rollback,
+    quarantine, prune) on the same subcommand group; see ``entrypoint``.
+    """
     parser = argparse.ArgumentParser(
         prog="organizer",
         description=(
@@ -439,6 +445,8 @@ def build_parser() -> argparse.ArgumentParser:
     config_example_parser.add_argument("--output", type=Path)
     config_example_parser.set_defaults(handler=_run_config_example)
 
+    for register in extensions:
+        register(subparsers)
     return parser
 
 

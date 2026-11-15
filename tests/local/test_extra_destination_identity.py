@@ -5,7 +5,6 @@ import pytest
 from jellyfin_show_organizer.destination import (
     DestinationStatus,
     build_extra_destination,
-    find_destination_collisions,
 )
 from jellyfin_show_organizer.extra_classifier import ExtraDisposition, classify_extra
 from jellyfin_show_organizer.extra_naming import derive_extra_display_identity
@@ -74,7 +73,7 @@ def test_distinct_generic_extra_titles_receive_distinct_destinations() -> None:
         == "Fixture Series (2026)/extras/Season 01 - Music Video.mkv"
     )
     assert drawing.relative_path != music.relative_path
-    assert find_destination_collisions((drawing, music)) == ()
+    assert drawing.collision_key != music.collision_key
     assert "extra-display-title:Season 01 - How To Draw Character" in drawing.reasons
 
 
@@ -217,7 +216,7 @@ def test_structural_extra_seasons_do_not_collapse_to_one_destination() -> None:
     assert season_two.relative_path == (
         "Fixture Series (2026)/extras/Season 02 - Extra 01 - Mission Overview.mkv"
     )
-    assert find_destination_collisions((season_one, season_two)) == ()
+    assert season_one.collision_key != season_two.collision_key
     assert "extra-naming-season-context:01" in season_one.reasons
     assert "extra-naming-season-context:02" in season_two.reasons
 
@@ -257,7 +256,7 @@ def test_creditless_extra_seasons_do_not_collapse_to_one_destination() -> None:
     assert season_two.relative_path == (
         "Fixture Series (2026)/extras/Season 02 - Creditless Opening 01.mkv"
     )
-    assert find_destination_collisions((season_one, season_two)) == ()
+    assert season_one.collision_key != season_two.collision_key
 
 
 def test_ambiguous_season_context_is_not_guessed_for_creditless_extra() -> None:

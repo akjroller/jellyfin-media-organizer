@@ -81,7 +81,6 @@ JMO is intentionally conservative: planning and review remain non-mutating, whil
   folder structures, rarer containers, and samples reported in `skipped.csv`
   instead of being silently dropped;
 - explicit handling of samples, unreadable entries, blocked links, extras, and ambiguous evidence;
-- deterministic inventory reconciliation;
 - versioned organizer plan models and immutable JSON schema contracts;
 - data-driven aliases and numbering policies;
 - persistent TVMaze cache primitives for deterministic/offline replay;

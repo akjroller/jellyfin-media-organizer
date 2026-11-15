@@ -640,7 +640,7 @@ def render_audit_bundle(
 
     return AuditBundle(
         plan_json=canonical_manifest_bytes(plan) + b"\n",
-        mapping_csv=_render_record_csv(records),
+        mapping_csv=render_mapping_csv(plan),
         unresolved_csv=_render_record_csv(unresolved),
         extras_csv=_render_record_csv(extras),
         duplicates_csv=render_duplicates_csv(plan),

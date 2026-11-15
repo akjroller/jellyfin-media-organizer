@@ -214,20 +214,6 @@ def _record_source(record: Mapping[str, object]) -> str:
     return _string(source.get("relative_path"), "record.source.relative_path")
 
 
-def _record_show_key(record: Mapping[str, object]) -> str:
-    show = record.get("show")
-    if isinstance(show, Mapping):
-        source_key = show.get("source_key")
-        if isinstance(source_key, str) and source_key:
-            return source_key
-    parse = record.get("parse")
-    if isinstance(parse, Mapping):
-        series_hint = parse.get("series_hint")
-        if isinstance(series_hint, str) and series_hint:
-            return series_hint
-    return _record_source(record).replace("\\", "/").split("/", 1)[0]
-
-
 def _duplicate_collision_class(
     duplicate: Mapping[str, object],
 ) -> ReviewCollisionClass:
