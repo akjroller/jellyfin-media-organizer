@@ -18,6 +18,7 @@ from .apply_execution import (
     _journal_lock,
     _parts,
     _release_journal_lock,
+    probe_no_replace_rename,
 )
 from .quarantine_contract import (
     QuarantineContractError,
@@ -784,6 +785,7 @@ def _check_only_quarantine(
     preapply, organized = _validate_check(
         prepared, source_root, organized_root, quarantine_root
     )
+    probe_no_replace_rename(quarantine_root)
     return QuarantineExecutionResult(
         quarantine_plan_sha256=prepared.plan.sha256,
         plan_sha256=prepared.plan.plan_sha256,
@@ -899,6 +901,7 @@ def execute_quarantine(
     moved_count = 0
     recovered_count = 0
     try:
+        probe_no_replace_rename(quarantine_root)
         journal = _QuarantineJournal(journal_path, prepared, resume=resume)
         _start_quarantine_journal(
             prepared,
@@ -1180,6 +1183,7 @@ def execute_quarantine_restore(
                 "--check-only cannot be combined with --resume"
             )
         _restore_all_state(prepared, source_root, quarantine_root, "pending")
+        probe_no_replace_rename(quarantine_root)
         return QuarantineRestoreResult(
             quarantine_plan_sha256=prepared.prepared.plan.sha256,
             quarantine_journal_sha256=prepared.quarantine_journal_sha256,
@@ -1201,6 +1205,7 @@ def execute_quarantine_restore(
     restored_count = 0
     recovered_count = 0
     try:
+        probe_no_replace_rename(quarantine_root)
         _validate_completed_quarantine_journal(
             prepared.prepared, prepared.quarantine_journal_path
         )

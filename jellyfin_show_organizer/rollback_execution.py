@@ -21,6 +21,7 @@ from .apply_execution import (
     _release_journal_lock,
     _safe_existing_path,
     _verify_source,
+    probe_no_replace_rename,
 )
 from .apply_validation import validate_apply_roots
 
@@ -437,6 +438,7 @@ def execute_rollback(
         )
         if check_only:
             _verify_all_pending(prepared, source_root, destination_root)
+            probe_no_replace_rename(destination_root)
             return RollbackExecutionResult(
                 plan_sha256=prepared.prepared_apply.contract.plan_sha256,
                 review_session_sha256=prepared.prepared_apply.review_session_sha256,
@@ -466,6 +468,7 @@ def execute_rollback(
         restored_count = 0
         recovered_count = 0
         try:
+            probe_no_replace_rename(destination_root)
             journal = _RollbackJournal(rollback_journal_path, prepared, resume=resume)
             if not resume:
                 _verify_all_pending(prepared, source_root, destination_root)

@@ -15,7 +15,7 @@ workflow recommendation:
 | --- | --- | --- |
 | `jmo run` / `jmo plan` | Yes, the new plan bundle only | No |
 | `jmo review` | Yes, the hash-bound review ledger and answers | No |
-| `jmo apply --check-only` | No journal or destination changes | No |
+| `jmo apply --check-only` | No journal; only a temporary rename-probe directory, removed before it returns | No |
 | `jmo apply` with a valid confirmation token and journal | Yes | Yes, and only for approved groups |
 
 Future commands must preserve this boundary. Planning and review code must not
@@ -121,6 +121,7 @@ If `--confirm-apply` is omitted, a real interactive terminal must type the compl
 - Source and target must be on the same filesystem/device.
 - No-op detection uses exact relative names only when the validated roots are the same. Separate-root imports retain unchanged relative names as moving operations. Case-only changes are not silently skipped; an existing destination on an insensitive filesystem remains a blocker.
 - The move primitive is an atomic no-overwrite rename: native non-replacing rename on Windows, `renameat2(RENAME_NOREPLACE)` on Linux, or `renamex_np(RENAME_EXCL)` on macOS. Unsupported hosts fail closed.
+- Before any move, `jmo apply` (including `--check-only` and `--resume`), `jmo rollback`, `jmo quarantine`, and `jmo quarantine-restore` probe that primitive inside a uniquely named `.jmo-rename-probe-*` directory under the destination (or quarantine) root: one rename to a free name must succeed, and a rename onto an existing name must be refused with both files intact. The probe touches only its own scratch entries and removes them whether it passes or fails. Many NFS, SMB/CIFS, and FUSE network mounts reject `RENAME_NOREPLACE`; those now fail before any journal entry or move with a message naming the filesystem limitation, and the same message is reported if a rename is rejected mid-run (after the group's automatic rollback).
 - Apply does not perform cross-filesystem copy-and-delete, overwrite, source-directory cleanup, duplicate deletion, or quarantine. Separate `quarantine-plan`, `quarantine`, and `quarantine-restore` commands implement explicitly approved reversible duplicate handling; see [First run](first-run.md#recovery-and-support-boundaries).
 
 ## Journal and group recovery
