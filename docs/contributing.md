@@ -71,7 +71,7 @@ Current modes include aired, absolute, parenthesized absolute, segment-title, sp
 
 New ordering behavior must be represented through typed parse/model/override/provider evidence. One source-show group cannot silently mix numbering policies, and provider-backed mappings fail closed when no unique destination exists.
 
-See `docs/numbering-policies.md`.
+See `docs/matching.md`.
 
 ## Destination policies
 

@@ -28,19 +28,24 @@ The current project boundary is deliberately narrow:
 - `filename_parser.py`, `extra_classifier.py`, and `extra_naming.py` — pure filename/path evidence, fail-closed extra classification, and extra display identity.
 - `show_resolver.py` and `_show_resolver_core.py` — conservative show-level resolution, provider search, ranking, aliases, and catalog-backed rescue orchestration.
 - `show_alias_evidence.py`, `show_structural_evidence.py`, `structural_root_title_fallback.py`, `parenthetical_aliases.py`, `release_prefix_fallback.py`, and `segment_counted_titles.py` — focused structural evidence strategies used by the resolver.
-- `providers.py`, `provider_aliases.py`, `tvmaze_cache.py`, and `tvmaze_alias_cache.py` — provider-neutral domain records plus TVMaze adapter and persistent cache boundaries.
+- `providers.py`, `provider_aliases.py`, `tvmaze_cache.py`, `tvmaze_alias_cache.py`, `tmdb_cache.py`, and `provider_http.py` — provider-neutral domain records, the TVMaze and optional TMDb adapters, the shared persistent cache, and rate-limited, retrying HTTP access.
 - `episode_assignment.py`, `episode_assignment_strict.py`, `mixed_episode_assignment.py`, and `numbering_inference.py` — cached-catalog episode mapping, explicit numbering policy, mixed-evidence handling, and provider-episode identity protection.
 - `destination.py` — deterministic Jellyfin-relative destination construction and cross-platform sanitization/collision keys.
 - `duplicate_classifier.py` and `release_quality.py` — duplicate grouping and conservative winner evidence without deletion authority.
 - `models.py` and `overrides.py` — typed cross-stage contracts and versioned local decisions.
 - `review.py` and `reports.py` — review references/stubs and atomic audit-bundle serialization, including the complete terminal accounting in `summary.txt`, `remaining.csv`, and `skipped.csv`.
-- `decision_hash.py`, `schema.py`, and `run_provenance.py` — versioned manifest validation, stable plan/decision identity, and path-free run context.
+- `decision_hash.py`, `schema.py`, `_schema_v3_impl.py`, `run_provenance.py`, and `artifact_identity.py` — versioned manifest serialization and validation, stable plan/decision identity, path-free run context, and the build identity that ties an installed package to its source revision.
 - `preflight.py` — whole-plan safety validation before review or mutation.
-- `apply_contract.py`, `apply_validation.py`, and `apply_execution.py` — exact approval binding, status-gated operation groups, live-state validation, atomic no-overwrite moves, durable journaling, rollback, resume, and final verification.
+- `apply_contract.py`, `apply_validation.py`, `apply_execution.py`, and `apply_scope.py` — exact approval binding, status-gated operation groups, optional canary scopes, live-state validation, atomic no-overwrite moves, durable journaling, group rollback, resume, and final verification.
+- `review_session.py`, `review_system.py`, `review_wizard.py`, `review_contract.py`, `review_overrides.py`, `review_identity.py`, and `review_execution.py` — hash-bound resumable review sessions, the interactive and answer-file review flows, compiling decisions into reviewed overrides, stable review references, and the reviewed planning path the CLI runs.
+- `rollback_execution.py`, `quarantine_contract.py`, `quarantine_execution.py`, and `prune_execution.py` — reversing a completed apply, reversible duplicate quarantine and restore, and removing (and restoring) source folders an apply left empty.
+- `user_commands.py`, `summary_io.py`, and `api.py` — the guided wizard, `init`, `run`, `demo`, `doctor`, `inspect`, and `report` commands, shared `summary.txt` parsing, and the small read-only API for embedding applications.
 - `data/` — versioned JSON/TOML contracts and synthetic default override examples.
 
-Command adapters (`cli.py`, `entrypoint.py`, `apply_scope_cli.py`, and
-`quarantine_cli.py`) sit at the outer edge of the package. Core modules may be
+Command adapters (`cli.py`, `entrypoint.py`, `apply_scope_cli.py`,
+`quarantine_cli.py`, and `prune_cli.py`) sit at the outer edge of the package.
+`cli.build_parser` defines the core commands, and `entrypoint` passes the other
+adapters' registration functions to it. Core modules may be
 called by those adapters, but must not import them; the boundary is enforced by
 `tests/local/test_module_boundaries.py`. Shareable output sanitization lives in
 `privacy.py` so audit reports and review exports cannot drift into separate

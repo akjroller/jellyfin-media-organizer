@@ -148,9 +148,8 @@ def test_readme_links_current_operational_documentation():
         "docs/troubleshooting.md",
         "docs/contributing.md",
         "docs/local-overrides.md",
-        "docs/provider-cache-policy.md",
-        "docs/numbering-policies.md",
-        "docs/metadata-provider-boundary.md",
+        "docs/providers.md",
+        "docs/matching.md",
         "docs/releasing.md",
     ):
         assert path in text
