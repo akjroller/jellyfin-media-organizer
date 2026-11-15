@@ -43,6 +43,12 @@ All notable public changes will be documented in this file. The project follows 
   unresolved instead of guessing.
 - Hardened guided setup so it only performs read-only checks and leaves any
   mutating apply operation behind an explicit `jmo apply` command.
+- Made the guided wizard stop at the read-only apply-check boundary; only the
+  explicit `jmo apply` command can mutate media.
+- Made wizard setup safe for Windows state directories on another volume and
+  staged initialization so failed writes do not publish partial state.
+- Updated first-run, security, provider, and PyPI smoke-test documentation for
+  the current release and provider boundary.
 
 ## 0.4.1 - 2026-09-25
 
@@ -103,12 +109,3 @@ records are reviewed; it never silently authorizes an apply.
 - First verified standalone JMO version tag and release-artifact build.
 - Jellyfin-focused, plan-first TV-show organization workflow with non-mutating
   planning and review plus explicitly gated apply execution.
-
-## Unreleased
-
-- Made the guided wizard stop at the read-only apply-check boundary; only the
-  explicit `jmo apply` command can mutate media.
-- Made wizard setup safe for Windows state directories on another volume and
-  staged initialization so failed writes do not publish partial state.
-- Updated first-run, security, provider, and PyPI smoke-test documentation for
-  the current release and provider boundary.
