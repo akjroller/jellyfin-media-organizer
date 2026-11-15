@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 
 from .apply_contract import ApplyContract, ApplyMember, ApplyMemberRole
 from .models import SourceFingerprint
+from .paths import is_link
 
 _WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
 _HASH_CHUNK_SIZE = 1024 * 1024
@@ -35,22 +36,10 @@ class ApplyFilesystemValidation:
     observations: tuple[ApplyMemberObservation, ...]
 
 
-def _is_linklike(path: Path) -> bool:
-    if path.is_symlink():
-        return True
-    checker = getattr(path, "is_junction", None)
-    if checker is None:
-        return False
-    try:
-        return bool(checker())
-    except OSError:
-        return True
-
-
 def _validated_root(root: Path, label: str) -> Path:
     if not os.path.lexists(root):
         raise ApplyFilesystemError(f"{label} root does not exist")
-    if _is_linklike(root):
+    if is_link(root):
         raise ApplyFilesystemError(f"{label} root cannot be a symlink or junction")
     if not root.is_dir():
         raise ApplyFilesystemError(f"{label} root must be a directory")
@@ -95,7 +84,7 @@ def _existing_parent(
             if require_all:
                 raise ApplyFilesystemError(f"{label} parent does not exist")
             return current
-        if _is_linklike(candidate):
+        if is_link(candidate):
             raise ApplyFilesystemError(
                 f"{label} parent chain contains a symlink or junction"
             )
@@ -163,7 +152,7 @@ def revalidate_apply_member(
     source = source_root.joinpath(*source_parts)
     if not os.path.lexists(source):
         raise ApplyFilesystemError("source does not exist")
-    if _is_linklike(source):
+    if is_link(source):
         raise ApplyFilesystemError("source cannot be a symlink or junction")
     if not source.is_file():
         raise ApplyFilesystemError("source must be a regular file")

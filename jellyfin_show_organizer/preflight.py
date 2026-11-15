@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .inventory import AuthorizedShowsRoot
 from .models import DuplicateDecision, SourceFingerprint
+from .paths import is_link
 
 
 class PreflightStatus(StrEnum):
@@ -110,26 +111,9 @@ _PLAN_HASH = re.compile(r"^[0-9a-fA-F]{64}$")
 _WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
 
 
-def _is_junction(path: Path) -> bool:
-    checker = getattr(path, "is_junction", None)
-    if checker is None:
-        return False
-    try:
-        return bool(checker())
-    except OSError:
-        return True
-
-
-def _is_link(path: Path) -> bool:
-    try:
-        return path.is_symlink() or _is_junction(path)
-    except OSError:
-        return True
-
-
 def authorize_destination_root(path: Path) -> AuthorizedDestinationRoot:
     candidate = path.expanduser()
-    if _is_link(candidate):
+    if is_link(candidate):
         raise ValueError("destination root cannot be a symlink or junction")
     try:
         resolved = candidate.resolve(strict=True)
@@ -242,7 +226,7 @@ def _path_traverses_link(root: Path, relative_path: str) -> bool:
         if part in {"", ".", ".."}:
             continue
         current = current / part
-        if _is_link(current):
+        if is_link(current):
             return True
     return False
 

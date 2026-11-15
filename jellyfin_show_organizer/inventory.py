@@ -7,6 +7,7 @@ from enum import StrEnum
 from pathlib import Path, PurePosixPath
 
 from .models import SourceFile, SourceFingerprint
+from .paths import is_link
 
 VIDEO_EXTENSIONS = frozenset({".avi", ".mkv", ".mp4"})
 # Video containers Jellyfin can play that JMO does not plan yet.  They are
@@ -83,23 +84,9 @@ class InventoryRecord:
         )
 
 
-def _is_junction(path: Path) -> bool:
-    checker = getattr(path, "is_junction", None)
-    if checker is None:
-        return False
-    try:
-        return bool(checker())
-    except OSError:
-        return True
-
-
-def _is_link(path: Path, *, entry_is_symlink: bool = False) -> bool:
-    return entry_is_symlink or path.is_symlink() or _is_junction(path)
-
-
 def authorize_shows_root(path: Path) -> AuthorizedShowsRoot:
     candidate = path.expanduser()
-    if _is_link(candidate):
+    if is_link(candidate):
         raise InventoryScanError("Shows root itself cannot be a symlink or junction")
     try:
         resolved = candidate.resolve(strict=True)
@@ -175,7 +162,7 @@ def scan_videos(root: AuthorizedShowsRoot) -> tuple[InventoryRecord, ...]:
             extension = path.suffix.casefold()
             entry_is_symlink = entry.is_symlink()
 
-            if _is_link(path, entry_is_symlink=entry_is_symlink):
+            if is_link(path, entry_is_symlink=entry_is_symlink):
                 if extension in VIDEO_EXTENSIONS:
                     records.append(_blocked_link_record(root.path, path))
                 continue

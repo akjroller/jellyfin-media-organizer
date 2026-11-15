@@ -12,6 +12,7 @@ from .inventory import (
     AuthorizedShowsRoot,
 )
 from .models import SourceFile, SourceFingerprint
+from .paths import is_link
 
 SUBTITLE_EXTENSIONS = frozenset({".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx"})
 IGNORED_ADJACENT_EXTENSIONS = frozenset(
@@ -95,20 +96,6 @@ class SidecarDiscovery:
 
 def _windows_path_key(relative_path: str) -> tuple[str, str]:
     return relative_path.casefold(), relative_path
-
-
-def _is_junction(path: Path) -> bool:
-    checker = getattr(path, "is_junction", None)
-    if checker is None:
-        return False
-    try:
-        return bool(checker())
-    except OSError:
-        return True
-
-
-def _is_link(path: Path, *, entry_is_symlink: bool = False) -> bool:
-    return entry_is_symlink or path.is_symlink() or _is_junction(path)
 
 
 def _fingerprint(entry: os.DirEntry[str]) -> SourceFingerprint:
@@ -275,7 +262,7 @@ def discover_sidecars(
             if is_directory:
                 continue
 
-            if _is_link(path, entry_is_symlink=entry.is_symlink()):
+            if is_link(path, entry_is_symlink=entry.is_symlink()):
                 unresolved.append(
                     AdjacentFile(
                         relative_path=relative_path,
