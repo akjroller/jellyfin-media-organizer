@@ -15,7 +15,12 @@ from .destination import (
 )
 from .episode_assignment_strict import AssignmentStatus, SourceEpisodeAssignment
 from .extra_naming import derive_extra_display_identity
-from .inventory import InventoryStatus, authorize_shows_root, scan_videos
+from .inventory import (
+    InventoryStatus,
+    authorize_shows_root,
+    scan_videos,
+    skipped_inventory_records,
+)
 from .models import (
     DuplicateDecision,
     ExtraDecision,
@@ -801,6 +806,8 @@ def execute_plan(
         )
     else:
         provider = tvmaze_provider
+    inventory = scan_videos(source_root)
+    skipped = skipped_inventory_records(inventory)
     plan = build_plan(
         source_root,
         config,
@@ -808,6 +815,7 @@ def execute_plan(
         cache,
         provider,
         progress=progress,
+        inventory=inventory,
     )
     if review_catalog is not None:
         plan = _apply_review_extensions(
@@ -868,6 +876,7 @@ def execute_plan(
             review_catalog,
             review_session,
         ),
+        skipped=skipped,
     )
     return PlanningOutcome(
         plan=plan,
@@ -877,4 +886,5 @@ def execute_plan(
         provider_strategy=actual_provider_strategy,
         provider_names=actual_provider_names,
         tmdb_available=tmdb_cache is not None,
+        skipped_inventory=skipped,
     )

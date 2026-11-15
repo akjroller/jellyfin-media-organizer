@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .decision_hash import stable_decision_hash
+from .inventory import InventoryRecord, InventoryStatus
 from .models import (
     CompanionPlanRecord,
     CompanionStatus,
@@ -117,6 +118,7 @@ class AuditBundle:
     run_provenance_json: bytes | None = None
     preflight_json: bytes | None = None
     preflight_txt: bytes | None = None
+    skipped_csv: bytes | None = None
 
     def files(self) -> tuple[tuple[str, bytes], ...]:
         files = [
@@ -126,6 +128,10 @@ class AuditBundle:
             ("duplicates.csv", self.duplicates_csv),
             ("sidecars.csv", self.sidecars_csv),
             ("remaining.csv", self.remaining_csv),
+        ]
+        if self.skipped_csv is not None:
+            files.append(("skipped.csv", self.skipped_csv))
+        files += [
             ("summary.txt", self.summary_txt),
             ("plan.sha256", self.plan_sha256),
             ("decision.sha256", self.decision_sha256),
@@ -449,6 +455,29 @@ def render_remaining_csv(plan: OrganizerPlan) -> bytes:
     return ("\ufeff" + stream.getvalue()).encode("utf-8")
 
 
+SKIPPED_CSV_HEADER = ("source", "extension", "status", "reason")
+
+
+def render_skipped_csv(skipped: tuple[InventoryRecord, ...]) -> bytes:
+    """List video-like files the inventory saw but deliberately did not plan."""
+
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=SKIPPED_CSV_HEADER, lineterminator="\n")
+    writer.writeheader()
+    for record in sorted(
+        skipped, key=lambda item: (item.relative_path.casefold(), item.relative_path)
+    ):
+        writer.writerow(
+            {
+                "source": record.relative_path,
+                "extension": record.extension,
+                "status": record.status.value,
+                "reason": record.reason or "",
+            }
+        )
+    return ("\ufeff" + stream.getvalue()).encode("utf-8")
+
+
 def _readiness_summary(
     plan: OrganizerPlan, preflight: PreflightResult | None
 ) -> tuple[str, tuple[dict[str, str], ...]]:
@@ -502,6 +531,8 @@ def _held_triage_lines(records: tuple[PlanRecord, ...]) -> list[str]:
 def render_summary(
     plan: OrganizerPlan,
     preflight: PreflightResult | None = None,
+    *,
+    skipped: tuple[InventoryRecord, ...] = (),
 ) -> bytes:
     """Render a concise, path-free status summary tied to both plan fingerprints."""
 
@@ -555,6 +586,14 @@ def render_summary(
             f"remaining_blocking={remaining_blocking}",
         )
     )
+    skipped_counts = Counter(record.status for record in skipped)
+    lines.extend(
+        (
+            f"skipped_samples={skipped_counts[InventoryStatus.EXCLUDED_SAMPLE]}",
+            "skipped_unsupported_videos="
+            f"{skipped_counts[InventoryStatus.UNSUPPORTED_VIDEO]}",
+        )
+    )
     if preflight is not None:
         lines.append(f"preflight_ready={str(preflight.ready).lower()}")
         lines.append(f"preflight_findings={len(preflight.findings)}")
@@ -566,8 +605,15 @@ def render_audit_bundle(
     preflight: PreflightResult | None = None,
     *,
     run_provenance_json: bytes | None = None,
+    skipped: tuple[InventoryRecord, ...] = (),
 ) -> AuditBundle:
-    """Render every public audit artifact from the same immutable plan object."""
+    """Render every public audit artifact from the same immutable plan object.
+
+    ``skipped`` lists inventory entries deliberately left out of the plan
+    (samples and unsupported video containers).  They are reported in
+    ``skipped.csv`` and ``summary.txt`` only; ``skipped.csv`` is not part of
+    ``plan.json``, so it does not feed the plan or decision hashes.
+    """
 
     plan_hash = stable_plan_hash(plan)
     decision_hash = stable_decision_hash(plan)
@@ -601,7 +647,8 @@ def render_audit_bundle(
         sidecars_csv=render_sidecars_csv(plan),
         remaining_csv=render_remaining_csv(plan),
         run_provenance_json=run_provenance_json,
-        summary_txt=render_summary(plan, preflight),
+        summary_txt=render_summary(plan, preflight, skipped=skipped),
+        skipped_csv=render_skipped_csv(skipped),
         plan_sha256=f"{plan_hash}\n".encode("ascii"),
         decision_sha256=f"{decision_hash}\n".encode("ascii"),
         preflight_json=preflight_json,
@@ -624,6 +671,7 @@ def write_audit_bundle(
     preflight: PreflightResult | None = None,
     *,
     run_provenance_json: bytes | None = None,
+    skipped: tuple[InventoryRecord, ...] = (),
 ) -> AuditBundle:
     """Publish an audit bundle without leaving a half-valid plan on failure.
 
@@ -633,7 +681,7 @@ def write_audit_bundle(
     """
 
     bundle = render_audit_bundle(
-        plan, preflight, run_provenance_json=run_provenance_json
+        plan, preflight, run_provenance_json=run_provenance_json, skipped=skipped
     )
     output_dir.mkdir(parents=False, exist_ok=False)
     try:

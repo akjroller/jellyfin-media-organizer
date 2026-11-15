@@ -124,6 +124,7 @@ def test_end_to_end_plan_is_cached_deterministic_and_non_mutating(
         "remaining.csv",
         "run-provenance.json",
         "sidecars.csv",
+        "skipped.csv",
         "summary.txt",
         "unresolved.csv",
     }

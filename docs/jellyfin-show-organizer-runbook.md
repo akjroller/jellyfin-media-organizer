@@ -135,7 +135,7 @@ ExampleMedia/
   Reports/     <- generated state belongs outside the active Shows tree
 ```
 
-The primary inventory is video-led. Current inventory code recognizes `.mkv`, `.mp4`, and `.avi` videos and must not follow symlinks or junctions outside the authorized root.
+The primary inventory is video-led. Current inventory code plans `.mkv`, `.mp4`, and `.avi` videos and must not follow symlinks or junctions outside the authorized root. Other video containers JMO recognizes but does not plan yet (such as `.m4v`, `.ts`, `.webm`, `.mov`) are never moved; they are listed in `skipped.csv` together with excluded samples, and counted as `skipped_unsupported_videos` and `skipped_samples` in `summary.txt`.
 
 Subtitle sidecars are a companion planning layer rather than independent episode discovery. The current sidecar primitive recognizes `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub`, and `.idx`, preserves supported language/default/forced/SDH/CC suffixes, keeps `.idx` + `.sub` pairs together, and leaves ambiguous associations unresolved. It does not move or rename sidecars.
 

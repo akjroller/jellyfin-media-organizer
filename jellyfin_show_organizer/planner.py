@@ -33,9 +33,11 @@ from .extra_classifier import ExtraClassification, ExtraDisposition, classify_ex
 from .extra_naming import derive_extra_display_identity
 from .inventory import (
     AuthorizedShowsRoot,
+    InventoryRecord,
     InventoryStatus,
     authorize_shows_root,
     scan_videos,
+    skipped_inventory_records,
 )
 from .models import (
     CacheSnapshot,
@@ -160,6 +162,7 @@ class PlanningOutcome:
     provider_strategy: str = "tvmaze"
     provider_names: tuple[str, ...] = ("tvmaze",)
     tmdb_available: bool = False
+    skipped_inventory: tuple[InventoryRecord, ...] = ()
 
 
 class TrackingTvmazeCatalogCache(TvmazeCatalogCache):
@@ -1019,8 +1022,10 @@ def _build_plan(
     *,
     extra_cache_snapshots: tuple[CacheSnapshot, ...] = (),
     progress: Callable[[str, int, int], None] | None = None,
+    inventory: tuple[InventoryRecord, ...] | None = None,
 ) -> OrganizerPlan:
-    inventory = scan_videos(source_root)
+    if inventory is None:
+        inventory = scan_videos(source_root)
     blocked = tuple(
         record
         for record in inventory
@@ -1274,6 +1279,8 @@ def execute_plan(
     else:
         provider = tvmaze_provider
     tmdb_snapshots = _cache_snapshots(tmdb_cache) if tmdb_cache is not None else ()
+    inventory = scan_videos(source_root)
+    skipped = skipped_inventory_records(inventory)
     plan = _build_plan(
         source_root,
         config,
@@ -1281,6 +1288,7 @@ def execute_plan(
         cache,
         provider,
         extra_cache_snapshots=tmdb_snapshots,
+        inventory=inventory,
     )
     plan_hash = stable_plan_hash(plan)
     preflight = preflight_plan(
@@ -1322,6 +1330,7 @@ def execute_plan(
         plan,
         preflight,
         run_provenance_json=render_run_provenance(run_provenance),
+        skipped=skipped,
     )
     return PlanningOutcome(
         plan=plan,
@@ -1331,4 +1340,5 @@ def execute_plan(
         provider_strategy=actual_provider_strategy,
         provider_names=actual_provider_names,
         tmdb_available=tmdb_cache is not None,
+        skipped_inventory=skipped,
     )

@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 
-from .inventory import VIDEO_EXTENSIONS, AuthorizedShowsRoot
+from .inventory import (
+    UNSUPPORTED_VIDEO_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    AuthorizedShowsRoot,
+)
 from .models import SourceFile, SourceFingerprint
 
 SUBTITLE_EXTENSIONS = frozenset({".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx"})
@@ -184,6 +188,11 @@ def _subtitle_candidates(
 def _ignored_adjacent_reason(path: Path, extension: str) -> str | None:
     if extension in IGNORED_ADJACENT_EXTENSIONS:
         return "explicitly-ignored-adjacent-file"
+    if extension in UNSUPPORTED_VIDEO_EXTENSIONS:
+        # A video container JMO cannot plan yet is reported by the inventory
+        # (skipped.csv).  It stays where it is; it is not a companion of the
+        # neighbouring planned videos and must not block their plan.
+        return "unsupported-video-container"
     if (
         extension in _RELEASE_PACKAGE_EXTENSIONS
         or _RAR_VOLUME_EXTENSION.fullmatch(extension) is not None

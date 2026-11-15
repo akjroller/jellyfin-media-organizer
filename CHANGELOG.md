@@ -4,6 +4,13 @@ All notable public changes will be documented in this file. The project follows 
 
 ## Unreleased
 
+- Video containers JMO does not organize yet (`.m4v`, `.ts`, `.m2ts`,
+  `.webm`, `.mov`, `.wmv`, and others) are now reported instead of being
+  dropped silently. They and excluded samples are listed in a new
+  `skipped.csv` audit file, counted in `summary.txt`, `jmo inspect`,
+  `jmo report`, and the `jmo plan` output, and never moved. One such file
+  next to a planned video no longer blocks the whole plan as an
+  "unsupported adjacent file"; it is an ignored companion left in place.
 - Provider caches no longer persist transient failures (timeouts, rate
   limits, 5xx, network errors). One network blip no longer makes later runs
   fail until `--refresh`; online runs retry such entries, including ones
