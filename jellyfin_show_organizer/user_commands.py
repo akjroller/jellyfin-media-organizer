@@ -727,6 +727,8 @@ def run_inspect(
         "suspicious": summary_int(values, "suspicious"),
         "unresolved": summary_int(values, "unresolved"),
         "remaining_total": summary_int(values, "remaining_total"),
+        "skipped_unsupported_videos": summary_int(values, "skipped_unsupported_videos"),
+        "skipped_samples": summary_int(values, "skipped_samples"),
         "plan_sha256": values.get("plan_sha256"),
     }
     if not redact_paths:
@@ -750,6 +752,11 @@ def run_inspect(
             "remaining_total",
         ):
             print(f"{key.replace('_', ' ').title():18} {result[key]}")
+        if result["skipped_unsupported_videos"]:
+            print(
+                f"Unsupported videos {result['skipped_unsupported_videos']} "
+                "(not organized; see skipped.csv)"
+            )
         if result["readiness_state"] == "apply-ready":
             print("Next step: run jmo apply ... --check-only before any mutation.")
         elif result["duplicate"] or result["held"]:
@@ -1061,6 +1068,8 @@ def run_report(run_dir: Path, output_dir: Path) -> int:
             "associated_companions",
             "ignored_companions",
             "duplicate_companions",
+            "skipped_samples",
+            "skipped_unsupported_videos",
         )
     }
     blockers = {key: counts[key] for key in ("suspicious", "unresolved") if counts[key]}

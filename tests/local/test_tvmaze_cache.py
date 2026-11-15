@@ -228,7 +228,7 @@ def test_corrupt_cache_entry_is_explicit_and_offline_never_refetches(tmp_path: P
     assert getter.calls == []
 
 
-def test_network_error_is_cached_as_explicit_unresolved_record(tmp_path: Path):
+def test_transient_failure_is_not_persisted_and_is_retried_online(tmp_path: Path):
     calls = 0
 
     def failing_getter(
@@ -244,16 +244,100 @@ def test_network_error_is_cached_as_explicit_unresolved_record(tmp_path: Path):
     first = cache.episode_catalog(TVMAZE_ID, failing_getter)
     second = cache.episode_catalog(TVMAZE_ID, failing_getter)
 
-    assert calls == 1
+    assert calls == 2
     assert first.state is tvmaze.CacheState.ERROR
     assert first.source is tvmaze.CacheSource.NETWORK
     assert first.failure_kind is tvmaze.ProviderFailureKind.UNKNOWN
     assert first.unresolved_reason is not None
     assert "RuntimeError" in first.unresolved_reason
+    assert second.source is tvmaze.CacheSource.NETWORK
+    assert not (cache_root / "episodes").exists()
+
+    offline = tvmaze.TvmazeCatalogCache(cache_root, offline=True).episode_catalog(
+        TVMAZE_ID, failing_getter
+    )
+    assert offline.state is tvmaze.CacheState.MISS
+    assert calls == 2
+
+
+def test_deterministic_not_found_is_persisted_and_replayed(tmp_path: Path):
+    calls = 0
+
+    def missing_getter(
+        url: str,
+        params: Mapping[str, str] | None = None,
+    ) -> object:
+        nonlocal calls
+        calls += 1
+        raise HttpError(404)
+
+    cache_root = tmp_path / "cache"
+    cache = tvmaze.TvmazeCatalogCache(cache_root, clock=_clock)
+    first = cache.episode_catalog(TVMAZE_ID, missing_getter)
+    second = cache.episode_catalog(TVMAZE_ID, missing_getter)
+
+    assert calls == 1
+    assert first.failure_kind is tvmaze.ProviderFailureKind.NOT_FOUND
     assert second.state is tvmaze.CacheState.ERROR
     assert second.source is tvmaze.CacheSource.CACHE
-    assert second.failure_kind is first.failure_kind
     assert second.unresolved_reason == first.unresolved_reason
+
+
+def test_legacy_persisted_transient_failure_is_retried_online(tmp_path: Path):
+    cache_root = tmp_path / "cache"
+    stale_failure = tvmaze.CacheRecord(
+        kind=tvmaze.CacheKind.EPISODES,
+        request_key=f"episodes:{TVMAZE_ID}",
+        retrieved_at="2026-01-01T00:00:00Z",
+        state=tvmaze.CacheState.ERROR,
+        response=None,
+        error="timeout: TimeoutError: timed out",
+        source=tvmaze.CacheSource.NETWORK,
+        failure_kind=tvmaze.ProviderFailureKind.TIMEOUT,
+    )
+    path = cache_root / "episodes" / f"{TVMAZE_ID}.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(tvmaze._encode_record(stale_failure)), encoding="utf-8")
+
+    offline_getter = FakeGetter()
+    offline = tvmaze.TvmazeCatalogCache(cache_root, offline=True).episode_catalog(
+        TVMAZE_ID, offline_getter
+    )
+    assert offline.state is tvmaze.CacheState.ERROR
+    assert offline_getter.calls == []
+
+    getter = FakeGetter()
+    online = tvmaze.TvmazeCatalogCache(cache_root, clock=_clock).episode_catalog(
+        TVMAZE_ID, getter
+    )
+    assert len(getter.calls) == 1
+    assert online.state is tvmaze.CacheState.OK
+    assert online.response == getter.episode_response
+
+
+def test_failed_refresh_keeps_the_last_good_response(tmp_path: Path):
+    cache_root = tmp_path / "cache"
+    policy = tvmaze.CachePolicy(search_max_age=timedelta(days=1))
+    cold = tvmaze.TvmazeCatalogCache(cache_root, clock=_clock, policy=policy)
+    good = cold.search_show("Example Series", FakeGetter())
+    search_file = next((cache_root / "search").glob("*.json"))
+    before = search_file.read_bytes()
+
+    def failing_getter(
+        url: str,
+        params: Mapping[str, str] | None = None,
+    ) -> object:
+        raise HttpError(503)
+
+    refreshed = tvmaze.TvmazeCatalogCache(
+        cache_root, clock=_clock_later, policy=policy, refresh=True
+    ).search_show("Example Series", failing_getter)
+
+    assert refreshed.state is tvmaze.CacheState.OK
+    assert refreshed.source is tvmaze.CacheSource.CACHE
+    assert refreshed.freshness is tvmaze.CacheFreshness.STALE
+    assert refreshed.snapshot_id == good.snapshot_id
+    assert search_file.read_bytes() == before
 
 
 class HttpError(RuntimeError):
@@ -270,6 +354,10 @@ class HttpError(RuntimeError):
         (HttpError(404), tvmaze.ProviderFailureKind.NOT_FOUND),
         (HttpError(503), tvmaze.ProviderFailureKind.TRANSIENT_HTTP),
         (ConnectionError("connection failed"), tvmaze.ProviderFailureKind.NETWORK),
+        (
+            tvmaze.MalformedProviderResponse("not JSON"),
+            tvmaze.ProviderFailureKind.MALFORMED_RESPONSE,
+        ),
     ],
 )
 def test_provider_failures_are_classified_explicitly(

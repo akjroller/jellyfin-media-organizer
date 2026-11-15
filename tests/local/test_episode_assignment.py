@@ -8,6 +8,7 @@ from jellyfin_show_organizer.episode_assignment import (
     SourceEpisodeInput,
     assign_episode_group,
 )
+from jellyfin_show_organizer.filename_parser import parse_video_path
 from jellyfin_show_organizer.models import (
     CanonicalShow,
     NumberingMode,
@@ -565,3 +566,24 @@ def test_segment_title_keeps_nonnumeric_bracket_suffix_conservative(
     assignment = result.assignments[0]
     assert assignment.status is AssignmentStatus.UNRESOLVED
     assert not assignment.episodes
+
+
+def test_numeric_episode_title_does_not_become_a_two_part_assignment(
+    tmp_path: Path,
+) -> None:
+    catalog = [
+        {"id": 1004, "season": 1, "number": 4, "name": "Five Years Gone"},
+        {"id": 1005, "season": 1, "number": 5, "name": "The Reckoning"},
+    ]
+    source = "Example Series/Example Series S01E04 5 Years Gone.mkv"
+
+    result = assign_episode_group(
+        _show(),
+        (SourceEpisodeInput(source, parse_video_path(source)),),
+        TvmazeCatalogCache(tmp_path / "cache"),
+        CountingGetter(catalog),
+    )
+
+    assert result.status is AssignmentStatus.MATCHED
+    (assignment,) = result.assignments
+    assert [episode.tvmaze_episode_id for episode in assignment.episodes] == [1004]

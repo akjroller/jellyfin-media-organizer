@@ -8,10 +8,29 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
-from .tvmaze_cache import JsonGetter, TvmazeCatalogCache
+from .tvmaze_cache import (
+    JsonGetter,
+    ProviderFailureKind,
+    TvmazeCatalogCache,
+    classify_provider_failure,
+)
 
 TVMAZE_AKAS_URL = "https://api.tvmaze.com/shows/{tvmaze_id}/akas"
 _ALIAS_CACHE_SCHEMA_VERSION = 1
+_REQUEST_FAILURE_PREFIX = "provider alias request failed: "
+
+
+def _is_transient_alias_failure(record: AliasCacheRecord) -> bool:
+    """Request failures other than a provider 404 describe the moment, not data."""
+
+    error = record.error
+    return (
+        error is not None
+        and error.startswith(_REQUEST_FAILURE_PREFIX)
+        and not error.startswith(
+            _REQUEST_FAILURE_PREFIX + ProviderFailureKind.NOT_FOUND.value + ":"
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +83,10 @@ class TvmazeAliasCache:
         request_key = f"akas:{tvmaze_id}"
         path = self._root / f"{tvmaze_id}.json"
         cached = self._read(path, request_key)
-        if cached is not None and (self._offline or not self._refresh):
+        if cached is not None and (
+            self._offline
+            or (not self._refresh and not _is_transient_alias_failure(cached))
+        ):
             return cached
         if self._offline:
             return AliasCacheRecord(
@@ -78,10 +100,14 @@ class TvmazeAliasCache:
         try:
             response = getter(url, None)
         except Exception as exc:
+            failure_kind = classify_provider_failure(exc)
             record = AliasCacheRecord(
                 request_key=request_key,
                 response=None,
-                error=f"provider alias request failed: {type(exc).__name__}: {exc}",
+                error=(
+                    f"{_REQUEST_FAILURE_PREFIX}{failure_kind.value}: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
                 source="network",
             )
         else:
@@ -101,6 +127,12 @@ class TvmazeAliasCache:
                     error=None,
                     source="network",
                 )
+        if record.error is not None:
+            if cached is not None and cached.error is None:
+                # A failed refresh keeps the last good alias response.
+                return cached
+            if _is_transient_alias_failure(record):
+                return record
         self._write(path, record)
         return record
 

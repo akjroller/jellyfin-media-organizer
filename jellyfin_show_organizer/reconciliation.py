@@ -46,6 +46,9 @@ def _status_for_inventory_record(
     elif record.status is InventoryStatus.EXCLUDED_SAMPLE:
         reason = record.reason or "sample-excluded"
         status = ReconciliationStatus.EXCLUDED_SAMPLE
+    elif record.status is InventoryStatus.UNSUPPORTED_VIDEO:
+        reason = record.reason or f"unsupported-extension:{record.extension}"
+        status = ReconciliationStatus.UNSUPPORTED
     elif record.status is InventoryStatus.BLOCKED_LINK:
         reason = f"blocked-link:{record.reason or 'link-not-followed'}"
         status = ReconciliationStatus.UNREADABLE

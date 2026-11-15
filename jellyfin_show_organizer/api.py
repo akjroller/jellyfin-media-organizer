@@ -32,6 +32,8 @@ class AuditSummary:
     unresolved: int
     remaining_total: int
     plan_sha256: str | None
+    skipped_unsupported_videos: int = 0
+    skipped_samples: int = 0
 
 
 def plan_library(
@@ -75,4 +77,6 @@ def inspect_audit(run_dir: Path) -> AuditSummary:
         unresolved=summary_int(values, "unresolved"),
         remaining_total=summary_int(values, "remaining_total"),
         plan_sha256=values.get("plan_sha256"),
+        skipped_unsupported_videos=summary_int(values, "skipped_unsupported_videos"),
+        skipped_samples=summary_int(values, "skipped_samples"),
     )

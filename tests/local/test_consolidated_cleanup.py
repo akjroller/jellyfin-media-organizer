@@ -140,6 +140,48 @@ def test_parent_does_not_confirm_unrelated_compact_leaf_series() -> None:
     assert parsed.episodes == (3,)
 
 
+def test_filename_title_prefix_is_retained_as_a_conservative_alias() -> None:
+    parsed = parse_video_path(
+        "Dexters Lab S01/[Team] Dexter's Laboratory - Ego Trip S01E01.mkv"
+    )
+
+    assert parsed.series_hint == "Dexter's Laboratory - Ego Trip"
+    assert parsed.series_aliases == (
+        "Dexter's Laboratory - Ego Trip",
+        "Dexter's Laboratory",
+    )
+
+
+def test_filename_title_alias_preserves_distinct_provider_identity() -> None:
+    parses = (
+        ParseResult(
+            series_hint="Dexter's Laboratory - Ego Trip",
+            series_aliases=(
+                "Dexter's Laboratory - Ego Trip",
+                "Dexter's Laboratory",
+            ),
+            season=1,
+            episodes=(1,),
+        ),
+    )
+    distinct = ProviderIdentity("fixture", "distinct")
+    resolution = resolve_show_group_with_provider(
+        "Dexter's Laboratory - Ego Trip",
+        parses,
+        load_overrides(),
+        Provider(
+            shows=(ProviderShow(distinct, "Dexter's Laboratory - Ego Trip", 2005),)
+        ),
+    )
+
+    assert resolution.status is ResolutionStatus.MATCHED
+    assert resolution.show is not None
+    assert resolution.show.provider_identity == distinct
+    assert normalize_show_identity("Dexter's Laboratory") != normalize_show_identity(
+        "Dexter's Laboratory - Ego Trip"
+    )
+
+
 def test_season_collection_context_can_prove_one_subtitle_suffix() -> None:
     parsed = parse_video_path(
         "Example Series S04 -END/[Team] Example Series Final - 05 (WEB 1080p).mkv"

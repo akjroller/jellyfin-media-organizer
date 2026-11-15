@@ -12,18 +12,36 @@ _LEADING_TAGS = re.compile(r"^(?:\[[^\]]+\][ ._-]*)+")
 _TRAILING_YEAR = re.compile(r"(?:^|[\s(])(?P<year>(?:18|19|20|21)\d{2})\)?$")
 _TVMAZE_ID = re.compile(r"(?i)(?:\[?tvmaze(?:[ ._-]?id)?[ ._-]?)(?P<id>\d+)\]?")
 _SEASON_NUMBER = r"(?:\d{1,2}|(?:18|19|20|21)\d{2})"
+# A bare continuation number (no ``E`` marker) directly attached to its
+# separator (``E01-02``, ``E01&02``) is unambiguous.  It must never run into
+# letters (``720p``, ``2nd``).
+_TIGHT_BARE_EPISODE = r"\d{1,3}(?![\dA-Za-z])"
+# Once whitespace separates the continuation (``S01E04 - 5 Years Gone``,
+# ``S01E07 + 8 Mile``), an unpadded number followed by a word is far more
+# likely to start the episode title than to name a second episode.  Zero-padded
+# numbers (``S01E01 & 02 Title``) keep their episode meaning; an unpadded number
+# is accepted only when no word follows it.
+_SPACED_BARE_EPISODE = (
+    r"(?:0\d{1,2}(?![\dA-Za-z])|\d{1,3}(?![\dA-Za-z])(?![ ._]*[^\W\d_]))"
+)
 _SXE = re.compile(
     rf"(?i)S(?P<season>{_SEASON_NUMBER})[ ._-]*E(?P<episode>\d{{1,3}})(?!\d)"
     r"(?P<segment>[A-Za-z](?!\d))?"
     r"(?P<tail>(?:(?:[ ._-]*E\d{1,3}(?!\d))|"
     r"(?:[ &+,/-]+S\d{1,4}[ ._-]*E\d{1,3}(?!\d))|"
-    r"(?:[ &+,]+E?\d{1,3}(?!\d))|"
-    r"(?:[ ._-]*-[ ._-]*E?\d{1,3}(?!\d)))*)"
+    r"(?:\s*[&+,][ &+,]*E\d{1,3}(?!\d))|"
+    rf"(?:[&+,]+{_TIGHT_BARE_EPISODE})|"
+    rf"(?:\s*[&+,][ &+,]*{_SPACED_BARE_EPISODE})|"
+    r"(?:[ ._-]*-[ ._-]*E\d{1,3}(?!\d))|"
+    rf"(?:[._]*-[._]*{_TIGHT_BARE_EPISODE})|"
+    rf"(?:[ ._-]*-[ ._-]*{_SPACED_BARE_EPISODE}))*)"
 )
 _X_NOTATION = re.compile(r"(?i)(?<!\d)(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?!\d)")
 _X_NOTATION_CHAIN = re.compile(
     r"(?i)(?<!\d)(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?!\d)"
-    r"(?P<tail>(?:\s*(?:&|and|,)\s*(?:(?P=season)x)?\d{1,3})*)"
+    r"(?P<tail>(?:(?:\s*(?:&|and|,)\s*(?P=season)x\d{1,3}(?!\d))|"
+    rf"(?:[&,]{_TIGHT_BARE_EPISODE})|"
+    rf"(?:\s*(?:&|and|,)\s*{_SPACED_BARE_EPISODE}))*)"
 )
 _EPISODE_WORD = re.compile(
     r"(?i)(?<![A-Za-z0-9])episode[ ._-]*(?P<episode>\d{1,3})"
@@ -129,9 +147,23 @@ def _filename_series_aliases(series: str | None, stem: str) -> tuple[str, ...]:
         return ()
     if _normalize_text(candidate).casefold() == _normalize_text(series).casefold():
         return ()
+    if _SPECIAL_NUMBERING.search(candidate) is not None:
+        return ()
     if len(re.findall(r"[^\W\d_]+", candidate, flags=re.UNICODE)) < 2:
         return ()
     return (series, candidate)
+
+
+def _series_aliases_for_stem(
+    series: str | None,
+    source: str,
+    stem: str,
+) -> tuple[str, ...]:
+    aliases = (
+        *_series_aliases(series, source),
+        *_filename_series_aliases(series, stem),
+    )
+    return tuple(dict.fromkeys(aliases))
 
 
 def _series_and_year(value: str) -> tuple[str | None, int | None]:
@@ -212,6 +244,9 @@ def _title_hint(stem: str, start: int) -> str | None:
     value = stem[start:]
     value = _TVMAZE_ID.sub(" ", value)
     value = _normalize_text(value)
+    # A conjunction left over from a rejected episode continuation
+    # (``S01E07 + 8 Mile``) is separator noise, not part of the title.
+    value = value.lstrip(" &+,-")
     if not value:
         return None
 
@@ -534,7 +569,7 @@ def _ancestor_episode_context(path: PurePosixPath) -> ParseResult | None:
             candidates.append(
                 ParseResult(
                     series_hint=series,
-                    series_aliases=_series_aliases(series, source),
+                    series_aliases=_series_aliases_for_stem(series, source, component),
                     season=int(match.group("season")),
                     episodes=_episode_list(
                         int(match.group("episode")), match.group("tail")
@@ -552,7 +587,7 @@ def _ancestor_episode_context(path: PurePosixPath) -> ParseResult | None:
             candidates.append(
                 ParseResult(
                     series_hint=series,
-                    series_aliases=_series_aliases(series, source),
+                    series_aliases=_series_aliases_for_stem(series, source, component),
                     season=int(match.group("season")),
                     episodes=(int(match.group("episode")),),
                     year=year,
@@ -604,7 +639,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
         absolute_episode, title_start = _dual_absolute_after_sxe(stem, match)
         return ParseResult(
             series_hint=series,
-            series_aliases=_series_aliases(series, source),
+            series_aliases=_series_aliases_for_stem(series, source, stem),
             season=int(match.group("season")),
             episodes=_episode_list(int(match.group("episode")), match.group("tail")),
             absolute_episode=absolute_episode,
@@ -620,7 +655,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
         series, year = _series_for_match(stem, path, match)
         return ParseResult(
             series_hint=series,
-            series_aliases=_series_aliases(series, source),
+            series_aliases=_series_aliases_for_stem(series, source, stem),
             season=int(match.group("season")),
             episodes=_episode_list(int(match.group("episode")), match.group("tail")),
             year=year,
@@ -634,7 +669,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
         series, year = _series_and_year(source)
         return ParseResult(
             series_hint=series,
-            series_aliases=_series_aliases(series, source),
+            series_aliases=_series_aliases_for_stem(series, source, stem),
             season=int(match.group("season")),
             episodes=(int(match.group("episode")),),
             segment_hint=(match.group("segment") or None),
@@ -649,7 +684,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
         series, year = _series_for_match(stem, path, match)
         return ParseResult(
             series_hint=series,
-            series_aliases=_series_aliases(series, source),
+            series_aliases=_series_aliases_for_stem(series, source, stem),
             special_kind=match.group("kind").casefold(),
             special_episode=int(match.group("episode")),
             year=year,
@@ -665,7 +700,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
             series, year = _series_for_match(stem, path, date_match)
             return ParseResult(
                 series_hint=series,
-                series_aliases=_series_aliases(series, source),
+                series_aliases=_series_aliases_for_stem(series, source, stem),
                 episode_date=episode_date,
                 year=year,
                 embedded_tvmaze_id=embedded_id,
@@ -678,7 +713,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
         series, year = _series_for_match(stem, path, match)
         return ParseResult(
             series_hint=series,
-            series_aliases=_series_aliases(series, source),
+            series_aliases=_series_aliases_for_stem(series, source, stem),
             absolute_episode=(
                 int(match.group("episode")) if match.group("last") is None else None
             ),
@@ -729,7 +764,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
         # a provider match.
         return ParseResult(
             series_hint=series,
-            series_aliases=_series_aliases(series, source),
+            series_aliases=_series_aliases_for_stem(series, source, stem),
             year=year,
             embedded_tvmaze_id=embedded_id,
             title_hint=_title_hint(stem, match.end()),
@@ -746,7 +781,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
         series, year = _series_and_year(source)
         return ParseResult(
             series_hint=series,
-            series_aliases=_series_aliases(series, source),
+            series_aliases=_series_aliases_for_stem(series, source, stem),
             absolute_episode=int(match.group("episode")),
             year=year,
             embedded_tvmaze_id=embedded_id,
@@ -771,7 +806,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
             )
         return ParseResult(
             series_hint=series,
-            series_aliases=_series_aliases(series, source),
+            series_aliases=_series_aliases_for_stem(series, source, stem),
             absolute_episode=episode,
             year=year,
             embedded_tvmaze_id=embedded_id,
@@ -796,7 +831,7 @@ def parse_video_path(relative_path: str) -> ParseResult:
             )
         return ParseResult(
             series_hint=series,
-            series_aliases=_series_aliases(series, source),
+            series_aliases=_series_aliases_for_stem(series, source, stem),
             absolute_episode=episode,
             year=year,
             embedded_tvmaze_id=embedded_id,

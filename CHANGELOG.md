@@ -10,6 +10,29 @@ All notable public changes will be documented in this file. The project follows 
   directory they remove again. NFS, SMB, and FUSE mounts that reject
   `RENAME_NOREPLACE` now fail early with a clear explanation instead of a raw
   "Invalid argument" partway through an apply.
+- Video containers JMO does not organize yet (`.m4v`, `.ts`, `.m2ts`,
+  `.webm`, `.mov`, `.wmv`, and others) are now reported instead of being
+  dropped silently. They and excluded samples are listed in a new
+  `skipped.csv` audit file, counted in `summary.txt`, `jmo inspect`,
+  `jmo report`, and the `jmo plan` output, and never moved. One such file
+  next to a planned video no longer blocks the whole plan as an
+  "unsupported adjacent file"; it is an ignored companion left in place.
+- Provider caches no longer persist transient failures (timeouts, rate
+  limits, 5xx, network errors). One network blip no longer makes later runs
+  fail until `--refresh`; online runs retry such entries, including ones
+  written by older versions.
+- A failed `--refresh` now keeps the previous good provider response instead
+  of overwriting it with the error.
+- TVMaze and TMDb now share one cache implementation, so TMDb follows the
+  documented refresh, freshness, and failure-classification policy.
+- Provider HTTP requests are rate limited and retry 429/5xx/network failures
+  with bounded backoff, honouring `Retry-After`. DNS, connection, and timeout
+  errors are now classified instead of reported as unknown.
+- Fixed episode titles that begin with a number (for example
+  `S01E04 5 Years Gone`) and space-separated resolutions (`S01E01 720p`)
+  being parsed as an extra episode, which could plan a single episode as a
+  two-part `S01E04-E05` match. Zero-padded and tightly attached
+  continuations (`S01E01 & 02`, `S01E09-10`) remain multi-episode.
 - Improved conservative show-title extraction for release trees whose folder
   names contain subtitle text, while preserving conflicting title evidence as
   unresolved instead of guessing.

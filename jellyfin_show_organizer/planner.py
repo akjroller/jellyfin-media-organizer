@@ -9,9 +9,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import cast
-from urllib.error import HTTPError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 from . import __version__
 from .destination import (
@@ -36,9 +33,11 @@ from .extra_classifier import ExtraClassification, ExtraDisposition, classify_ex
 from .extra_naming import derive_extra_display_identity
 from .inventory import (
     AuthorizedShowsRoot,
+    InventoryRecord,
     InventoryStatus,
     authorize_shows_root,
     scan_videos,
+    skipped_inventory_records,
 )
 from .models import (
     CacheSnapshot,
@@ -63,6 +62,11 @@ from .preflight import (
     preflight_plan,
 )
 from .provider_aliases import TvmazeAliasProviderAdapter
+from .provider_http import (  # re-exported for existing callers
+    TVMAZE_MIN_INTERVAL_SECONDS,
+    ProviderHttpError as ProviderHttpError,
+    ThrottledJsonGetter,
+)
 from .providers import (
     AutoProviderAdapter,
     MetadataProvider,
@@ -99,12 +103,6 @@ from .tvmaze_cache import (
 
 class PlanningConfigurationError(ValueError):
     """Raised when a requested plan cannot be run within the safety contract."""
-
-
-class ProviderHttpError(RuntimeError):
-    def __init__(self, status_code: int, message: str) -> None:
-        super().__init__(message)
-        self.status_code = status_code
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +162,7 @@ class PlanningOutcome:
     provider_strategy: str = "tvmaze"
     provider_names: tuple[str, ...] = ("tvmaze",)
     tmdb_available: bool = False
+    skipped_inventory: tuple[InventoryRecord, ...] = ()
 
 
 class TrackingTvmazeCatalogCache(TvmazeCatalogCache):
@@ -213,22 +212,12 @@ class TrackingTmdbCatalogCache(TmdbCatalogCache):
         return self._track(super().episode_catalog(tmdb_id, getter))
 
 
-def http_json_getter(
-    url: str,
-    params: Mapping[str, str] | None = None,
-) -> object:
-    query = urlencode(sorted((params or {}).items()))
-    target = f"{url}?{query}" if query else url
-    request = Request(
-        target,
-        headers={"Accept": "application/json", "User-Agent": f"JMO/{__version__}"},
-    )
-    try:
-        with urlopen(request, timeout=20) as response:  # noqa: S310
-            payload = response.read()
-    except HTTPError as exc:
-        raise ProviderHttpError(exc.code, f"provider HTTP {exc.code}") from exc
-    return json.loads(payload.decode("utf-8"))
+# One shared, throttled getter keeps every planning, review, and wizard call
+# within TVMaze's published rate limit for the whole process.
+http_json_getter: JsonGetter = ThrottledJsonGetter(
+    headers={"Accept": "application/json", "User-Agent": f"JMO/{__version__}"},
+    min_interval=TVMAZE_MIN_INTERVAL_SECONDS,
+)
 
 
 def _path_key(value: str) -> tuple[str, str]:
@@ -1033,8 +1022,10 @@ def _build_plan(
     *,
     extra_cache_snapshots: tuple[CacheSnapshot, ...] = (),
     progress: Callable[[str, int, int], None] | None = None,
+    inventory: tuple[InventoryRecord, ...] | None = None,
 ) -> OrganizerPlan:
-    inventory = scan_videos(source_root)
+    if inventory is None:
+        inventory = scan_videos(source_root)
     blocked = tuple(
         record
         for record in inventory
@@ -1288,6 +1279,8 @@ def execute_plan(
     else:
         provider = tvmaze_provider
     tmdb_snapshots = _cache_snapshots(tmdb_cache) if tmdb_cache is not None else ()
+    inventory = scan_videos(source_root)
+    skipped = skipped_inventory_records(inventory)
     plan = _build_plan(
         source_root,
         config,
@@ -1295,6 +1288,7 @@ def execute_plan(
         cache,
         provider,
         extra_cache_snapshots=tmdb_snapshots,
+        inventory=inventory,
     )
     plan_hash = stable_plan_hash(plan)
     preflight = preflight_plan(
@@ -1336,6 +1330,7 @@ def execute_plan(
         plan,
         preflight,
         run_provenance_json=render_run_provenance(run_provenance),
+        skipped=skipped,
     )
     return PlanningOutcome(
         plan=plan,
@@ -1345,4 +1340,5 @@ def execute_plan(
         provider_strategy=actual_provider_strategy,
         provider_names=actual_provider_names,
         tmdb_available=tmdb_cache is not None,
+        skipped_inventory=skipped,
     )

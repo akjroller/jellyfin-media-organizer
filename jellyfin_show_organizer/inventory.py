@@ -9,6 +9,33 @@ from pathlib import Path, PurePosixPath
 from .models import SourceFile, SourceFingerprint
 
 VIDEO_EXTENSIONS = frozenset({".avi", ".mkv", ".mp4"})
+# Video containers Jellyfin can play that JMO does not plan yet.  They are
+# reported as skipped instead of silently disappearing from the inventory.
+UNSUPPORTED_VIDEO_EXTENSIONS = frozenset(
+    {
+        ".3gp",
+        ".asf",
+        ".divx",
+        ".flv",
+        ".iso",
+        ".m2ts",
+        ".m2v",
+        ".m4v",
+        ".mov",
+        ".mpeg",
+        ".mpg",
+        ".mts",
+        ".ogm",
+        ".ogv",
+        ".rm",
+        ".rmvb",
+        ".ts",
+        ".vob",
+        ".webm",
+        ".wmv",
+        ".wtv",
+    }
+)
 IGNORED_DIRECTORY_NAMES = frozenset(
     {
         "artwork",
@@ -24,6 +51,7 @@ _SAMPLE_TOKEN = re.compile(r"(?:^|[ ._-])sample(?:$|[ ._-])", re.IGNORECASE)
 class InventoryStatus(StrEnum):
     INCLUDED = "included"
     EXCLUDED_SAMPLE = "excluded-sample"
+    UNSUPPORTED_VIDEO = "unsupported-video"
     BLOCKED_LINK = "blocked-link"
     UNREADABLE = "unreadable"
 
@@ -109,6 +137,21 @@ def _blocked_link_record(root: Path, path: Path) -> InventoryRecord:
     )
 
 
+SKIPPED_INVENTORY_STATUSES = frozenset(
+    {InventoryStatus.EXCLUDED_SAMPLE, InventoryStatus.UNSUPPORTED_VIDEO}
+)
+
+
+def skipped_inventory_records(
+    inventory: tuple[InventoryRecord, ...],
+) -> tuple[InventoryRecord, ...]:
+    """Return video-like entries that are deliberately left out of the plan."""
+
+    return tuple(
+        record for record in inventory if record.status in SKIPPED_INVENTORY_STATUSES
+    )
+
+
 def scan_videos(root: AuthorizedShowsRoot) -> tuple[InventoryRecord, ...]:
     if not isinstance(root, AuthorizedShowsRoot):
         raise TypeError("scan_videos requires an explicitly authorized Shows root")
@@ -159,6 +202,16 @@ def scan_videos(root: AuthorizedShowsRoot) -> tuple[InventoryRecord, ...]:
                 continue
 
             if extension not in VIDEO_EXTENSIONS:
+                if extension in UNSUPPORTED_VIDEO_EXTENSIONS:
+                    records.append(
+                        InventoryRecord(
+                            relative_path=path.relative_to(root.path).as_posix(),
+                            extension=extension,
+                            status=InventoryStatus.UNSUPPORTED_VIDEO,
+                            fingerprint=None,
+                            reason=f"unsupported-extension:{extension}",
+                        )
+                    )
                 continue
 
             try:

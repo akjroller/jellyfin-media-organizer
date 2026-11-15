@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, ClassVar, Protocol, cast
 from uuid import uuid4
 
 CACHE_SCHEMA_VERSION = 2
@@ -50,6 +50,19 @@ class ProviderFailureKind(StrEnum):
     NETWORK = "network"
     MALFORMED_RESPONSE = "malformed-response"
     UNKNOWN = "unknown"
+
+
+class MalformedProviderResponse(ValueError):
+    """A provider answered, but not with the documented response shape."""
+
+
+# Only deterministic provider answers are persisted as failures.  Timeouts,
+# rate limits, 5xx responses, network failures, and unclassified errors describe
+# the moment of the request rather than the provider's data, so persisting them
+# would make one network blip fail every later ordinary run.
+PERSISTED_FAILURE_KINDS = frozenset(
+    {ProviderFailureKind.NOT_FOUND, ProviderFailureKind.MALFORMED_RESPONSE}
+)
 
 
 class JsonGetter(Protocol):
@@ -114,6 +127,17 @@ class CacheRecord:
 
 
 Clock = Callable[[], datetime]
+
+
+def is_transient_failure(record: CacheRecord) -> bool:
+    """Whether an error record should be retried instead of replayed online."""
+
+    return (
+        record.state is CacheState.ERROR
+        and record.failure_kind not in PERSISTED_FAILURE_KINDS
+    )
+
+
 Validator = Callable[[object], None]
 
 
@@ -176,7 +200,9 @@ def _status_code(error: Exception) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def _classify_failure(error: Exception) -> ProviderFailureKind:
+def classify_provider_failure(error: Exception) -> ProviderFailureKind:
+    if isinstance(error, MalformedProviderResponse):
+        return ProviderFailureKind.MALFORMED_RESPONSE
     if isinstance(error, TimeoutError):
         return ProviderFailureKind.TIMEOUT
     status = _status_code(error)
@@ -191,7 +217,17 @@ def _classify_failure(error: Exception) -> ProviderFailureKind:
     return ProviderFailureKind.UNKNOWN
 
 
-class TvmazeCatalogCache:
+class ProviderCatalogCache:
+    """Persistent, provider-namespaced request cache with fail-closed replay.
+
+    Ordinary runs replay any persisted record, even a stale one, so planning
+    stays deterministic.  Online runs retry transient failures instead of
+    replaying them.  Refresh mode re-fetches stale, corrupt, and failed entries,
+    but a failed refresh never replaces a previously successful response.
+    """
+
+    provider_name: ClassVar[str] = TVMAZE_PROVIDER
+
     def __init__(
         self,
         root: Path,
@@ -209,35 +245,6 @@ class TvmazeCatalogCache:
         self.offline = offline
         self.refresh = refresh
 
-    def search_show(self, title: str, getter: JsonGetter) -> CacheRecord:
-        normalized_title = normalize_search_title(title)
-        request_key = _search_key(title)
-        path = self.root / "search" / _search_filename(request_key)
-        params = {"q": normalized_title}
-        return self._get_or_fetch(
-            path=path,
-            kind=CacheKind.SEARCH,
-            request_key=request_key,
-            url=TVMAZE_SEARCH_URL,
-            params=params,
-            getter=getter,
-            validator=_validate_list_response,
-        )
-
-    def episode_catalog(self, tvmaze_id: int, getter: JsonGetter) -> CacheRecord:
-        request_key = _episodes_key(tvmaze_id)
-        path = self.root / "episodes" / f"{tvmaze_id}.json"
-        params = {"specials": "1"}
-        return self._get_or_fetch(
-            path=path,
-            kind=CacheKind.EPISODES,
-            request_key=request_key,
-            url=TVMAZE_EPISODES_URL.format(tvmaze_id=tvmaze_id),
-            params=params,
-            getter=getter,
-            validator=_validate_list_response,
-        )
-
     def _get_or_fetch(
         self,
         *,
@@ -246,7 +253,7 @@ class TvmazeCatalogCache:
         request_key: str,
         url: str,
         params: Mapping[str, str],
-        getter: JsonGetter,
+        fetch: Callable[[], object],
         validator: Validator,
     ) -> CacheRecord:
         cached = self._read(path, kind, request_key)
@@ -254,7 +261,7 @@ class TvmazeCatalogCache:
             cached = self._with_freshness(cached)
             if self.offline:
                 return cached
-            if not self.refresh:
+            if not self.refresh and not is_transient_failure(cached):
                 return cached
             if (
                 cached.state is CacheState.OK
@@ -265,8 +272,16 @@ class TvmazeCatalogCache:
         if self.offline:
             return self._miss_record(kind, request_key, url, params)
 
-        record = self._fetch(kind, request_key, url, params, getter, validator)
-        self._write(path, record)
+        record = self._fetch(kind, request_key, url, params, fetch, validator)
+        if record.state is CacheState.OK:
+            self._write(path, record)
+            return record
+        if cached is not None and cached.state is CacheState.OK:
+            # A failed refresh keeps the last good response as replayable
+            # (and visibly stale) evidence instead of destroying it.
+            return cached
+        if record.failure_kind in PERSISTED_FAILURE_KINDS:
+            self._write(path, record)
         return record
 
     def _fetch(
@@ -275,11 +290,11 @@ class TvmazeCatalogCache:
         request_key: str,
         url: str,
         params: Mapping[str, str],
-        getter: JsonGetter,
+        fetch: Callable[[], object],
         validator: Validator,
     ) -> CacheRecord:
         try:
-            response = getter(url, params)
+            response = fetch()
         except Exception as exc:
             return self._error_record(kind, request_key, url, params, exc)
 
@@ -294,6 +309,7 @@ class TvmazeCatalogCache:
                 response=None,
                 error=f"malformed provider response: {exc}",
                 source=CacheSource.NETWORK,
+                provider=self.provider_name,
                 request_url=url,
                 request_params=_request_params(params),
                 failure_kind=ProviderFailureKind.MALFORMED_RESPONSE,
@@ -318,6 +334,7 @@ class TvmazeCatalogCache:
             response=response,
             error=None,
             source=CacheSource.NETWORK,
+            provider=self.provider_name,
             request_url=url,
             request_params=_request_params(params),
             freshness=CacheFreshness.FRESH,
@@ -331,7 +348,7 @@ class TvmazeCatalogCache:
         params: Mapping[str, str],
         error: Exception,
     ) -> CacheRecord:
-        failure_kind = _classify_failure(error)
+        failure_kind = classify_provider_failure(error)
         return CacheRecord(
             kind=kind,
             request_key=request_key,
@@ -340,6 +357,7 @@ class TvmazeCatalogCache:
             response=None,
             error=f"{failure_kind.value}: {type(error).__name__}: {error}",
             source=CacheSource.NETWORK,
+            provider=self.provider_name,
             request_url=url,
             request_params=_request_params(params),
             failure_kind=failure_kind,
@@ -361,6 +379,7 @@ class TvmazeCatalogCache:
             response=None,
             error="offline cache miss",
             source=CacheSource.POLICY,
+            provider=self.provider_name,
             request_url=url,
             request_params=_request_params(params),
             freshness=CacheFreshness.UNKNOWN,
@@ -391,7 +410,7 @@ class TvmazeCatalogCache:
             return None
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-            record = _decode_record(raw)
+            record = _decode_record(raw, provider=self.provider_name)
         except (
             OSError,
             UnicodeError,
@@ -407,6 +426,7 @@ class TvmazeCatalogCache:
                 response=None,
                 error=f"corrupt cache entry: {type(exc).__name__}: {exc}",
                 source=CacheSource.CACHE,
+                provider=self.provider_name,
             )
 
         if record.kind is not kind or record.request_key != request_key:
@@ -418,6 +438,7 @@ class TvmazeCatalogCache:
                 response=None,
                 error="corrupt cache entry: request identity mismatch",
                 source=CacheSource.CACHE,
+                provider=self.provider_name,
             )
         return replace(record, source=CacheSource.CACHE)
 
@@ -435,6 +456,40 @@ class TvmazeCatalogCache:
             os.replace(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
+
+
+class TvmazeCatalogCache(ProviderCatalogCache):
+    provider_name = TVMAZE_PROVIDER
+
+    def search_show(self, title: str, getter: JsonGetter) -> CacheRecord:
+        normalized_title = normalize_search_title(title)
+        request_key = _search_key(title)
+        path = self.root / "search" / _search_filename(request_key)
+        params = {"q": normalized_title}
+        return self._get_or_fetch(
+            path=path,
+            kind=CacheKind.SEARCH,
+            request_key=request_key,
+            url=TVMAZE_SEARCH_URL,
+            params=params,
+            fetch=lambda: getter(TVMAZE_SEARCH_URL, params),
+            validator=_validate_list_response,
+        )
+
+    def episode_catalog(self, tvmaze_id: int, getter: JsonGetter) -> CacheRecord:
+        request_key = _episodes_key(tvmaze_id)
+        path = self.root / "episodes" / f"{tvmaze_id}.json"
+        params = {"specials": "1"}
+        url = TVMAZE_EPISODES_URL.format(tvmaze_id=tvmaze_id)
+        return self._get_or_fetch(
+            path=path,
+            kind=CacheKind.EPISODES,
+            request_key=request_key,
+            url=url,
+            params=params,
+            fetch=lambda: getter(url, params),
+            validator=_validate_list_response,
+        )
 
 
 def _encode_record(record: CacheRecord) -> dict[str, Any]:
@@ -455,7 +510,7 @@ def _encode_record(record: CacheRecord) -> dict[str, Any]:
     }
 
 
-def _decode_record(raw: object) -> CacheRecord:
+def _decode_record(raw: object, *, provider: str = TVMAZE_PROVIDER) -> CacheRecord:
     if not isinstance(raw, dict):
         raise ValueError("cache entry must be an object")
     value = cast(dict[str, object], raw)
@@ -477,7 +532,7 @@ def _decode_record(raw: object) -> CacheRecord:
     if value["schema_version"] != CACHE_SCHEMA_VERSION:
         raise ValueError("unsupported cache schema version")
 
-    provider = value["provider"]
+    stored_provider = value["provider"]
     request_key = value["request_key"]
     request_url = value["request_url"]
     request_params = value["request_params"]
@@ -486,7 +541,7 @@ def _decode_record(raw: object) -> CacheRecord:
     failure_kind_value = value["failure_kind"]
     kind_value = value["kind"]
     state_value = value["state"]
-    if provider != TVMAZE_PROVIDER:
+    if stored_provider != provider:
         raise ValueError("cache provider is invalid")
     if not isinstance(request_key, str) or not request_key:
         raise ValueError("cache request_key must be a non-empty string")

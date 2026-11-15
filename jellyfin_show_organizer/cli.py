@@ -20,6 +20,7 @@ from .apply_execution import (
     total_moving_members,
 )
 from .apply_validation import ApplyFilesystemError, validate_apply_roots
+from .inventory import InventoryStatus
 from .models import TerminalStatus
 from .provider_aliases import TvmazeAliasProviderAdapter
 from .providers import AutoProviderAdapter, MetadataProvider, TmdbProviderAdapter
@@ -556,6 +557,8 @@ def _run_plan(args: argparse.Namespace) -> int:
     else:
         exit_code = PLAN_SUCCESS_EXIT
 
+    skipped_counts = Counter(record.status for record in outcome.skipped_inventory)
+    unsupported_videos = skipped_counts[InventoryStatus.UNSUPPORTED_VIDEO]
     summary = {
         "schema_version": 1,
         "plan_sha256": outcome.preflight.plan_hash,
@@ -565,6 +568,10 @@ def _run_plan(args: argparse.Namespace) -> int:
         "preflight_ready": outcome.preflight.ready,
         "preflight_findings": len(outcome.preflight.findings),
         "provider_failure": outcome.provider_failure,
+        "skipped": {
+            "samples": skipped_counts[InventoryStatus.EXCLUDED_SAMPLE],
+            "unsupported_videos": unsupported_videos,
+        },
         "provider": {
             "strategy": outcome.provider_strategy,
             "tmdb_token_configured": bool(
@@ -594,6 +601,21 @@ def _run_plan(args: argparse.Namespace) -> int:
         else:
             print(f"Provider strategy: {config.provider_strategy} (TVMaze only)")
         print(f"Audit bundle: {config.output_dir.resolve(strict=False)}")
+        if unsupported_videos:
+            extensions = ", ".join(
+                sorted(
+                    {
+                        record.extension
+                        for record in outcome.skipped_inventory
+                        if record.status is InventoryStatus.UNSUPPORTED_VIDEO
+                    }
+                )
+            )
+            print(
+                f"Skipped {unsupported_videos} video file(s) in formats JMO does "
+                f"not organize yet ({extensions}); they are listed in skipped.csv "
+                "and will not be moved."
+            )
         if outcome.preflight.ready:
             print(
                 "Next step: inspect the bundle, then run jmo review if duplicate or held items need decisions."
