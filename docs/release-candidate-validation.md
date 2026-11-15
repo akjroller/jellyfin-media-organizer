@@ -4,14 +4,14 @@ The release-candidate gates use fabricated files created beneath temporary test 
 
 `tests/local/test_release_candidate_stress.py` builds a blocked review corpus. It accounts for every video while exercising ambiguous editions, weak provider matches, conflicting extra evidence, duplicate provider-episode releases, destination collisions between different logical identities, unsupported adjacent files, and whole-plan preflight rejection.
 
-`tests/local/test_release_candidate_ready.py` builds the corrected ready corpus. It covers provider-title matching, aliases, aired and season-zero numbering, multi-episode files, absolute and parenthesized-absolute numbering, distinct segments, specials, date matching, extras, subtitle companions, Unicode/mojibake recovery, and invalid destination-character encoding.
+`tests/local/test_release_candidate_ready.py` builds the corrected ready corpus. It covers provider-title matching, aliases, aired and season-zero numbering, multi-episode files, absolute and parenthesized-absolute numbering, distinct segments, specials, date matching, extras, subtitle and episode-metadata companions, Unicode/mojibake recovery, and invalid destination-character encoding.
 
 The ready corpus contains 15 video records and four companion records. Its approved plan-only context is:
 
 - tool version: `0.1.0`;
 - plan schema: `3`;
 - provider cache: ten successful synthetic snapshots;
-- immutable plan hash: `fede198a3502d4231c37c54aeec2d3b315096156b5f793c11b5b8981dc759b03`.
+- immutable plan hash: `7ebd584e3aee3fb336c7dea6133f1ce088988f5fe857fe94bbdcdea6b4d71ada`.
 
 The test fixes all synthetic timestamps and the cache clock, regenerates the exact approved hash, and then repeats the plan against the warmed cache in offline mode. Offline replay must make zero provider calls and reproduce identical plan JSON, summary output, provenance, and plan hash. Both source snapshots remain unchanged and the destination roots remain empty.
 

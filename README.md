@@ -88,7 +88,8 @@ JMO is intentionally conservative: planning and review remain non-mutating, whil
 - canonical TVMaze show resolution with fail-closed ambiguity handling;
 - a namespaced metadata-provider boundary with TVMaze and optional TMDb support;
 - end-to-end, show-grouped plan generation with cached provider metadata;
-- companion subtitle planning and duplicate-safe operation groups;
+- companion planning for subtitles and Jellyfin episode files (`<episode>.nfo`
+  and `<episode>-thumb.jpg`), with duplicate-safe operation groups;
 - immutable JSON/CSV/text audit bundles with provenance and stable hashes;
 - whole-plan preflight that blocks unresolved, colliding, or unsafe plans;
 - session-bound, resumable **non-mutating review** for duplicate groups and held sources;

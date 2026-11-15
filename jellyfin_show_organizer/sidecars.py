@@ -28,6 +28,15 @@ IGNORED_ADJACENT_EXTENSIONS = frozenset(
         ".tiff",
     }
 )
+# Jellyfin's episode-level local files: "<video filename>.nfo" for metadata and
+# "<video filename>-thumb.<image>" for the episode image.  Series and season
+# files (tvshow.nfo, season.nfo, poster.jpg, ...) belong to folders, not to an
+# episode, and stay ignored.
+EPISODE_METADATA_EXTENSION = ".nfo"
+EPISODE_THUMBNAIL_EXTENSIONS = frozenset(
+    {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
+)
+EPISODE_THUMBNAIL_SUFFIX = "-thumb"
 _RELEASE_PACKAGE_EXTENSIONS = frozenset({".rar", ".sfv", ".srr"})
 _RAR_VOLUME_EXTENSION = re.compile(r"^\.r\d{2}$", re.IGNORECASE)
 _RELEASE_MARKER_ARTIFACT = re.compile(
@@ -51,6 +60,8 @@ class AdjacentDisposition(StrEnum):
 class CompanionKind(StrEnum):
     SUBTITLE = "subtitle"
     SUBTITLE_PAIR = "subtitle-pair"
+    METADATA = "metadata"
+    THUMBNAIL = "thumbnail"
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +183,33 @@ def _subtitle_candidates(
     return tuple(candidates)
 
 
+def _episode_metadata_candidates(
+    stem: str, extension: str, videos: tuple[SourceFile, ...]
+) -> tuple[tuple[SourceFile, CompanionKind, str], ...] | None:
+    """Return episode-file matches, or None when the file is not episode metadata.
+
+    Matching is exact (case-insensitive) against the video's filename stem, as
+    Jellyfin's own episode naming requires; no partial or fuzzy matches.
+    """
+
+    folded = stem.casefold()
+    if extension == EPISODE_METADATA_EXTENSION:
+        kind, suffix, video_stem = CompanionKind.METADATA, "", folded
+    elif extension in EPISODE_THUMBNAIL_EXTENSIONS and folded.endswith(
+        EPISODE_THUMBNAIL_SUFFIX
+    ):
+        kind = CompanionKind.THUMBNAIL
+        suffix = EPISODE_THUMBNAIL_SUFFIX
+        video_stem = folded[: -len(EPISODE_THUMBNAIL_SUFFIX)]
+    else:
+        return None
+    return tuple(
+        (video, kind, suffix)
+        for video in videos
+        if PurePosixPath(video.relative_path).stem.casefold() == video_stem
+    )
+
+
 def _ignored_adjacent_reason(path: Path, extension: str) -> str | None:
     if extension in IGNORED_ADJACENT_EXTENSIONS:
         return "explicitly-ignored-adjacent-file"
@@ -190,6 +228,92 @@ def _ignored_adjacent_reason(path: Path, extension: str) -> str | None:
     if extension == ".txt" and _EPISODE_GUIDE_DOCUMENT.search(path.stem) is not None:
         return "known-episode-guide-document"
     return None
+
+
+MetadataKey = tuple[str, CompanionKind, str, str]
+
+
+def _route_episode_metadata(
+    relative_path: str,
+    extension: str,
+    fingerprint: SourceFingerprint,
+    videos: tuple[SourceFile, ...],
+    metadata_files: dict[MetadataKey, list[AdjacentFile]],
+    ignored: list[AdjacentFile],
+) -> bool:
+    """Collect an episode .nfo or thumbnail; return False if it is neither."""
+
+    matches = _episode_metadata_candidates(
+        PurePosixPath(relative_path).stem, extension, videos
+    )
+    if not matches:
+        return False
+    if len(matches) == 1:
+        video, kind, suffix = matches[0]
+        metadata_files.setdefault(
+            (video.relative_path, kind, suffix, extension), []
+        ).append(
+            AdjacentFile(
+                relative_path=relative_path,
+                extension=extension,
+                fingerprint=fingerprint,
+                disposition=AdjacentDisposition.ASSOCIATED,
+                reason="deterministic-episode-metadata-association",
+            )
+        )
+    else:
+        # Several videos share this stem (for example an .mkv and an .m4v of
+        # one episode).  Leave the file where it is.
+        ignored.append(
+            AdjacentFile(
+                relative_path=relative_path,
+                extension=extension,
+                fingerprint=fingerprint,
+                disposition=AdjacentDisposition.IGNORED,
+                reason="ambiguous-episode-metadata",
+            )
+        )
+    return True
+
+
+def _episode_metadata_groups(
+    metadata_files: dict[MetadataKey, list[AdjacentFile]],
+    ignored: list[AdjacentFile],
+) -> list[CompanionGroup]:
+    groups: list[CompanionGroup] = []
+    for (source_video, kind, suffix, _extension), files in sorted(
+        metadata_files.items(),
+        key=lambda item: (
+            item[0][0].casefold(),
+            item[0][1].value,
+            item[0][2],
+            item[0][3],
+            item[0][0],
+        ),
+    ):
+        if len(files) != 1:
+            # Case-only variants on a case-sensitive filesystem cannot share one
+            # destination; keep them all in place rather than guess.
+            ignored.extend(
+                AdjacentFile(
+                    relative_path=file.relative_path,
+                    extension=file.extension,
+                    fingerprint=file.fingerprint,
+                    disposition=AdjacentDisposition.IGNORED,
+                    reason="duplicate-episode-metadata",
+                )
+                for file in files
+            )
+            continue
+        groups.append(
+            CompanionGroup(
+                source_video=source_video,
+                kind=kind,
+                suffix=suffix,
+                files=tuple(files),
+            )
+        )
+    return groups
 
 
 def discover_sidecars(
@@ -223,6 +347,7 @@ def discover_sidecars(
     unresolved: list[AdjacentFile] = []
     ignored: list[AdjacentFile] = []
     subtitle_files: dict[tuple[str, str], list[AdjacentFile]] = {}
+    metadata_files: dict[tuple[str, CompanionKind, str, str], list[AdjacentFile]] = {}
 
     for directory_name in sorted(
         by_directory,
@@ -301,6 +426,16 @@ def discover_sidecars(
                         reason="not-a-regular-file",
                     )
                 )
+                continue
+
+            if _route_episode_metadata(
+                relative_path,
+                extension,
+                fingerprint,
+                videos_here,
+                metadata_files,
+                ignored,
+            ):
                 continue
 
             ignored_reason = _ignored_adjacent_reason(path, extension)
@@ -420,6 +555,8 @@ def discover_sidecars(
                     files=(file,),
                 )
             )
+
+    companions.extend(_episode_metadata_groups(metadata_files, ignored))
 
     companions.sort(
         key=lambda group: (
