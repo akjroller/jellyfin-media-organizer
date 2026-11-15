@@ -62,8 +62,8 @@ ASSISTANT_ATTRIBUTION = re.compile(
 # Each entry exempts exactly one known line in exactly one commit; every other
 # line of that message, and the same text in any other commit, is still checked.
 KNOWN_COMMIT_MESSAGE_EXCEPTIONS = {
-    # #304 squash merge: the PR description's assistant attribution line became
-    # part of the commit message. Kept rather than force-pushing `main`.
+    # #304 squash merge: a PR-description line this gate rejects became part
+    # of the commit message. Kept rather than force-pushing `main`.
     "455bf1bbea0bf11dabdcecd70a068f0d6e178a27": (
         "\U0001f916 Generated with [Claude Code](https://claude.com/claude-code)"
     ),
