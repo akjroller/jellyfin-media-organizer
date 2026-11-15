@@ -37,6 +37,26 @@ EPISODE_THUMBNAIL_EXTENSIONS = frozenset(
     {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 )
 EPISODE_THUMBNAIL_SUFFIX = "-thumb"
+# Jellyfin's documented series-level local files.  Only files sitting directly
+# in a top-level source show folder are considered; season folders are not.
+SHOW_METADATA_NAMES = frozenset({"tvshow.nfo"})
+SHOW_IMAGE_STEMS = frozenset(
+    {
+        "art",
+        "backdrop",
+        "background",
+        "banner",
+        "clearlogo",
+        "cover",
+        "fanart",
+        "folder",
+        "landscape",
+        "logo",
+        "poster",
+        "show",
+        "thumb",
+    }
+)
 _RELEASE_PACKAGE_EXTENSIONS = frozenset({".rar", ".sfv", ".srr"})
 _RAR_VOLUME_EXTENSION = re.compile(r"^\.r\d{2}$", re.IGNORECASE)
 _RELEASE_MARKER_ARTIFACT = re.compile(
@@ -103,6 +123,9 @@ class SidecarDiscovery:
     companions: tuple[CompanionGroup, ...]
     unresolved: tuple[AdjacentFile, ...]
     ignored: tuple[AdjacentFile, ...]
+    # Series-level files found directly in top-level source show folders; the
+    # planner decides whether each can move with that show or stays in place.
+    show_files: tuple[AdjacentFile, ...] = ()
 
 
 def _windows_path_key(relative_path: str) -> tuple[str, str]:
@@ -208,6 +231,67 @@ def _episode_metadata_candidates(
         for video in videos
         if PurePosixPath(video.relative_path).stem.casefold() == video_stem
     )
+
+
+def is_show_level_file(name: str) -> bool:
+    """Whether a filename is one of Jellyfin's series-level local files."""
+
+    folded = name.casefold()
+    path = PurePosixPath(folded)
+    if folded in SHOW_METADATA_NAMES:
+        return True
+    return path.suffix in EPISODE_THUMBNAIL_EXTENSIONS and path.stem in SHOW_IMAGE_STEMS
+
+
+def _show_file(relative_path: str, fingerprint: SourceFingerprint) -> AdjacentFile:
+    return AdjacentFile(
+        relative_path=relative_path,
+        extension=PurePosixPath(relative_path).suffix.casefold(),
+        fingerprint=fingerprint,
+        disposition=AdjacentDisposition.IGNORED,
+        reason="show-level-file",
+    )
+
+
+def _top_level_show_files(
+    root: AuthorizedShowsRoot,
+    videos: tuple[SourceFile, ...],
+    scanned: set[str],
+) -> list[AdjacentFile]:
+    """Series-level files in top-level show folders that hold no videos directly.
+
+    These files were never planned before, so anything unreadable or unusual is
+    simply skipped rather than reported as a blocker.
+    """
+
+    folders = sorted(
+        {
+            PurePosixPath(video.relative_path).parts[0]
+            for video in videos
+            if len(PurePosixPath(video.relative_path).parts) > 1
+        }
+        - scanned,
+        key=lambda value: (value.casefold(), value),
+    )
+    found: list[AdjacentFile] = []
+    for folder in folders:
+        directory = root.path / folder
+        if is_link(directory):
+            continue
+        try:
+            with os.scandir(directory) as iterator:
+                entries = sorted(iterator, key=lambda e: (e.name.casefold(), e.name))
+            for entry in entries:
+                if not is_show_level_file(entry.name):
+                    continue
+                if is_link(Path(entry.path), entry_is_symlink=entry.is_symlink()):
+                    continue
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                found.append(_show_file(f"{folder}/{entry.name}", _fingerprint(entry)))
+        except OSError:
+            continue
+    return found
 
 
 def _ignored_adjacent_reason(path: Path, extension: str) -> str | None:
@@ -348,6 +432,7 @@ def discover_sidecars(
     ignored: list[AdjacentFile] = []
     subtitle_files: dict[tuple[str, str], list[AdjacentFile]] = {}
     metadata_files: dict[tuple[str, CompanionKind, str, str], list[AdjacentFile]] = {}
+    show_files: list[AdjacentFile] = []
 
     for directory_name in sorted(
         by_directory,
@@ -436,6 +521,14 @@ def discover_sidecars(
                 metadata_files,
                 ignored,
             ):
+                continue
+
+            if (
+                "/" not in directory_name
+                and directory_name != "."
+                and (is_show_level_file(path.name))
+            ):
+                show_files.append(_show_file(relative_path, fingerprint))
                 continue
 
             ignored_reason = _ignored_adjacent_reason(path, extension)
@@ -557,6 +650,7 @@ def discover_sidecars(
             )
 
     companions.extend(_episode_metadata_groups(metadata_files, ignored))
+    show_files.extend(_top_level_show_files(root, videos, set(by_directory)))
 
     companions.sort(
         key=lambda group: (
@@ -568,10 +662,12 @@ def discover_sidecars(
     )
     unresolved.sort(key=lambda file: _windows_path_key(file.relative_path))
     ignored.sort(key=lambda file: _windows_path_key(file.relative_path))
+    show_files.sort(key=lambda file: _windows_path_key(file.relative_path))
     return SidecarDiscovery(
         companions=tuple(companions),
         unresolved=tuple(unresolved),
         ignored=tuple(ignored),
+        show_files=tuple(show_files),
     )
 
 

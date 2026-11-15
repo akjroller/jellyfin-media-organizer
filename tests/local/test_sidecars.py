@@ -127,7 +127,7 @@ def test_unrecognized_subtitle_suffix_remains_unresolved(tmp_path: Path):
     assert result.unresolved[0].reason == "no-deterministic-video-association"
 
 
-def test_adjacent_metadata_artwork_and_unknown_files_have_explicit_policy(
+def test_show_files_metadata_artwork_and_unknown_files_have_explicit_policy(
     tmp_path: Path,
 ):
     shows = tmp_path / "Shows"
@@ -136,27 +136,25 @@ def test_adjacent_metadata_artwork_and_unknown_files_have_explicit_policy(
     _touch(shows / "Example Series" / "poster.jpg")
     _touch(shows / "Example Series" / "fanart.PNG")
     _touch(shows / "Example Series" / "release-notes.txt")
+    _touch(shows / "Example Series" / "screenshot.jpg")
 
     result = discover_sidecars(
         authorize_shows_root(shows),
         _video_sources(shows),
     )
 
+    # Series-level files are handed to the planner, which decides whether each
+    # moves with the show; other artwork stays an ignored companion.
+    assert [file.relative_path for file in result.show_files] == [
+        "Example Series/fanart.PNG",
+        "Example Series/poster.jpg",
+        "Example Series/tvshow.nfo",
+    ]
     assert {
         (file.relative_path, file.disposition, file.reason) for file in result.ignored
     } == {
         (
-            "Example Series/fanart.PNG",
-            AdjacentDisposition.IGNORED,
-            "explicitly-ignored-adjacent-file",
-        ),
-        (
-            "Example Series/poster.jpg",
-            AdjacentDisposition.IGNORED,
-            "explicitly-ignored-adjacent-file",
-        ),
-        (
-            "Example Series/tvshow.nfo",
+            "Example Series/screenshot.jpg",
             AdjacentDisposition.IGNORED,
             "explicitly-ignored-adjacent-file",
         ),
