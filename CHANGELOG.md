@@ -4,6 +4,10 @@ All notable public changes will be documented in this file. The project follows 
 
 ## Unreleased
 
+- Added `jmo jellyfin-refresh`, which asks your Jellyfin server to rescan its
+  libraries with one `POST /Library/Refresh` request. The server comes from
+  `--server` or `JMO_JELLYFIN_URL`; the API key only from
+  `JMO_JELLYFIN_API_KEY`, and it is never printed, logged, or stored.
 - Added `jmo prune-empty-dirs` to remove the source folders a completed apply
   left empty, as a separate step with `--check-only`, an exact confirmation
   token, and its own journal. Only completely empty folders that held moved

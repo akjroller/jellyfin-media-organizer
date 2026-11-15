@@ -264,6 +264,29 @@ artifacts; do not generate a replacement plan over a partially moved library.
 See [the apply safety contract](apply-safety-contract.md) for rollback and
 duplicate-quarantine procedures.
 
+## After the move: let Jellyfin rescan
+
+Jellyfin picks up the organized files on its next scheduled scan. To ask it to
+rescan right away, create an API key in the Jellyfin dashboard (Dashboard >
+API Keys), then:
+
+```bash
+export JMO_JELLYFIN_API_KEY='your-api-key'
+jmo jellyfin-refresh --server http://localhost:8096
+```
+
+PowerShell:
+
+```powershell
+$env:JMO_JELLYFIN_API_KEY = 'your-api-key'
+jmo jellyfin-refresh --server http://localhost:8096
+```
+
+`--server` can also come from `JMO_JELLYFIN_URL`. The command sends one
+`POST /Library/Refresh` request and changes nothing on disk. The API key is read
+only from the environment, so it never lands in your shell history or in any
+JMO output, report, or log.
+
 ## Getting help and reporting problems
 
 `jmo report LocalState/audit --output LocalState/report` writes a path-free
