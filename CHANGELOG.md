@@ -4,6 +4,11 @@ All notable public changes will be documented in this file. The project follows 
 
 ## Unreleased
 
+- Jellyfin episode files now move with their episode: `<video filename>.nfo`
+  and `<video filename>-thumb.<image>` are renamed to the new episode filename
+  in the same operation group, so apply and rollback treat them like
+  subtitles. Series and season files (`tvshow.nfo`, `poster.jpg`, ...) and
+  episode files shared by two same-named videos stay in place.
 - JMO now organizes `.m4v`, `.mov`, `.webm`, `.wmv`, `.ts`, `.m2ts`, `.mts`,
   `.mpg`, and `.mpeg` files in addition to `.mkv`, `.mp4`, and `.avi`, keeping
   each file's extension. The same episode in two containers goes to duplicate

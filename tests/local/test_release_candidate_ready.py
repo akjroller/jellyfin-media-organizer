@@ -18,7 +18,7 @@ from jellyfin_show_organizer.tvmaze_cache import JsonGetter
 pytestmark = pytest.mark.local
 FIXED_MTIME_NS = 1_700_000_000_000_000_000
 APPROVED_PLAN_SHA256 = (
-    "fede198a3502d4231c37c54aeec2d3b315096156b5f793c11b5b8981dc759b03"
+    "7ebd584e3aee3fb336c7dea6133f1ce088988f5fe857fe94bbdcdea6b4d71ada"
 )
 
 
@@ -209,7 +209,7 @@ preferred_title = "Extras Gallery"
     _write(aired.with_suffix(".en.forced.srt"), b"subtitle")
     _write(aired.with_suffix(".idx"), b"subtitle-index")
     _write(aired.with_suffix(".sub"), b"subtitle-payload")
-    _write(aired.with_suffix(".nfo"), b"ignored")
+    _write(aired.with_suffix(".nfo"), b"episode-metadata")
     return shows, destination, overrides, files
 
 
@@ -247,9 +247,9 @@ def test_complete_ready_candidate_has_stable_approved_hash_and_zero_mutation(
     }
     assert len(first.plan.records) == len(files) == 15
     assert len(provider.calls) == 10
+    # The episode .nfo is associated episode metadata and moves with its video.
     assert Counter(record.status for record in first.plan.companions) == {
-        CompanionStatus.ASSOCIATED: 3,
-        CompanionStatus.IGNORED: 1,
+        CompanionStatus.ASSOCIATED: 4,
     }
     assert any(
         "Café Cosmos" in (record.destination or "")

@@ -81,6 +81,8 @@ Keep the media unchanged, reduce the collision to a synthetic reproduction, and 
 
 Subtitle association is conservative. Supported subtitle extensions are `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub`, and `.idx`; `.idx` + `.sub` pairs stay together. Language/default/forced/SDH/CC suffixes are preserved when the association is deterministic.
 
+Jellyfin episode files move with their video when they match its filename exactly: `<video filename>.nfo` and `<video filename>-thumb.<jpg|jpeg|png|webp|gif|bmp|tif|tiff>`. They are renamed to the new episode filename. Series and season files (`tvshow.nfo`, `season.nfo`, `poster.jpg`, `fanart.jpg`, and similar), a plain `<video filename>.jpg`, and episode files shared by two videos with the same filename (for example an `.mkv` and an `.m4v`) stay in place as ignored companions.
+
 Ambiguous sidecars remain unresolved. Unsupported adjacent files remain untouched rather than being silently deleted. Do not rename or delete the source files merely to force the current planner to accept them.
 
 ## Apply check fails
