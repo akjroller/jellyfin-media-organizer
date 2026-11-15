@@ -4,6 +4,17 @@ All notable public changes will be documented in this file. The project follows 
 
 ## Unreleased
 
+- Provider caches no longer persist transient failures (timeouts, rate
+  limits, 5xx, network errors). One network blip no longer makes later runs
+  fail until `--refresh`; online runs retry such entries, including ones
+  written by older versions.
+- A failed `--refresh` now keeps the previous good provider response instead
+  of overwriting it with the error.
+- TVMaze and TMDb now share one cache implementation, so TMDb follows the
+  documented refresh, freshness, and failure-classification policy.
+- Provider HTTP requests are rate limited and retry 429/5xx/network failures
+  with bounded backoff, honouring `Retry-After`. DNS, connection, and timeout
+  errors are now classified instead of reported as unknown.
 - Fixed episode titles that begin with a number (for example
   `S01E04 5 Years Gone`) and space-separated resolutions (`S01E01 720p`)
   being parsed as an extra episode, which could plan a single episode as a

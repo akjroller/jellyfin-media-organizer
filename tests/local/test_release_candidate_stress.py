@@ -9,6 +9,7 @@ import pytest
 
 from jellyfin_show_organizer.models import CompanionStatus, TerminalStatus
 from jellyfin_show_organizer.planner import PlanningConfig, execute_plan
+from jellyfin_show_organizer.provider_http import ProviderHttpError
 from jellyfin_show_organizer.tvmaze_cache import (
     TVMAZE_EPISODES_URL,
     TVMAZE_SEARCH_URL,
@@ -140,12 +141,18 @@ class StressGetter:
     ) -> object:
         self.calls.append((url, params))
         if url == TVMAZE_SEARCH_URL:
+            # The cache sends the normalized (case-folded) title as ``q``.
             query = dict(params or {}).get("q", "")
-            return SEARCHES[query]
+            searches = {
+                title.casefold(): results for title, results in SEARCHES.items()
+            }
+            # Like TVMaze, an unknown title is an empty result, not an error.
+            return searches.get(query, [])
         for tvmaze_id, episodes in EPISODES.items():
             if url == TVMAZE_EPISODES_URL.format(tvmaze_id=tvmaze_id):
                 return episodes
-        raise AssertionError(f"unexpected synthetic provider request: {url}")
+        # Like TVMaze, an unknown show resource is a deterministic 404 answer.
+        raise ProviderHttpError(404, f"provider HTTP 404: {url}")
 
 
 def _touch(path: Path, payload: bytes) -> None:
@@ -328,7 +335,7 @@ def test_synthetic_release_candidate_accounts_for_every_video_and_replays_offlin
     assert all(record.status in TerminalStatus for record in first.plan.records)
     assert not first.preflight.ready
     assert first.provider_failure
-    assert len(getter.calls) == 8
+    assert len(getter.calls) == 12
 
     companion_counts = Counter(record.status for record in first.plan.companions)
     assert companion_counts == Counter(

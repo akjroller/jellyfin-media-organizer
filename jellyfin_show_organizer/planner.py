@@ -9,9 +9,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import cast
-from urllib.error import HTTPError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 from . import __version__
 from .destination import (
@@ -63,6 +60,11 @@ from .preflight import (
     preflight_plan,
 )
 from .provider_aliases import TvmazeAliasProviderAdapter
+from .provider_http import (  # re-exported for existing callers
+    TVMAZE_MIN_INTERVAL_SECONDS,
+    ProviderHttpError as ProviderHttpError,
+    ThrottledJsonGetter,
+)
 from .providers import (
     AutoProviderAdapter,
     MetadataProvider,
@@ -99,12 +101,6 @@ from .tvmaze_cache import (
 
 class PlanningConfigurationError(ValueError):
     """Raised when a requested plan cannot be run within the safety contract."""
-
-
-class ProviderHttpError(RuntimeError):
-    def __init__(self, status_code: int, message: str) -> None:
-        super().__init__(message)
-        self.status_code = status_code
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,22 +209,12 @@ class TrackingTmdbCatalogCache(TmdbCatalogCache):
         return self._track(super().episode_catalog(tmdb_id, getter))
 
 
-def http_json_getter(
-    url: str,
-    params: Mapping[str, str] | None = None,
-) -> object:
-    query = urlencode(sorted((params or {}).items()))
-    target = f"{url}?{query}" if query else url
-    request = Request(
-        target,
-        headers={"Accept": "application/json", "User-Agent": f"JMO/{__version__}"},
-    )
-    try:
-        with urlopen(request, timeout=20) as response:  # noqa: S310
-            payload = response.read()
-    except HTTPError as exc:
-        raise ProviderHttpError(exc.code, f"provider HTTP {exc.code}") from exc
-    return json.loads(payload.decode("utf-8"))
+# One shared, throttled getter keeps every planning, review, and wizard call
+# within TVMaze's published rate limit for the whole process.
+http_json_getter: JsonGetter = ThrottledJsonGetter(
+    headers={"Accept": "application/json", "User-Agent": f"JMO/{__version__}"},
+    min_interval=TVMAZE_MIN_INTERVAL_SECONDS,
+)
 
 
 def _path_key(value: str) -> tuple[str, str]:

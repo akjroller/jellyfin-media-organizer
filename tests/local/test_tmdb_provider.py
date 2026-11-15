@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from jellyfin_show_organizer.models import ProviderIdentity
+from jellyfin_show_organizer.provider_http import ProviderHttpError
 from jellyfin_show_organizer.providers import (
     AutoProviderAdapter,
     ProviderSearchSnapshot,
@@ -17,7 +18,14 @@ from jellyfin_show_organizer.tmdb_cache import (
     TmdbCatalogCache,
     tmdb_http_getter,
 )
-from jellyfin_show_organizer.tvmaze_cache import CacheState
+from jellyfin_show_organizer.tvmaze_alias_cache import TvmazeAliasCache
+from jellyfin_show_organizer.tvmaze_cache import (
+    CacheFreshness,
+    CacheSource,
+    CacheState,
+    ProviderFailureKind,
+    TvmazeCatalogCache,
+)
 
 
 def test_tmdb_adapter_normalizes_search_and_seasons(tmp_path: Path) -> None:
@@ -261,3 +269,100 @@ def test_auto_provider_requires_consensus_for_ambiguous_tvmaze_results() -> None
         cast(Any, Primary()), cast(Any, Secondary())
     ).search_shows("Example")
     assert result.shows == candidates[:]
+
+
+def test_tmdb_refresh_does_not_refetch_a_fresh_entry(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def getter(url: str, _params: object = None) -> object:
+        calls.append(url)
+        return {"results": []}
+
+    TmdbCatalogCache(tmp_path / "cache").search_show("Example", cast(Any, getter))
+    record = TmdbCatalogCache(tmp_path / "cache", refresh=True).search_show(
+        "Example", cast(Any, getter)
+    )
+
+    assert len(calls) == 1
+    assert record.source is CacheSource.CACHE
+    assert record.freshness is CacheFreshness.FRESH
+
+
+def test_tmdb_failures_are_classified_and_transient_ones_not_persisted(
+    tmp_path: Path,
+) -> None:
+    cache_root = tmp_path / "cache"
+
+    def rate_limited(url: str, _params: object = None) -> object:
+        raise ProviderHttpError(429, "provider HTTP 429")
+
+    limited = TmdbCatalogCache(cache_root).search_show(
+        "Example", cast(Any, rate_limited)
+    )
+    assert limited.failure_kind is ProviderFailureKind.RATE_LIMIT
+    assert not (cache_root / "search").exists()
+
+    def missing(url: str, _params: object = None) -> object:
+        raise ProviderHttpError(404, "provider HTTP 404")
+
+    not_found = TmdbCatalogCache(cache_root).episode_catalog(77, cast(Any, missing))
+    assert not_found.failure_kind is ProviderFailureKind.NOT_FOUND
+    replay = TmdbCatalogCache(cache_root, offline=True).episode_catalog(
+        77, cast(Any, missing)
+    )
+    assert replay.source is CacheSource.CACHE
+    assert replay.failure_kind is ProviderFailureKind.NOT_FOUND
+
+
+def test_tmdb_malformed_show_is_a_malformed_response(tmp_path: Path) -> None:
+    def getter(url: str, _params: object = None) -> object:
+        return {"seasons": "not-a-list"}
+
+    record = TmdbCatalogCache(tmp_path / "cache").episode_catalog(77, cast(Any, getter))
+
+    assert record.state is CacheState.ERROR
+    assert record.failure_kind is ProviderFailureKind.MALFORMED_RESPONSE
+
+
+def test_tmdb_failed_refresh_keeps_good_episode_catalog(tmp_path: Path) -> None:
+    def good(url: str, _params: object = None) -> object:
+        if url == TMDB_SHOW_URL.format(tmdb_id=77):
+            return {"seasons": [{"season_number": 1}]}
+        return {"episodes": [{"id": 1, "season_number": 1, "episode_number": 1}]}
+
+    first = TmdbCatalogCache(tmp_path / "cache").episode_catalog(77, cast(Any, good))
+
+    def failing(url: str, _params: object = None) -> object:
+        raise TimeoutError("timed out")
+
+    refreshed = TmdbCatalogCache(tmp_path / "cache", refresh=True).episode_catalog(
+        77, cast(Any, failing)
+    )
+
+    assert first.resolved
+    assert refreshed.resolved
+    assert refreshed.snapshot_id == first.snapshot_id
+
+
+def test_alias_cache_retries_transient_failures_but_keeps_not_found(
+    tmp_path: Path,
+) -> None:
+    aliases = TvmazeAliasCache(TvmazeCatalogCache(tmp_path / "cache"))
+    calls: list[str] = []
+
+    def flaky(url: str, _params: object = None) -> object:
+        calls.append(url)
+        raise ConnectionError("connection reset")
+
+    assert not aliases.show_aliases(5, cast(Any, flaky)).resolved
+    assert not aliases.show_aliases(5, cast(Any, flaky)).resolved
+    assert len(calls) == 2
+
+    def missing(url: str, _params: object = None) -> object:
+        calls.append(url)
+        raise ProviderHttpError(404, "provider HTTP 404")
+
+    aliases.show_aliases(6, cast(Any, missing))
+    replay = aliases.show_aliases(6, cast(Any, missing))
+    assert len(calls) == 3
+    assert replay.source == "cache"
