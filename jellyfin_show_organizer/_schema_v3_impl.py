@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
@@ -12,6 +13,32 @@ from .models import CompanionPlanRecord, OrganizerPlan, PlanRecord
 
 PLAN_SCHEMA_VERSION = 3
 PLAN_SCHEMA_RESOURCE = "data/plan-schema-v3.json"
+
+# Rules mirrored from plan-schema-v2.json $defs, which plan-schema-v3.json reuses.
+_HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
+_ISO_DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+_NUMBERING_MODES = frozenset(
+    {"aired", "absolute", "parenthesized-absolute", "segment-title", "special", "date"}
+)
+_SHOW_FIELDS = frozenset({"source_key", "tvmaze_id", "title", "year", "numbering_mode"})
+_PARSE_REQUIRED = frozenset(
+    {
+        "series_hint",
+        "season",
+        "episodes",
+        "absolute_episode",
+        "special_kind",
+        "special_episode",
+        "episode_date",
+        "segment_hint",
+        "year",
+        "embedded_tvmaze_id",
+        "title_hint",
+    }
+)
+_PARSE_OPTIONAL = frozenset({"absolute_episodes"})
+_EVIDENCE_FIELDS = frozenset({"method", "confidence", "reasons", "candidates"})
+_CANDIDATE_FIELDS = frozenset({"tvmaze_id", "title", "score", "reasons"})
 
 
 class ManifestValidationError(ValueError):
@@ -214,6 +241,124 @@ def _require_number(value: object, field: str) -> None:
         raise ManifestValidationError(f"{field} must be a number")
 
 
+def _require_integer(
+    value: object, field: str, *, minimum: int, allow_none: bool = False
+) -> None:
+    if value is None and allow_none:
+        return
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ManifestValidationError(f"{field} must be an integer >= {minimum}")
+
+
+def _require_text(value: object, field: str, *, allow_none: bool = False) -> None:
+    """A string that may be empty, matching ``type: string`` without minLength."""
+
+    if value is None and allow_none:
+        return
+    if not isinstance(value, str):
+        raise ManifestValidationError(f"{field} must be a string")
+
+
+def _require_unit_interval(value: object, field: str) -> None:
+    _require_number(value, field)
+    if not 0.0 <= cast(float, value) <= 1.0:
+        raise ManifestValidationError(f"{field} must be between 0 and 1")
+
+
+def _require_text_array(value: object, field: str) -> None:
+    if not isinstance(value, list | tuple) or not all(
+        isinstance(item, str) for item in value
+    ):
+        raise ManifestValidationError(f"{field} must be an array of strings")
+
+
+def _require_hex64(value: object, field: str) -> None:
+    if not isinstance(value, str) or _HEX64.fullmatch(value) is None:
+        raise ManifestValidationError(f"{field} must be a 64-character hex digest")
+
+
+def _validate_show(value: object, field: str) -> None:
+    show = _require_mapping(value, field)
+    if set(show) != _SHOW_FIELDS:
+        raise ManifestValidationError(f"{field} has unexpected fields")
+    _require_string(show["source_key"], f"{field}.source_key")
+    _require_integer(show["tvmaze_id"], f"{field}.tvmaze_id", minimum=1)
+    _require_string(show["title"], f"{field}.title")
+    _require_integer(show["year"], f"{field}.year", minimum=1800, allow_none=True)
+    if show["numbering_mode"] not in _NUMBERING_MODES:
+        raise ManifestValidationError(f"{field}.numbering_mode is not supported")
+
+
+def _validate_parse(value: object, field: str) -> None:
+    parse = _require_mapping(value, field)
+    keys = set(parse)
+    if not _PARSE_REQUIRED <= keys or not keys <= _PARSE_REQUIRED | _PARSE_OPTIONAL:
+        raise ManifestValidationError(f"{field} has unexpected fields")
+    for key in ("series_hint", "segment_hint", "title_hint"):
+        _require_text(parse[key], f"{field}.{key}", allow_none=True)
+    _require_integer(parse["season"], f"{field}.season", minimum=0, allow_none=True)
+    episodes = parse["episodes"]
+    if not isinstance(episodes, list | tuple):
+        raise ManifestValidationError(f"{field}.episodes must be an array")
+    for index, episode in enumerate(episodes):
+        _require_integer(episode, f"{field}.episodes[{index}]", minimum=0)
+    if "absolute_episodes" in parse:
+        absolute = parse["absolute_episodes"]
+        if not isinstance(absolute, list | tuple):
+            raise ManifestValidationError(f"{field}.absolute_episodes must be an array")
+        for index, episode in enumerate(absolute):
+            _require_integer(episode, f"{field}.absolute_episodes[{index}]", minimum=1)
+    _require_integer(
+        parse["absolute_episode"],
+        f"{field}.absolute_episode",
+        minimum=0,
+        allow_none=True,
+    )
+    if parse["special_kind"] not in {"ova", "oad", None}:
+        raise ManifestValidationError(f"{field}.special_kind is not supported")
+    _require_integer(
+        parse["special_episode"],
+        f"{field}.special_episode",
+        minimum=1,
+        allow_none=True,
+    )
+    episode_date = parse["episode_date"]
+    if episode_date is not None and (
+        not isinstance(episode_date, str) or _ISO_DATE.fullmatch(episode_date) is None
+    ):
+        raise ManifestValidationError(f"{field}.episode_date must be YYYY-MM-DD")
+    _require_integer(parse["year"], f"{field}.year", minimum=1800, allow_none=True)
+    _require_integer(
+        parse["embedded_tvmaze_id"],
+        f"{field}.embedded_tvmaze_id",
+        minimum=1,
+        allow_none=True,
+    )
+
+
+def _validate_evidence(value: object, field: str) -> None:
+    evidence = _require_mapping(value, field)
+    if set(evidence) != _EVIDENCE_FIELDS:
+        raise ManifestValidationError(f"{field} has unexpected fields")
+    _require_string(evidence["method"], f"{field}.method")
+    _require_unit_interval(evidence["confidence"], f"{field}.confidence")
+    _require_text_array(evidence["reasons"], f"{field}.reasons")
+    candidates = evidence["candidates"]
+    if not isinstance(candidates, list | tuple):
+        raise ManifestValidationError(f"{field}.candidates must be an array")
+    for index, raw_candidate in enumerate(candidates):
+        candidate_field = f"{field}.candidates[{index}]"
+        candidate = _require_mapping(raw_candidate, candidate_field)
+        if set(candidate) != _CANDIDATE_FIELDS:
+            raise ManifestValidationError(f"{candidate_field} has unexpected fields")
+        _require_integer(
+            candidate["tvmaze_id"], f"{candidate_field}.tvmaze_id", minimum=1
+        )
+        _require_text(candidate["title"], f"{candidate_field}.title")
+        _require_unit_interval(candidate["score"], f"{candidate_field}.score")
+        _require_text_array(candidate["reasons"], f"{candidate_field}.reasons")
+
+
 def _validate_fingerprint(value: object, field: str) -> None:
     fingerprint = _require_mapping(value, field)
     required = {"size", "mtime_ns", "sha256"}
@@ -401,16 +546,12 @@ def _validate_record(value: object, index: int) -> None:
                 f"{field} held records require audit evidence"
             )
 
+    if record["show"] is not None:
+        _validate_show(record["show"], f"{field}.show")
+    if record["parse"] is not None:
+        _validate_parse(record["parse"], f"{field}.parse")
     if record["evidence"] is not None:
-        evidence = _require_mapping(record["evidence"], f"{field}.evidence")
-        if "confidence" not in evidence:
-            raise ManifestValidationError(f"{field}.evidence.confidence is required")
-        _require_number(evidence["confidence"], f"{field}.evidence.confidence")
-        evidence_confidence = cast(float, evidence["confidence"])
-        if not 0.0 <= evidence_confidence <= 1.0:
-            raise ManifestValidationError(
-                f"{field}.evidence.confidence must be between 0 and 1"
-            )
+        _validate_evidence(record["evidence"], f"{field}.evidence")
 
 
 def _validate_companion(value: object, index: int) -> None:
@@ -433,6 +574,8 @@ def _validate_companion(value: object, index: int) -> None:
         _require_string(companion[key], f"{field}.{key}")
     for key in ("source_video", "operation_group_id", "destination", "kind"):
         _require_string(companion[key], f"{field}.{key}", allow_none=True)
+    if not cast(str, companion["extension"]).startswith("."):
+        raise ManifestValidationError(f"{field}.extension must start with '.'")
     if companion["fingerprint"] is not None:
         _validate_fingerprint(companion["fingerprint"], f"{field}.fingerprint")
     allowed = {"associated", "duplicate", "ignored", "unresolved"}
@@ -452,8 +595,9 @@ def _validate_provenance(value: object) -> None:
     }
     if set(provenance) != required:
         raise ManifestValidationError("provenance has unexpected fields")
-    for key in ("tool_version", "config_snapshot_id", "overrides_snapshot_id"):
-        _require_string(provenance[key], f"provenance.{key}")
+    _require_string(provenance["tool_version"], "provenance.tool_version")
+    for key in ("config_snapshot_id", "overrides_snapshot_id"):
+        _require_hex64(provenance[key], f"provenance.{key}")
     snapshots = provenance["cache_snapshots"]
     if not isinstance(snapshots, list | tuple):
         raise ManifestValidationError("provenance.cache_snapshots must be an array")
@@ -463,8 +607,9 @@ def _validate_provenance(value: object) -> None:
         expected = {"provider", "kind", "request_key", "snapshot_id", "state"}
         if set(snapshot) != expected:
             raise ManifestValidationError(f"{field} has unexpected fields")
-        for key in expected:
+        for key in ("provider", "kind", "request_key", "state"):
             _require_string(snapshot[key], f"{field}.{key}")
+        _require_hex64(snapshot["snapshot_id"], f"{field}.snapshot_id")
 
 
 def validate_manifest(value: object) -> None:
