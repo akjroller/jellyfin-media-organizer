@@ -495,3 +495,120 @@ def test_resume_journal_rejects_invalid_json(tmp_path: Path):
 
     with pytest.raises(ApplyExecutionError, match="invalid JSON"):
         apply_execution._Journal(path, prepared, resume=True)
+
+
+def test_resume_recovers_rollback_whose_journal_record_was_lost(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_root, destination_root = _roots(tmp_path)
+    prepared, members = _prepared(source_root)
+    journal = tmp_path / "apply.jsonl"
+    actual_rename = apply_execution._atomic_rename_no_replace
+    actual_append = apply_execution._Journal.append
+
+    def fail_sidecar(source: Path, destination: Path) -> None:
+        if source.suffix == ".srt":
+            raise PermissionError("synthetic sidecar denial")
+        actual_rename(source, destination)
+
+    def journal_device_fails_after_rollback(
+        self: object, event: str, **kwargs: object
+    ) -> None:
+        if event in {"member-rollback-completed", "group-failed"}:
+            raise ApplyExecutionError("could not durably append the apply journal")
+        actual_append(self, event, **kwargs)  # type: ignore[arg-type]
+
+    with monkeypatch.context() as patch:
+        patch.setattr(apply_execution, "_atomic_rename_no_replace", fail_sidecar)
+        patch.setattr(
+            apply_execution._Journal, "append", journal_device_fails_after_rollback
+        )
+        with pytest.raises(ApplyExecutionError):
+            execute_apply(prepared, source_root, destination_root, journal_path=journal)
+
+    # The video was moved and then restored, but the journal never recorded the
+    # restore: it still says the video's move completed.
+    events = [json.loads(line)["event"] for line in journal.read_text().splitlines()]
+    assert "member-completed" in events
+    assert "member-rollback-started" in events
+    assert "member-rollback-completed" not in events
+    for member in members:
+        assert source_root.joinpath(*member.source_relative_path.split("/")).is_file()
+
+    result = execute_apply(
+        prepared, source_root, destination_root, journal_path=journal, resume=True
+    )
+
+    assert result.groups_completed == 1
+    assert result.members_moved == 2
+    for member in members:
+        assert not source_root.joinpath(
+            *member.source_relative_path.split("/")
+        ).exists()
+        assert destination_root.joinpath(
+            *member.destination_relative_path.split("/")
+        ).is_file()
+    replayed = [json.loads(line) for line in journal.read_text().splitlines()]
+    recovered = [
+        entry
+        for entry in replayed
+        if entry["event"] == "member-rollback-completed"
+        and entry["result"] == "recovered-after-interruption"
+    ]
+    assert len(recovered) == 1
+    assert replayed[-1]["event"] == "run-completed"
+
+
+def test_resume_keeps_member_whose_rollback_never_moved_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source_root, destination_root = _roots(tmp_path)
+    prepared, members = _prepared(source_root)
+    journal = tmp_path / "apply.jsonl"
+    actual_rename = apply_execution._atomic_rename_no_replace
+    actual_append = apply_execution._Journal.append
+
+    def fail_sidecar_and_restore(source: Path, destination: Path) -> None:
+        if source.suffix == ".srt":
+            raise PermissionError("synthetic sidecar denial")
+        if "Season 01" in source.parts:  # a restore moves back out
+            raise PermissionError("synthetic restore denial")
+        actual_rename(source, destination)
+
+    def journal_device_fails_after_rollback(
+        self: object, event: str, **kwargs: object
+    ) -> None:
+        if event in {"member-rollback-completed", "group-failed"}:
+            raise ApplyExecutionError("could not durably append the apply journal")
+        actual_append(self, event, **kwargs)  # type: ignore[arg-type]
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            apply_execution, "_atomic_rename_no_replace", fail_sidecar_and_restore
+        )
+        patch.setattr(
+            apply_execution._Journal, "append", journal_device_fails_after_rollback
+        )
+        with pytest.raises(ApplyExecutionError):
+            execute_apply(prepared, source_root, destination_root, journal_path=journal)
+
+    video, sidecar = members
+    assert destination_root.joinpath(
+        *video.destination_relative_path.split("/")
+    ).is_file()
+
+    result = execute_apply(
+        prepared, source_root, destination_root, journal_path=journal, resume=True
+    )
+
+    assert result.groups_completed == 1
+    assert result.members_moved == 1
+    assert destination_root.joinpath(
+        *sidecar.destination_relative_path.split("/")
+    ).is_file()
+    replayed = [json.loads(line) for line in journal.read_text().splitlines()]
+    assert not any(
+        entry["event"] == "member-rollback-completed"
+        and entry["result"] == "recovered-after-interruption"
+        for entry in replayed
+    )

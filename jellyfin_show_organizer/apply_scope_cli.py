@@ -223,7 +223,8 @@ def _run_apply(args: argparse.Namespace) -> int:
             separate_roots=source_root != destination_root,
         )
         prepared = bind_optional_scope(args, prepared)
-        assert prepared.apply_scope_sha256 is not None
+        if prepared.apply_scope_sha256 is None:
+            raise ApplyScopeError("scoped apply requires a bound apply scope")
         _current_revision_matches(prepared, operation="scoped apply")
 
         token = approval_token(prepared, source_root, destination_root)

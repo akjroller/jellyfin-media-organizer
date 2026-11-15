@@ -123,6 +123,10 @@ class _JournalState:
     completed_members: frozenset[tuple[str, str, str]]
     started_members: frozenset[tuple[str, str, str]]
     run_completed: bool
+    # Members whose automatic rollback started after their move completed but
+    # whose rollback completion was never journaled (for example because the
+    # journal device failed after the media was already restored).
+    rollback_unfinished_members: frozenset[tuple[str, str, str]] = frozenset()
 
 
 def _mapping(value: object, label: str) -> Mapping[str, object]:
@@ -463,6 +467,7 @@ class _Journal:
         completed_groups: set[str] = set()
         completed_members: set[tuple[str, str, str]] = set()
         started_members: set[tuple[str, str, str]] = set()
+        rollback_unfinished: set[tuple[str, str, str]] = set()
         run_completed = False
         for entry in self.entries:
             event = cast(str, entry["event"])
@@ -480,9 +485,14 @@ class _Journal:
                 started_members.add(key)
             elif event == "member-completed" and key is not None:
                 completed_members.add(key)
+                rollback_unfinished.discard(key)
+            elif event == "member-rollback-started" and key is not None:
+                if key in completed_members:
+                    rollback_unfinished.add(key)
             elif event == "member-rollback-completed" and key is not None:
                 completed_members.discard(key)
                 started_members.discard(key)
+                rollback_unfinished.discard(key)
             elif event == "group-completed" and isinstance(group_id, str):
                 completed_groups.add(group_id)
             elif event == "run-completed":
@@ -492,6 +502,7 @@ class _Journal:
             completed_members=frozenset(completed_members),
             started_members=frozenset(started_members),
             run_completed=run_completed,
+            rollback_unfinished_members=frozenset(rollback_unfinished),
         )
 
 
@@ -542,6 +553,25 @@ def _verify_source(
         raise ApplyExecutionError("rolled-back move still has a destination path")
     if not _fingerprint_matches(source, member.fingerprint):
         raise ApplyExecutionError("rolled-back source fingerprint is invalid")
+
+
+def _rollback_evidently_finished(
+    member: ApplyMember, source_root: Path, destination_root: Path
+) -> bool:
+    """Whether an unjournaled rollback provably restored ``member`` to its source.
+
+    True only when the destination is absent and the source matches the
+    approved fingerprint.  Any other state is left to the ordinary checks,
+    which fail closed on ambiguity.
+    """
+
+    source = _safe_existing_path(source_root, member.source_relative_path)
+    destination = _safe_existing_path(
+        destination_root, member.destination_relative_path
+    )
+    return not os.path.lexists(destination) and _fingerprint_matches(
+        source, member.fingerprint
+    )
 
 
 def _atomic_rename_no_replace(source: Path, destination: Path) -> None:
@@ -802,6 +832,65 @@ def _rollback_members(
     return failures
 
 
+def _resume_group_members(
+    group_id: str,
+    members: tuple[ApplyMember, ...],
+    journal: _Journal,
+    source_root: Path,
+    destination_root: Path,
+) -> tuple[list[ApplyMember], list[ApplyMember], int]:
+    """Split one group's members into verified-completed and still-pending.
+
+    Interrupted states are adopted only when the filesystem proves them: a move
+    whose completion was not journaled, or a rollback whose completion was not
+    journaled.  Every other state falls through to the ordinary fail-closed
+    verification.
+    """
+
+    completed: list[ApplyMember] = []
+    pending: list[ApplyMember] = []
+    recovered = 0
+    state = journal.state()
+    for member in members:
+        key = _member_key(group_id, member)
+        if key in state.rollback_unfinished_members and _rollback_evidently_finished(
+            member, source_root, destination_root
+        ):
+            # The restore happened; only its journal record was lost.
+            journal.append(
+                "member-rollback-completed",
+                group_id=group_id,
+                member=member,
+                result="recovered-after-interruption",
+            )
+            recovered += 1
+            pending.append(member)
+            continue
+        if key in state.completed_members:
+            _verify_destination(member, source_root, destination_root)
+            completed.append(member)
+            continue
+        if key in state.started_members:
+            source = _safe_existing_path(source_root, member.source_relative_path)
+            destination = _safe_existing_path(
+                destination_root, member.destination_relative_path
+            )
+            if not os.path.lexists(source) and _fingerprint_matches(
+                destination, member.fingerprint
+            ):
+                journal.append(
+                    "member-completed",
+                    group_id=group_id,
+                    member=member,
+                    result="recovered-after-interruption",
+                )
+                completed.append(member)
+                recovered += 1
+                continue
+        pending.append(member)
+    return completed, pending, recovered
+
+
 def execute_apply(
     prepared: PreparedApply,
     source_root: Path,
@@ -883,35 +972,14 @@ def execute_apply(
                     _verify_destination(member, source_root, destination_root)
                 continue
 
-            completed: list[ApplyMember] = []
-            pending: list[ApplyMember] = []
-            current_state = journal.state()
-            for member in group.moving_members:
-                key = _member_key(group.group_id, member)
-                if key in current_state.completed_members:
-                    _verify_destination(member, source_root, destination_root)
-                    completed.append(member)
-                    continue
-                if key in current_state.started_members:
-                    source = _safe_existing_path(
-                        source_root, member.source_relative_path
-                    )
-                    destination = _safe_existing_path(
-                        destination_root, member.destination_relative_path
-                    )
-                    if not os.path.lexists(source) and _fingerprint_matches(
-                        destination, member.fingerprint
-                    ):
-                        journal.append(
-                            "member-completed",
-                            group_id=group.group_id,
-                            member=member,
-                            result="recovered-after-interruption",
-                        )
-                        completed.append(member)
-                        recovered_count += 1
-                        continue
-                pending.append(member)
+            completed, pending, recovered = _resume_group_members(
+                group.group_id,
+                group.moving_members,
+                journal,
+                source_root,
+                destination_root,
+            )
+            recovered_count += recovered
 
             journal.append(
                 "group-started",

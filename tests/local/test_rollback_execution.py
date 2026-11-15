@@ -318,3 +318,69 @@ def test_rollback_token_binds_apply_journal_and_roots(tmp_path: Path) -> None:
     other_destination = tmp_path / "other-destination"
     other_destination.mkdir()
     assert token != rollback_token(rollback, source_root, other_destination)
+
+
+def test_prepare_rollback_refuses_missing_or_non_file_journal(tmp_path: Path) -> None:
+    source_root, _destination_root = _roots(tmp_path)
+    prepared, _members = _prepared(source_root)
+
+    with pytest.raises(RollbackExecutionError, match="does not exist"):
+        prepare_rollback(prepared, tmp_path / "missing.jsonl")
+    with pytest.raises(RollbackExecutionError, match="regular file"):
+        prepare_rollback(prepared, tmp_path)
+
+
+def test_prepare_rollback_refuses_an_unfinished_apply_journal(tmp_path: Path) -> None:
+    source_root, destination_root, prepared, _members, apply_journal = _applied(
+        tmp_path
+    )
+    lines = apply_journal.read_text(encoding="utf-8").splitlines()
+    assert json.loads(lines[-1])["event"] == "run-completed"
+    apply_journal.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+
+    with pytest.raises(RollbackExecutionError, match="completed run"):
+        prepare_rollback(prepared, apply_journal)
+    assert destination_root.exists()
+
+
+def test_rollback_journal_must_live_outside_both_media_roots(tmp_path: Path) -> None:
+    source_root, destination_root, prepared, _members, apply_journal = _applied(
+        tmp_path
+    )
+    rollback = prepare_rollback(prepared, apply_journal)
+
+    for inside in (source_root / "rollback.jsonl", destination_root / "rb.jsonl"):
+        with pytest.raises(RollbackExecutionError, match="must be outside"):
+            execute_rollback(
+                rollback,
+                source_root,
+                destination_root,
+                rollback_journal_path=inside,
+            )
+    with pytest.raises(RollbackExecutionError, match="parent does not exist"):
+        execute_rollback(
+            rollback,
+            source_root,
+            destination_root,
+            rollback_journal_path=tmp_path / "missing" / "rb.jsonl",
+        )
+    with pytest.raises(RollbackExecutionError, match="explicit rollback journal"):
+        execute_rollback(
+            rollback, source_root, destination_root, rollback_journal_path=None
+        )
+    with pytest.raises(RollbackExecutionError, match="distinct from the apply"):
+        execute_rollback(
+            rollback,
+            source_root,
+            destination_root,
+            rollback_journal_path=apply_journal,
+        )
+    with pytest.raises(RollbackExecutionError, match="cannot be combined"):
+        execute_rollback(
+            rollback,
+            source_root,
+            destination_root,
+            rollback_journal_path=None,
+            check_only=True,
+            resume=True,
+        )

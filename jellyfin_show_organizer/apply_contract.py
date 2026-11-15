@@ -507,8 +507,12 @@ def _derive_operation_groups(
 ) -> tuple[ApplyOperationGroup, ...]:
     raw_records = root["records"]
     raw_companions = root["companions"]
-    assert isinstance(raw_records, list | tuple)
-    assert isinstance(raw_companions, list | tuple)
+    # validate_manifest guarantees both arrays; re-check here so this function
+    # stays fail-closed even if a caller skips validation or runs with -O.
+    if not isinstance(raw_records, list | tuple):
+        raise ApplyContractError("manifest records must be an array")
+    if not isinstance(raw_companions, list | tuple):
+        raise ApplyContractError("manifest companions must be an array")
 
     groups: dict[str, list[ApplyMember]] = defaultdict(list)
     video_group_by_source: dict[str, str] = {}
