@@ -14,12 +14,12 @@ from .apply_execution import (
     PreparedApply,
     _atomic_rename_no_replace,
     _fingerprint_matches,
-    _is_linklike,
     _journal_lock,
     _parts,
     _release_journal_lock,
     probe_no_replace_rename,
 )
+from .paths import is_link
 from .quarantine_contract import (
     QuarantineContractError,
     QuarantineGroup,
@@ -168,7 +168,7 @@ def _sha256_file(path: Path, label: str) -> str:
 def _validated_root(path: Path, label: str) -> Path:
     if not os.path.lexists(path):
         raise QuarantineExecutionError(f"{label} root does not exist")
-    if _is_linklike(path):
+    if is_link(path):
         raise QuarantineExecutionError(f"{label} root cannot be a symlink or junction")
     if not path.is_dir():
         raise QuarantineExecutionError(f"{label} root must be a directory")
@@ -205,7 +205,7 @@ def _candidate_path(root: Path, relative_path: str, *, require_parent: bool) -> 
             if require_parent:
                 raise QuarantineExecutionError("required member parent is missing")
             break
-        if _is_linklike(current) or not current.is_dir():
+        if is_link(current) or not current.is_dir():
             raise QuarantineExecutionError(
                 "member parent chain contains a link or non-directory"
             )
@@ -666,7 +666,7 @@ def _ensure_quarantine_parents(
         current = current / part
         relative = current.relative_to(quarantine_root).as_posix()
         if os.path.lexists(current):
-            if _is_linklike(current) or not current.is_dir():
+            if is_link(current) or not current.is_dir():
                 raise QuarantineExecutionError(
                     "quarantine parent became a link or non-directory"
                 )

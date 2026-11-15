@@ -32,6 +32,7 @@ from .apply_validation import (
     validate_apply_roots,
 )
 from .models import CacheSnapshot, SourceFingerprint
+from .paths import is_link
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
@@ -316,18 +317,6 @@ def _parts(value: str) -> tuple[str, ...]:
     return tuple(path.parts)
 
 
-def _is_linklike(path: Path) -> bool:
-    if path.is_symlink():
-        return True
-    checker = getattr(path, "is_junction", None)
-    if checker is None:
-        return False
-    try:
-        return bool(checker())
-    except OSError:
-        return True
-
-
 def _safe_existing_path(root: Path, relative_path: str) -> Path:
     current = root
     parts = _parts(relative_path)
@@ -335,7 +324,7 @@ def _safe_existing_path(root: Path, relative_path: str) -> Path:
         current = current / part
         if not os.path.lexists(current) or not current.is_dir():
             raise ApplyExecutionError("approved member parent is missing")
-        if _is_linklike(current):
+        if is_link(current):
             raise ApplyExecutionError("approved member parent became a link")
     return current / parts[-1]
 
@@ -694,7 +683,7 @@ def _ensure_parent_directories(
         current = current / part
         relative = current.relative_to(destination_root).as_posix()
         if os.path.lexists(current):
-            if _is_linklike(current) or not current.is_dir():
+            if is_link(current) or not current.is_dir():
                 raise ApplyExecutionError(
                     "destination parent became a link or non-directory"
                 )

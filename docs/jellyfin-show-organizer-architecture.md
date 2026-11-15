@@ -24,6 +24,7 @@ The current project boundary is deliberately narrow:
 - `cli.py` — plan, review, and explicitly gated apply command surfaces.
 - `planner.py` — end-to-end inventory, resolution, assignment, duplicate, companion, provenance, preflight, and audit orchestration.
 - `inventory.py` and `sidecars.py` — authorized-root scanning, deterministic read-only video inventory, and adjacent companion discovery.
+- `paths.py` — the single fail-closed symlink/junction check shared by inventory, sidecar discovery, preflight, apply, rollback, and quarantine.
 - `filename_parser.py`, `extra_classifier.py`, and `extra_naming.py` — pure filename/path evidence, fail-closed extra classification, and extra display identity.
 - `show_resolver.py` and `_show_resolver_core.py` — conservative show-level resolution, provider search, ranking, aliases, and catalog-backed rescue orchestration.
 - `show_alias_evidence.py`, `show_structural_evidence.py`, `structural_root_title_fallback.py`, `parenthetical_aliases.py`, `release_prefix_fallback.py`, and `segment_counted_titles.py` — focused structural evidence strategies used by the resolver.
