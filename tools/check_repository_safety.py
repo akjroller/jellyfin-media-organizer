@@ -58,6 +58,16 @@ PROFILE_PATTERNS = (
 ASSISTANT_ATTRIBUTION = re.compile(
     r"(?i)\b(ChatGPT|OpenAI|Claude Code|GitHub Copilot)\b"
 )
+# Published commits that cannot be reworded without rewriting protected `main`.
+# Each entry exempts exactly one known line in exactly one commit; every other
+# line of that message, and the same text in any other commit, is still checked.
+KNOWN_COMMIT_MESSAGE_EXCEPTIONS = {
+    # #304 squash merge: the PR description's assistant attribution line became
+    # part of the commit message. Kept rather than force-pushing `main`.
+    "455bf1bbea0bf11dabdcecd70a068f0d6e178a27": (
+        "\U0001f916 Generated with [Claude Code](https://claude.com/claude-code)"
+    ),
+}
 
 
 def _tracked_paths() -> tuple[Path, ...]:
@@ -72,18 +82,40 @@ def _tracked_paths() -> tuple[Path, ...]:
     )
 
 
+def _without_known_exception(commit: str, message: str) -> str:
+    excepted_line = KNOWN_COMMIT_MESSAGE_EXCEPTIONS.get(commit)
+    if excepted_line is None:
+        return message
+    return "\n".join(
+        line for line in message.split("\n") if line.strip() != excepted_line
+    )
+
+
+def _parse_commit_log(raw: bytes) -> tuple[str, ...]:
+    """Parse ``%H%x01%B%x00`` records, applying the single-line exceptions."""
+
+    messages: list[str] = []
+    for record in raw.split(b"\0"):
+        if not record.strip():
+            continue
+        commit, _, body = record.partition(b"\x01")
+        message = _without_known_exception(
+            commit.decode("ascii", errors="replace").strip(),
+            body.decode("utf-8", errors="replace"),
+        )
+        if message.strip():
+            messages.append(message)
+    return tuple(messages)
+
+
 def _reachable_commit_messages() -> tuple[str, ...]:
     result = subprocess.run(
-        ["git", "log", "--format=%B%x00"],
+        ["git", "log", "--format=%H%x01%B%x00"],
         cwd=ROOT,
         check=True,
         capture_output=True,
     )
-    return tuple(
-        item.decode("utf-8", errors="replace")
-        for item in result.stdout.split(b"\0")
-        if item.strip()
-    )
+    return _parse_commit_log(result.stdout)
 
 
 def _is_synthetic_fixture(path: Path) -> bool:
