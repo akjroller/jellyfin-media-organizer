@@ -12,7 +12,6 @@ from jellyfin_show_organizer.destination import (
     build_episode_destination,
     build_extra_destination,
     decode_sanitized_component,
-    find_destination_collisions,
     sanitize_component,
 )
 from jellyfin_show_organizer.episode_assignment import (
@@ -279,11 +278,9 @@ def test_case_insensitive_destination_collisions_are_reported() -> None:
         ".mkv",
     )
 
-    collisions = find_destination_collisions((upper, lower))
-
-    assert len(collisions) == 1
-    assert collisions[0].source_keys == ("lower.mkv", "upper.mkv")
-    assert len(collisions[0].relative_paths) == 2
+    assert upper.collision_key is not None
+    assert upper.collision_key == lower.collision_key
+    assert upper.relative_path != lower.relative_path
 
 
 def test_loss_preserving_sanitization_avoids_false_forbidden_character_collision() -> (
@@ -301,7 +298,7 @@ def test_loss_preserving_sanitization_avoids_false_forbidden_character_collision
     )
 
     assert colon.relative_path != question.relative_path
-    assert find_destination_collisions((colon, question)) == ()
+    assert colon.collision_key != question.collision_key
 
 
 def test_path_limit_shortening_is_deterministic_and_bounded() -> None:

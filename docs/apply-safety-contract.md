@@ -122,7 +122,7 @@ If `--confirm-apply` is omitted, a real interactive terminal must type the compl
 - No-op detection uses exact relative names only when the validated roots are the same. Separate-root imports retain unchanged relative names as moving operations. Case-only changes are not silently skipped; an existing destination on an insensitive filesystem remains a blocker.
 - The move primitive is an atomic no-overwrite rename: native non-replacing rename on Windows, `renameat2(RENAME_NOREPLACE)` on Linux, or `renamex_np(RENAME_EXCL)` on macOS. Unsupported hosts fail closed.
 - Before any move, `jmo apply` (including `--check-only` and `--resume`), `jmo rollback`, `jmo quarantine`, and `jmo quarantine-restore` probe that primitive inside a uniquely named `.jmo-rename-probe-*` directory under the destination (or quarantine) root: one rename to a free name must succeed, and a rename onto an existing name must be refused with both files intact. The probe touches only its own scratch entries and removes them whether it passes or fails. Many NFS, SMB/CIFS, and FUSE network mounts reject `RENAME_NOREPLACE`; those now fail before any journal entry or move with a message naming the filesystem limitation, and the same message is reported if a rename is rejected mid-run (after the group's automatic rollback).
-- Apply does not perform cross-filesystem copy-and-delete, overwrite, source-directory cleanup, duplicate deletion, or quarantine. Empty source folders can be removed afterwards with the separate `prune-empty-dirs` command (see below). Separate `quarantine-plan`, `quarantine`, and `quarantine-restore` commands implement explicitly approved reversible duplicate handling; see [First run](first-run.md#recovery-and-support-boundaries).
+- Apply does not perform cross-filesystem copy-and-delete, overwrite, source-directory cleanup, duplicate deletion, or quarantine. Empty source folders can be removed afterwards with the separate `prune-empty-dirs` command (see below). Separate `quarantine-plan`, `quarantine`, and `quarantine-restore` commands implement explicitly approved reversible duplicate handling; see [Recovery and support boundaries](#recovery-and-support-boundaries).
 
 ## Journal and group recovery
 
@@ -153,3 +153,27 @@ jmo prune-empty-dirs --source-root ExampleMedia/Shows --apply-journal LocalState
 - A folder is removed only when it is completely empty, deepest first, with `rmdir`, which the operating system refuses for any folder that is not empty. A leftover file of any kind, including hidden ones such as `Thumbs.db` or `.DS_Store`, keeps the folder and its parents.
 - `--check-only` lists the exact folders and prints a token bound to that list, the source root, and the apply journal. A real run requires that token and a new journal outside the source root, and refuses if anything changed since the check.
 - `jmo rollback` needs the original source folders. If you pruned and then want to roll back, run `jmo restore-pruned-dirs --source-root ExampleMedia/Shows --prune-journal LocalState/prune.jsonl` first; it recreates exactly the folders the prune removed and is safe to repeat.
+
+## Recovery and support boundaries
+
+After interruption, preserve all files and artifacts. Resume with the exact same apply command, journal, and approval values plus `--resume`. Do not generate a replacement plan over a partially moved library and use it as a recovery shortcut.
+
+Apply resume handles incomplete groups and verifies completed ones. To reverse a completed apply, use the separate `jmo rollback` command with the original plan, preflight, provenance, approval hashes/revision, original roots, and `--apply-journal`. Start with `--check-only`; mutation additionally requires a new `--rollback-journal` and the exact `--confirm-rollback` token. It verifies fingerprints and refuses occupied original paths. Resume an interrupted rollback using that same rollback journal and `--resume`, not apply resume. If recovery reports an uncertain state, stop and follow its member-specific guidance.
+
+Duplicate quarantine is a separate opt-in workflow: `jmo quarantine-plan` creates an immutable artifact from reviewed duplicate decisions. `jmo quarantine` checks that artifact with `--approve-quarantine-plan-sha256`, the original approvals, and explicit source, destination, and quarantine roots. The quarantine root must be outside the library on the same filesystem. Check-only may inspect winners before apply, but mutation requires verified organized winners, a new journal, and the exact quarantine confirmation token. It moves reviewed losers only and never deletes them. `jmo quarantine-restore` reverses a completed quarantine using its original artifact/journal, a separate restore journal, and its own confirmation token. Run each command's `--help` for the required arguments; each mutating operation has its own `--check-only` gate. Restore quarantined losers before rolling back their organized winners.
+
+| Environment or operation | Support boundary |
+|---|---|
+| Windows and Linux | Automated offline test coverage; same-filesystem no-overwrite moves |
+| macOS | Dedicated CI runner configured; release support requires that runner to pass |
+| Installed wheel/sdist | Build identity verified independently of nearby Git repositories |
+| Case-only rename | Executed on case-sensitive filesystems; blocked when the destination already exists on an insensitive filesystem |
+| Separate roots | Supported on the same filesystem, including already-canonical relative names |
+| Cross-volume moves | Unsupported; no copy-and-delete fallback |
+| NAS, SMB, unusual mounts | Apply, rollback, and quarantine probe the atomic no-overwrite rename first and refuse mounts that do not support it, with an explanation; validate locking with disposable files before a real library |
+| Links and junctions | Rejected as media roots and within operation parent chains |
+| Completed-apply rollback | Supported with exact original artifacts, completed apply journal, revalidation, and separate approval/journal |
+| Duplicate quarantine and restore | Supported as separately approved same-filesystem operations; no deletion |
+| Duplicate deletion | Not implemented |
+
+Updates require reinstalling the package and generating fresh reviewed artifacts when the executable revision changes. Never substitute an old approval token for a new build.

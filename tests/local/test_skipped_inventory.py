@@ -27,10 +27,6 @@ from jellyfin_show_organizer.planner import (
     PlanningOutcome,
     execute_plan,
 )
-from jellyfin_show_organizer.reconciliation import (
-    ReconciliationStatus,
-    reconcile_inventory,
-)
 from jellyfin_show_organizer.user_commands import run_inspect, run_report
 
 pytestmark = pytest.mark.local
@@ -114,10 +110,6 @@ def test_scan_reports_unsupported_video_containers(tmp_path: Path) -> None:
         InventoryStatus.EXCLUDED_SAMPLE,
     }
     assert len(skipped) == 3
-
-    reconciled = {item.relative_path: item for item in reconcile_inventory(records)}
-    assert reconciled[flv.relative_path].status is ReconciliationStatus.UNSUPPORTED
-    assert reconciled[flv.relative_path].reason == "unsupported-extension:.flv"
 
 
 def test_skipped_files_are_reported_and_do_not_block_the_plan(tmp_path: Path) -> None:

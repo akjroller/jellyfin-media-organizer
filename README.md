@@ -54,7 +54,7 @@ apply_safe=true
 
 The complete fabricated walkthrough, including duplicate, held, extra, sidecar,
 and ambiguous examples, is in the [synthetic case study](docs/synthetic-case-study.md).
-For safe beta testing and feedback, see [Community beta](docs/community-beta.md).
+To report a problem safely, see [Getting help](docs/getting-started.md#getting-help-and-reporting-problems).
 
 JMO is not a universal media manager yet. It is a TV-show-focused, plan-first
 tool for people who want to inspect and review a proposed Jellyfin layout before
@@ -81,7 +81,6 @@ JMO is intentionally conservative: planning and review remain non-mutating, whil
   folder structures, rarer containers, and samples reported in `skipped.csv`
   instead of being silently dropped;
 - explicit handling of samples, unreadable entries, blocked links, extras, and ambiguous evidence;
-- deterministic inventory reconciliation;
 - versioned organizer plan models and immutable JSON schema contracts;
 - data-driven aliases and numbering policies;
 - persistent TVMaze cache primitives for deterministic/offline replay;
@@ -166,7 +165,7 @@ A minimal planning run uses separate existing source and destination roots, plus
 
 In PowerShell, use `.\.venv\Scripts\jmo.exe` instead of `./.venv/bin/jmo` and put the arguments on one line (Bash backslashes are not PowerShell continuations).
 
-For a complete first-time sequence, see [First run](docs/first-run.md). Other documentation uses `jmo` as shorthand for the executable in your environment; activation is optional.
+For a complete first-time sequence, see [Getting started](docs/getting-started.md). Other documentation uses `jmo` as shorthand for the executable in your environment; activation is optional.
 
 Normal wheels and source distributions carry a file-verified build revision. They do not need a Git checkout at runtime. Builds made from dirty checkouts remain ineligible for apply, and altered or unstamped installations fail closed. Reinstall after pulling changes: `pip install .` installs a snapshot, not a live view of the checkout. Build metadata verifies integrity, not publisher authenticity; install artifacts only from a trusted source.
 
@@ -209,25 +208,29 @@ Repository examples and tests use synthetic paths and fixtures. Real library inv
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md)
-- [Operational runbook](docs/jellyfin-show-organizer-runbook.md)
+Using JMO:
+
+- [Getting started](docs/getting-started.md): install, plan, review, apply, and getting help
 - [Non-mutating review workflow](docs/review-workflow.md)
-- [Apply safety contract and runbook](docs/apply-safety-contract.md)
+- [Apply safety contract](docs/apply-safety-contract.md): approval, recovery, rollback, quarantine, and folder cleanup
+- [Local overrides](docs/local-overrides.md), including duplicate winner preferences
 - [Troubleshooting safely](docs/troubleshooting.md)
-- [Contributor workflow](docs/contributing.md)
-- [Architecture](docs/jellyfin-show-organizer-architecture.md)
-- [Plan-only release-candidate validation](docs/release-candidate-validation.md)
-- [Local overrides](docs/local-overrides.md)
-- [Provider cache and offline policy](docs/provider-cache-policy.md)
-- [Numbering policies](docs/numbering-policies.md)
-- [Metadata-provider boundary](docs/metadata-provider-boundary.md)
-- [Release and versioning policy](docs/releasing.md)
-- [Security policy](SECURITY.md)
-- [Changelog](CHANGELOG.md)
 - [Synthetic case study](docs/synthetic-case-study.md)
-- [Community beta guide](docs/community-beta.md)
+
+How it works:
+
+- [Architecture](docs/jellyfin-show-organizer-architecture.md)
+- [Operational runbook](docs/jellyfin-show-organizer-runbook.md)
+- [How JMO matches shows and episodes](docs/matching.md)
+- [Metadata providers, cache, and offline policy](docs/providers.md)
+
+Maintaining JMO:
+
+- [Contributor workflow](docs/contributing.md)
+- [Release and versioning policy](docs/releasing.md)
 - [Package publishing](docs/publishing.md)
-- [Upstream acknowledgments](ACKNOWLEDGMENTS.md)
+- [Plan-only release-candidate validation](docs/release-candidate-validation.md)
+- [Security policy](SECURITY.md), [Changelog](CHANGELOG.md), [Roadmap](ROADMAP.md), [Upstream acknowledgments](ACKNOWLEDGMENTS.md)
 
 ## Development
 

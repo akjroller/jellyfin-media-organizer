@@ -10,15 +10,12 @@ import jellyfin_show_organizer.apply_execution as apply_execution
 from jellyfin_show_organizer.apply_contract import (
     ApplyApproval,
     ApplyContractError,
-    ApplyJournalEntry,
     ApplyMemberRole,
     ApplyReviewApproval,
     ApplyReviewMode,
-    JournalEvent,
     build_apply_contract,
     derive_apply_group_ids,
     manifest_plan_hash,
-    replay_journal,
 )
 from jellyfin_show_organizer.apply_execution import ApplyExecutionError, prepare_apply
 from jellyfin_show_organizer.models import (
@@ -580,135 +577,4 @@ def test_schema5_reviewed_plan_requires_run_provenance():
             plan_to_manifest(plan),
             _preflight(plan),
             _approval(plan, review=review),
-        )
-
-
-def test_journal_replay_preserves_completed_members_across_failed_resume():
-    plan = _plan()
-    contract = build_apply_contract(
-        plan_to_manifest(plan),
-        _preflight(plan),
-        _approval(plan),
-    )
-    group = contract.groups[0]
-    video, subtitle = group.moving_members
-
-    incomplete = replay_journal(
-        contract,
-        (
-            ApplyJournalEntry(
-                sequence=1,
-                plan_sha256=contract.plan_sha256,
-                group_id=group.group_id,
-                event=JournalEvent.GROUP_STARTED,
-            ),
-            ApplyJournalEntry(
-                sequence=2,
-                plan_sha256=contract.plan_sha256,
-                group_id=group.group_id,
-                event=JournalEvent.MEMBER_COMPLETED,
-                source_relative_path=video.source_relative_path,
-                destination_relative_path=video.destination_relative_path,
-            ),
-            ApplyJournalEntry(
-                sequence=3,
-                plan_sha256=contract.plan_sha256,
-                group_id=group.group_id,
-                event=JournalEvent.GROUP_FAILED,
-                detail="synthetic interruption",
-            ),
-        ),
-    )
-    assert incomplete.completed_group_ids == ()
-    assert incomplete.incomplete_group_ids == (group.group_id,)
-    assert len(incomplete.completed_members) == 1
-
-    resumed = replay_journal(
-        contract,
-        (
-            ApplyJournalEntry(
-                sequence=1,
-                plan_sha256=contract.plan_sha256,
-                group_id=group.group_id,
-                event=JournalEvent.GROUP_STARTED,
-            ),
-            ApplyJournalEntry(
-                sequence=2,
-                plan_sha256=contract.plan_sha256,
-                group_id=group.group_id,
-                event=JournalEvent.MEMBER_COMPLETED,
-                source_relative_path=video.source_relative_path,
-                destination_relative_path=video.destination_relative_path,
-            ),
-            ApplyJournalEntry(
-                sequence=3,
-                plan_sha256=contract.plan_sha256,
-                group_id=group.group_id,
-                event=JournalEvent.GROUP_FAILED,
-                detail="synthetic interruption",
-            ),
-            ApplyJournalEntry(
-                sequence=4,
-                plan_sha256=contract.plan_sha256,
-                group_id=group.group_id,
-                event=JournalEvent.GROUP_STARTED,
-            ),
-            ApplyJournalEntry(
-                sequence=5,
-                plan_sha256=contract.plan_sha256,
-                group_id=group.group_id,
-                event=JournalEvent.MEMBER_COMPLETED,
-                source_relative_path=subtitle.source_relative_path,
-                destination_relative_path=subtitle.destination_relative_path,
-            ),
-            ApplyJournalEntry(
-                sequence=6,
-                plan_sha256=contract.plan_sha256,
-                group_id=group.group_id,
-                event=JournalEvent.GROUP_COMPLETED,
-            ),
-        ),
-    )
-    assert resumed.completed_group_ids == (group.group_id,)
-    assert resumed.incomplete_group_ids == ()
-    assert len(resumed.completed_members) == 2
-
-
-def test_journal_rejects_repeating_an_already_completed_member():
-    plan = _plan()
-    contract = build_apply_contract(
-        plan_to_manifest(plan),
-        _preflight(plan),
-        _approval(plan),
-    )
-    group = contract.groups[0]
-    video = group.moving_members[0]
-
-    with pytest.raises(ApplyContractError, match="repeats a completed member"):
-        replay_journal(
-            contract,
-            (
-                ApplyJournalEntry(
-                    sequence=1,
-                    plan_sha256=contract.plan_sha256,
-                    group_id=group.group_id,
-                    event=JournalEvent.GROUP_STARTED,
-                ),
-                ApplyJournalEntry(
-                    sequence=2,
-                    plan_sha256=contract.plan_sha256,
-                    group_id=group.group_id,
-                    event=JournalEvent.MEMBER_COMPLETED,
-                    source_relative_path=video.source_relative_path,
-                    destination_relative_path=video.destination_relative_path,
-                ),
-                ApplyJournalEntry(
-                    sequence=3,
-                    plan_sha256=contract.plan_sha256,
-                    group_id=group.group_id,
-                    event=JournalEvent.MEMBER_COMPLETED,
-                    source_relative_path=video.source_relative_path,
-                    destination_relative_path=video.destination_relative_path,
-                ),
-            ),
         )

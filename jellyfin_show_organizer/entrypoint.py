@@ -29,14 +29,19 @@ ROLLBACK_FAILED_EXIT = 31
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Extend the existing CLI with rollback, scope, and quarantine controls."""
+    """The full CLI: core commands plus scope, rollback, quarantine, and prune."""
 
-    parser = cli.build_parser()
-    subparsers = cast(
-        Any,
-        next(action for action in parser._actions if hasattr(action, "add_parser")),
+    return cli.build_parser(
+        extensions=(
+            register_apply_scope_commands,
+            _register_rollback_command,
+            register_quarantine_commands,
+            register_prune_commands,
+        )
     )
-    register_apply_scope_commands(subparsers)
+
+
+def _register_rollback_command(subparsers: Any) -> None:
     rollback_parser = subparsers.add_parser(
         "rollback",
         help="Reverse one completed apply journal with a separate durable journal.",
@@ -86,9 +91,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rollback_parser.add_argument("--json", action="store_true", dest="json_output")
     rollback_parser.set_defaults(handler=_run_rollback)
-    register_quarantine_commands(subparsers)
-    register_prune_commands(subparsers)
-    return parser
 
 
 def _run_rollback(args: argparse.Namespace) -> int:

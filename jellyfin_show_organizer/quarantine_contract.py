@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import cast
 
 from .apply_contract import manifest_plan_hash
-from .apply_execution import ApplyExecutionError, PreparedApply
+from .apply_execution import PreparedApply
 from .models import SourceFingerprint
 
 QUARANTINE_PLAN_SCHEMA_VERSION = 1
@@ -526,16 +526,3 @@ def validate_quarantine_plan_binding(
             "quarantine plan does not match the exact reviewed duplicate outcome"
         )
     return expected
-
-
-def quarantine_plan_from_paths(
-    plan_path: str,
-    prepared_apply: PreparedApply,
-) -> QuarantinePlan:
-    try:
-        manifest = json.loads(open(plan_path, encoding="utf-8").read())
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ApplyExecutionError(
-            "could not load plan for quarantine derivation"
-        ) from exc
-    return derive_quarantine_plan(manifest, prepared_apply)

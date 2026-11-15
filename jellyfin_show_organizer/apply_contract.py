@@ -32,13 +32,6 @@ class ApplyReviewMode(StrEnum):
     APPROVED_PARTIAL = "approved-partial"
 
 
-class JournalEvent(StrEnum):
-    GROUP_STARTED = "group-started"
-    MEMBER_COMPLETED = "member-completed"
-    GROUP_COMPLETED = "group-completed"
-    GROUP_FAILED = "group-failed"
-
-
 @dataclass(frozen=True, slots=True)
 class ApplyReviewApproval:
     """Approval binding for the exact review ledger that produced a reviewed plan."""
@@ -160,43 +153,6 @@ class ApplyContract:
         group_ids = [group.group_id for group in self.groups]
         if len(group_ids) != len(set(group_ids)):
             raise ValueError("apply group ids must be unique")
-
-
-@dataclass(frozen=True, slots=True)
-class ApplyJournalEntry:
-    sequence: int
-    plan_sha256: str
-    group_id: str
-    event: JournalEvent
-    source_relative_path: str | None = None
-    destination_relative_path: str | None = None
-    detail: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.sequence <= 0:
-            raise ValueError("journal sequence must be positive")
-        _validate_hash(self.plan_sha256, "journal plan_sha256")
-        if not self.group_id:
-            raise ValueError("journal group_id cannot be empty")
-        has_source = self.source_relative_path is not None
-        has_destination = self.destination_relative_path is not None
-        if has_source != has_destination:
-            raise ValueError(
-                "journal member source and destination must be supplied together"
-            )
-        if self.event is JournalEvent.MEMBER_COMPLETED and not has_source:
-            raise ValueError("member-completed journal entries require member paths")
-        if self.event is not JournalEvent.MEMBER_COMPLETED and has_source:
-            raise ValueError("only member-completed entries may carry member paths")
-        if self.detail is not None and not self.detail.strip():
-            raise ValueError("journal detail cannot be blank")
-
-
-@dataclass(frozen=True, slots=True)
-class JournalReplay:
-    completed_group_ids: tuple[str, ...]
-    incomplete_group_ids: tuple[str, ...]
-    completed_members: tuple[tuple[str, str], ...]
 
 
 def _validate_hash(value: str, field: str) -> None:
@@ -620,102 +576,4 @@ def build_apply_contract(
         )
     return ApplyContract(
         plan_sha256=plan_hash, groups=operation_groups, separate_roots=separate_roots
-    )
-
-
-def replay_journal(
-    contract: ApplyContract,
-    entries: Iterable[ApplyJournalEntry],
-) -> JournalReplay:
-    """Replay append-only journal events without touching the filesystem."""
-
-    groups = {group.group_id: group for group in contract.groups}
-    active: set[str] = set()
-    completed_groups: set[str] = set()
-    touched_groups: set[str] = set()
-    completed_members: set[tuple[str, str]] = set()
-
-    ordered = tuple(entries)
-    expected_sequence = 1
-    for entry in ordered:
-        if entry.sequence != expected_sequence:
-            raise ApplyContractError("journal sequence is not contiguous")
-        expected_sequence += 1
-        if entry.plan_sha256 != contract.plan_sha256:
-            raise ApplyContractError("journal entry belongs to a different plan")
-        group = groups.get(entry.group_id)
-        if group is None:
-            raise ApplyContractError("journal entry references an unknown group")
-        if entry.group_id in completed_groups:
-            raise ApplyContractError("journal contains events after group completion")
-        touched_groups.add(entry.group_id)
-
-        if entry.event is JournalEvent.GROUP_STARTED:
-            if entry.group_id in active:
-                raise ApplyContractError("journal starts an already active group")
-            active.add(entry.group_id)
-            continue
-
-        if entry.event is JournalEvent.MEMBER_COMPLETED:
-            if entry.group_id not in active:
-                raise ApplyContractError(
-                    "journal completes a member outside an active group"
-                )
-            assert entry.source_relative_path is not None
-            assert entry.destination_relative_path is not None
-            member_key = (
-                _path_key(entry.source_relative_path),
-                _path_key(entry.destination_relative_path),
-            )
-            allowed = {
-                (
-                    _path_key(member.source_relative_path),
-                    _path_key(member.destination_relative_path),
-                )
-                for member in group.moving_members
-            }
-            if member_key not in allowed:
-                raise ApplyContractError(
-                    "journal member is not part of the approved group"
-                )
-            if member_key in completed_members:
-                raise ApplyContractError("journal repeats a completed member move")
-            completed_members.add(member_key)
-            continue
-
-        if entry.event is JournalEvent.GROUP_FAILED:
-            if entry.group_id not in active:
-                raise ApplyContractError("journal fails a group that is not active")
-            active.remove(entry.group_id)
-            continue
-
-        if entry.event is JournalEvent.GROUP_COMPLETED:
-            if entry.group_id not in active:
-                raise ApplyContractError("journal completes a group that is not active")
-            required = {
-                (
-                    _path_key(member.source_relative_path),
-                    _path_key(member.destination_relative_path),
-                )
-                for member in group.moving_members
-            }
-            if not required.issubset(completed_members):
-                raise ApplyContractError(
-                    "journal completes a group before all member moves are recorded"
-                )
-            active.remove(entry.group_id)
-            completed_groups.add(entry.group_id)
-            continue
-
-        raise ApplyContractError("journal contains an unsupported event")
-
-    incomplete = touched_groups - completed_groups
-    return JournalReplay(
-        completed_group_ids=tuple(
-            sorted(completed_groups, key=lambda value: (value.casefold(), value))
-        ),
-        incomplete_group_ids=tuple(
-            sorted(incomplete, key=lambda value: (value.casefold(), value))
-        ),
-        completed_members=tuple(sorted(completed_members)),
     )

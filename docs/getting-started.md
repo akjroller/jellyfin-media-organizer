@@ -103,24 +103,8 @@ system; keep state, cache, and audit output outside both media roots.
 
 ## Configure once, then reuse
 
-For an existing library, `jmo init` creates the state directory, cache,
-starter override, and planning config in one step. It never overwrites an
-existing state directory:
-
-```text
-jmo init /path/to/Shows --destination-root /path/to/OrganizedShows --state-dir LocalState
-```
-
-If you want to learn the workflow without using any real media, create the
-disposable synthetic workspace first:
-
-```text
-jmo demo --output JMO-demo
-```
-
-The demo contains fabricated files only and includes its own instructions.
-
-Create a state directory outside both media roots and save this as
+To manage the configuration yourself instead of using `jmo init`, create a
+state directory outside both media roots and save this as
 `LocalState/planning.toml`:
 
 ```toml
@@ -237,6 +221,20 @@ jmo plan /path/to/Shows --config LocalState/planning.toml --output-dir LocalStat
 For a deterministic replay, repeat with `--offline` and a different output
 directory. Plan and decision hashes should match the online run.
 
+## Reading the results
+
+Every audit bundle includes `remaining.csv`. It is the authoritative list of entries that `jmo apply` deliberately leaves at the source or that still block apply. Matched videos, extras, and associated companions are excluded because they are apply-movable.
+
+`remaining.csv` marks each row as `intentional` or `blocking`:
+
+- duplicate loser videos and duplicate companions are intentional leftovers from apply; reversible quarantine is a separate approval;
+- held videos and ignored companions are intentional leftovers;
+- suspicious or unresolved videos and unresolved companions are blocking leftovers.
+
+`skipped.csv` lists video files the inventory found but did not plan: samples, disc images and files inside Blu-ray/DVD folder structures (`BDMV`, `VIDEO_TS`), and rarer containers JMO does not organize yet (such as `.flv` or `.rmvb`). They are never moved. `summary.txt` counts them as `skipped_samples` and `skipped_unsupported_videos`, and `jmo plan` prints a warning when unsupported videos were skipped.
+
+`summary.txt` reports `readiness_state=not-evaluated|apply-ready|blocked`, `apply_safe`, `library_fully_organized`, and remaining totals. `apply_safe=true` means the approved movement subset may cross the apply boundary. It does **not** mean the source tree becomes empty. `library_fully_organized=true` is only reported when no planned leftovers remain at all.
+
 ## Before the first move
 
 Read the reviewed `summary.txt`, `remaining.csv`, and `preflight.txt`. Keep an
@@ -266,15 +264,21 @@ artifacts; do not generate a replacement plan over a partially moved library.
 See [the apply safety contract](apply-safety-contract.md) for rollback and
 duplicate-quarantine procedures.
 
-## What to send when asking for help
+## Getting help and reporting problems
 
-Do not publish a real library listing or private filenames. Share:
+`jmo report LocalState/audit --output LocalState/report` writes a path-free
+bundle that is safe to attach to a public issue. Do not publish a real library
+listing or private filenames. A useful report contains:
 
-- JMO version (`jmo --version`);
-- operating system and Python version;
-- the exit code and the relevant `summary.txt` / `preflight.txt` lines;
+- JMO version (`jmo --version`), operating system, and Python version;
+- the command and its exit code;
+- counts from `summary.txt` or `jmo inspect` and the relevant `preflight.txt`
+  lines;
+- the plan, decision, and review-session hashes;
 - whether the run was online or offline;
-- sanitized counts of matched, extra, duplicate, held, suspicious, and unresolved records.
+- a minimal fabricated filename that reproduces the problem.
 
-Never share provider credentials, cache contents, approval tokens, journals, or
-unsanitized real-library paths in a public issue.
+Use the issue templates for reproducible defects and feature proposals, and
+GitHub Discussions for questions and workflow feedback. Never share provider
+credentials, cache contents, approval tokens, journals, or unsanitized
+real-library paths.

@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
-from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -82,19 +81,6 @@ class DestinationDecision:
             raise ValueError("unresolved destinations cannot carry a final path")
 
 
-@dataclass(frozen=True, slots=True)
-class DestinationCollision:
-    collision_key: str
-    source_keys: tuple[str, ...]
-    relative_paths: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        if len(self.source_keys) < 2:
-            raise ValueError("destination collisions require at least two sources")
-        if len(self.source_keys) != len(self.relative_paths):
-            raise ValueError("collision sources and paths must have equal length")
-
-
 _FORBIDDEN = frozenset('<>:"/\\|?*')
 _WINDOWS_RESERVED = frozenset(
     {
@@ -128,7 +114,6 @@ _EXTRA_DEFAULT_TITLES: dict[str, str] = {
     "creditless-opening": "Creditless Opening",
     "creditless-ending": "Creditless Ending",
 }
-_HASH_SUFFIX_LENGTH = 14
 
 
 def _digest(value: str) -> str:
@@ -508,34 +493,3 @@ def build_extra_destination(
         reasons.append("unknown-extra-kind-mapped-to-generic-extras-folder")
     reasons.extend(path_reasons)
     return _ready(source_key, relative_path, *reasons)
-
-
-def find_destination_collisions(
-    decisions: Iterable[DestinationDecision],
-) -> tuple[DestinationCollision, ...]:
-    """Report case-insensitive destination convergence without choosing a winner."""
-
-    grouped: dict[str, list[DestinationDecision]] = defaultdict(list)
-    for decision in decisions:
-        if decision.status is DestinationStatus.READY:
-            assert decision.collision_key is not None
-            grouped[decision.collision_key].append(decision)
-
-    collisions: list[DestinationCollision] = []
-    for collision_key, matches in sorted(grouped.items()):
-        if len(matches) < 2:
-            continue
-        ordered = sorted(
-            matches,
-            key=lambda decision: (decision.source_key.casefold(), decision.source_key),
-        )
-        collisions.append(
-            DestinationCollision(
-                collision_key=collision_key,
-                source_keys=tuple(decision.source_key for decision in ordered),
-                relative_paths=tuple(
-                    decision.relative_path or "" for decision in ordered
-                ),
-            )
-        )
-    return tuple(collisions)

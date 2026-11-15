@@ -8,7 +8,6 @@ from jellyfin_show_organizer.review_system import (
     ReviewConfigurationError,
     _duplicate_collision_class,
     _mapping,
-    _record_show_key,
     _string,
     load_review_answers,
 )
@@ -57,16 +56,3 @@ def test_duplicate_collision_class_requires_structured_valid_value() -> None:
 
     with pytest.raises(ReviewConfigurationError, match="collision_class is invalid"):
         _duplicate_collision_class({"collision_class": "fabricated-invalid"})
-
-
-def test_record_show_key_falls_back_to_source_parent() -> None:
-    assert (
-        _record_show_key(
-            {
-                "source": {
-                    "relative_path": "Fallback Series/Mystery.mkv",
-                }
-            }
-        )
-        == "Fallback Series"
-    )
