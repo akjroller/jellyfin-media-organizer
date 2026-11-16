@@ -19,7 +19,10 @@ from jellyfin_show_organizer.apply_contract import (
     ApplyContractError,
     derive_apply_group_ids,
 )
-from jellyfin_show_organizer.planner import PlanningConfig, execute_plan
+from jellyfin_show_organizer.planner import (
+    PlanningConfig,
+    execute_plan,
+)
 from jellyfin_show_organizer.schema import ManifestValidationError, validate_manifest
 
 pytestmark = pytest.mark.local

@@ -6,6 +6,9 @@ from jellyfin_show_organizer.destination import (
     DestinationStatus,
     build_extra_destination,
 )
+from jellyfin_show_organizer.duplicate_planning import (
+    logical_identity,
+)
 from jellyfin_show_organizer.extra_classifier import ExtraDisposition, classify_extra
 from jellyfin_show_organizer.extra_naming import derive_extra_display_identity
 from jellyfin_show_organizer.models import (
@@ -18,7 +21,6 @@ from jellyfin_show_organizer.models import (
     SourceFingerprint,
     TerminalStatus,
 )
-from jellyfin_show_organizer.planner import _logical_identity
 
 pytestmark = pytest.mark.local
 
@@ -156,7 +158,7 @@ def test_true_alternate_extra_copies_converge_to_one_logical_identity() -> None:
         "Fixture Series/Fixture.Series.S01EXTRA.Cast.Reunion.720p.WEB-DL.x264-OTHER.mkv"
     )
 
-    assert _logical_identity(high) == _logical_identity(low)
+    assert logical_identity(high) == logical_identity(low)
 
 
 def test_distinct_extra_titles_do_not_share_planner_logical_identity() -> None:
@@ -165,7 +167,7 @@ def test_distinct_extra_titles_do_not_share_planner_logical_identity() -> None:
     )
     music = _extra_record("Fixture Series/Fixture.Series.S01EXTRA.Music.Video.mkv")
 
-    assert _logical_identity(drawing) != _logical_identity(music)
+    assert logical_identity(drawing) != logical_identity(music)
 
 
 def test_generic_extra_folder_filename_can_supply_semantic_title() -> None:
@@ -295,4 +297,4 @@ def test_planner_extra_identity_keeps_seasons_distinct() -> None:
         "Fixture Series/Fixture.Series.S02EXTRA01.Mission.Overview.mkv"
     )
 
-    assert _logical_identity(season_one) != _logical_identity(season_two)
+    assert logical_identity(season_one) != logical_identity(season_two)

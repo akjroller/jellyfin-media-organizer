@@ -3,29 +3,25 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import unicodedata
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import cast
 
 from . import __version__
+from .companion_planning import plan_companions
 from .destination import (
     DestinationPolicy,
     DestinationStatus,
     build_episode_destination,
     build_extra_destination,
 )
-from .duplicate_classifier import (
-    DuplicateCandidate,
-    DuplicateDisposition,
-    DuplicatePreference,
-    classify_duplicate_candidates,
+from .duplicate_planning import (
+    apply_duplicate_decisions,
+    recover_equivalent_provider_episode_duplicates,
 )
 from .episode_assignment import (
     AssignmentStatus,
-    SourceEpisodeAssignment,
     SourceEpisodeInput,
     assign_episode_group_with_provider,
 )
@@ -41,9 +37,6 @@ from .inventory import (
 )
 from .models import (
     CacheSnapshot,
-    CanonicalShow,
-    CompanionPlanRecord,
-    CompanionStatus,
     MatchEvidence,
     OrganizerPlan,
     ParseResult,
@@ -54,10 +47,14 @@ from .models import (
     TerminalStatus,
 )
 from .overrides import EpisodeDecisionOverride, OverrideCatalog, load_overrides
+from .plan_common import (
+    PlanningConfigurationError,
+    operation_group_id,
+    path_key,
+)
+from .plan_preflight import preflight_records
 from .preflight import (
-    PreflightRecord,
     PreflightResult,
-    PreflightStatus,
     authorize_destination_root,
     preflight_plan,
 )
@@ -86,9 +83,6 @@ from .show_resolver import (
     resolve_show_group_with_provider,
 )
 from .sidecars import (
-    AdjacentFile,
-    SidecarDiscovery,
-    companion_destinations,
     discover_sidecars,
 )
 from .tmdb_cache import TmdbCatalogCache, tmdb_http_getter
@@ -99,10 +93,6 @@ from .tvmaze_cache import (
     JsonGetter,
     TvmazeCatalogCache,
 )
-
-
-class PlanningConfigurationError(ValueError):
-    """Raised when a requested plan cannot be run within the safety contract."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,15 +210,6 @@ http_json_getter: JsonGetter = ThrottledJsonGetter(
 )
 
 
-def _path_key(value: str) -> tuple[str, str]:
-    return unicodedata.normalize("NFKC", value).casefold(), value
-
-
-def _operation_group_id(relative_path: str) -> str:
-    normalized = unicodedata.normalize("NFKC", relative_path).casefold()
-    return "op-" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:20]
-
-
 def _show_group_key(source: SourceFile, classification: ExtraClassification) -> str:
     path = PurePosixPath(source.relative_path)
     if len(path.parts) > 1:
@@ -299,138 +280,6 @@ def _plan_episode(episode: ProviderEpisode) -> PlanEpisode:
     )
 
 
-_DUPLICATE_PROVIDER_EPISODE_PREFIX = "duplicate-provider-episode-assignment:"
-_PROVIDER_EPISODE_DUPLICATE_CANDIDATE = "provider-episode-duplicate-candidate"
-
-
-def _duplicate_provider_claims(
-    assignment: SourceEpisodeAssignment,
-) -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            reason.removeprefix(_DUPLICATE_PROVIDER_EPISODE_PREFIX)
-            for reason in assignment.evidence.reasons
-            if reason.startswith(_DUPLICATE_PROVIDER_EPISODE_PREFIX)
-        )
-    )
-
-
-def _duplicate_claim_components(
-    claims_by_source: Mapping[str, tuple[str, ...]],
-) -> tuple[tuple[str, ...], ...]:
-    remaining = set(claims_by_source)
-    components: list[tuple[str, ...]] = []
-    while remaining:
-        seed = min(remaining, key=_path_key)
-        component = {seed}
-        frontier = [seed]
-        remaining.remove(seed)
-        while frontier:
-            current = frontier.pop()
-            current_claims = set(claims_by_source[current])
-            connected = sorted(
-                (
-                    source
-                    for source in remaining
-                    if current_claims.intersection(claims_by_source[source])
-                ),
-                key=_path_key,
-            )
-            for source in connected:
-                remaining.remove(source)
-                component.add(source)
-                frontier.append(source)
-        components.append(tuple(sorted(component, key=_path_key)))
-    return tuple(components)
-
-
-def _recover_equivalent_provider_episode_duplicates(
-    show: CanonicalShow,
-    sources: tuple[SourceEpisodeInput, ...],
-    assignments: Mapping[str, SourceEpisodeAssignment],
-    provider: MetadataProvider,
-) -> dict[str, SourceEpisodeAssignment]:
-    """Recover only exact-set duplicate claims after the strict overlap guard fires.
-
-    The normal group assignment remains fail-closed. Sources are re-evaluated one at
-    a time solely to recover the provider episodes that the strict duplicate guard
-    deliberately removed. A connected overlap component is promoted only when every
-    member independently matches and every member has the exact same complete
-    provider-episode identity set. Partial overlaps therefore remain suspicious.
-    """
-
-    claims_by_source = {
-        source.source_key: claims
-        for source in sources
-        if (assignment := assignments.get(source.source_key)) is not None
-        and assignment.status is AssignmentStatus.SUSPICIOUS
-        and (claims := _duplicate_provider_claims(assignment))
-    }
-    if len(claims_by_source) < 2:
-        return {}
-
-    source_by_key = {source.source_key: source for source in sources}
-    recovered: dict[str, SourceEpisodeAssignment] = {}
-    for component in _duplicate_claim_components(claims_by_source):
-        if len(component) < 2:
-            continue
-
-        individual: dict[str, SourceEpisodeAssignment] = {}
-        complete_sets: set[tuple[str, ...]] = set()
-        valid = True
-        for source_key in component:
-            result = assign_episode_group_with_provider(
-                show,
-                (source_by_key[source_key],),
-                provider,
-            )
-            if len(result.assignments) != 1:
-                valid = False
-                break
-            assignment = result.assignments[0]
-            if (
-                assignment.status is not AssignmentStatus.MATCHED
-                or not assignment.episodes
-            ):
-                valid = False
-                break
-            complete_set = tuple(
-                sorted(episode.identity.key for episode in assignment.episodes)
-            )
-            if len(complete_set) != len(set(complete_set)):
-                valid = False
-                break
-            individual[source_key] = assignment
-            complete_sets.add(complete_set)
-
-        if not valid or len(individual) != len(component) or len(complete_sets) != 1:
-            continue
-
-        episode_set = next(iter(complete_sets))
-        set_reason = "provider-episode-duplicate-set:" + ",".join(episode_set)
-        for source_key in component:
-            assignment = individual[source_key]
-            original = assignments[source_key]
-            duplicate_reasons = tuple(
-                reason
-                for reason in original.evidence.reasons
-                if reason.startswith(_DUPLICATE_PROVIDER_EPISODE_PREFIX)
-            )
-            recovered[source_key] = replace(
-                assignment,
-                evidence=replace(
-                    assignment.evidence,
-                    reasons=(
-                        *assignment.evidence.reasons,
-                        *duplicate_reasons,
-                        _PROVIDER_EPISODE_DUPLICATE_CANDIDATE,
-                        set_reason,
-                    ),
-                ),
-            )
-    return recovered
-
-
 def _unresolved_show_records(
     sources: tuple[SourceFile, ...],
     classifications: Mapping[str, ExtraClassification],
@@ -447,7 +296,7 @@ def _unresolved_show_records(
             status=status,
             parse=classifications[source.relative_path].parse,
             evidence=resolution.evidence,
-            operation_group_id=_operation_group_id(source.relative_path),
+            operation_group_id=operation_group_id(source.relative_path),
             reason=_reason(resolution.evidence),
         )
         for source in sources
@@ -481,7 +330,7 @@ def _plan_resolved_group(
 
     for source in sources:
         classification = classifications[source.relative_path]
-        group_id = _operation_group_id(source.relative_path)
+        group_id = operation_group_id(source.relative_path)
         decision = overrides.episode_decision_for(source.relative_path)
         if decision is not None:
             if classification.disposition is not ExtraDisposition.EPISODE_CANDIDATE:
@@ -607,7 +456,7 @@ def _plan_resolved_group(
         assignment.source_key: assignment for assignment in assignment_group.assignments
     }
     assignments.update(
-        _recover_equivalent_provider_episode_duplicates(
+        recover_equivalent_provider_episode_duplicates(
             show,
             tuple(episode_sources),
             assignments,
@@ -624,7 +473,7 @@ def _plan_resolved_group(
             evidence_parts.append(local_decision_evidence)
         evidence_parts.append(assignment.evidence)
         evidence = _combine_evidence(*evidence_parts)
-        group_id = _operation_group_id(source.relative_path)
+        group_id = operation_group_id(source.relative_path)
         if assignment.status is not AssignmentStatus.MATCHED:
             status = (
                 TerminalStatus.SUSPICIOUS
@@ -684,379 +533,6 @@ def _plan_resolved_group(
     return records
 
 
-def _logical_identity(record: PlanRecord) -> str:
-    assert record.show is not None
-    show_identity = record.show.provider_identity.key
-    if record.provider_episodes:
-        episodes = ",".join(
-            episode.provider_identity.key for episode in record.provider_episodes
-        )
-        return f"{show_identity}:episodes:{episodes}"
-    if record.extra is not None:
-        naming = derive_extra_display_identity(
-            record.source.relative_path,
-            record.extra.kind,
-            show_title=record.show.title,
-            title_hint=record.parse.title_hint if record.parse is not None else None,
-        )
-        return f"{show_identity}:extra:{record.extra.kind}:{naming.identity_key}"
-    return f"{show_identity}:source:{record.source.relative_path}"
-
-
-def _provider_episode_duplicate_collision_key(record: PlanRecord) -> str | None:
-    # Every resolved provider episode is a potential logical destination
-    # collision, regardless of whether the resolver happened to annotate the
-    # source with the duplicate-candidate evidence marker.  The marker is an
-    # optimization used by the resolver for ambiguous assignment families;
-    # relying on it here allowed two independently resolved releases (for
-    # example an MKV and an MP4 of the same episode) to pass apply and only be
-    # discovered as a collision on the next scan after they were managed.
-    # Grouping all resolved episode sets is fail-closed: singleton groups do
-    # not produce a duplicate result, while repeated provider coordinates are
-    # forced through the normal reviewed duplicate decision path.
-    if record.show is None or not record.provider_episodes:
-        return None
-    episode_ids = tuple(
-        sorted(episode.provider_identity.key for episode in record.provider_episodes)
-    )
-    return (
-        "provider-episode-collision:"
-        f"{record.show.provider_identity.key}:" + ",".join(episode_ids)
-    )
-
-
-def _apply_duplicate_decisions(
-    records: list[PlanRecord],
-    sidecars: SidecarDiscovery,
-    overrides: OverrideCatalog,
-) -> list[PlanRecord]:
-    companions_by_video: dict[str, list[str]] = defaultdict(list)
-    for group in sidecars.companions:
-        companions_by_video[group.source_video].extend(
-            file.relative_path for file in group.files
-        )
-
-    candidate_records = tuple(
-        record
-        for record in records
-        if record.status in {TerminalStatus.MATCHED, TerminalStatus.EXTRA}
-        and record.destination is not None
-        and record.show is not None
-    )
-    candidate_keys = {
-        _path_key(record.source.relative_path)[0] for record in candidate_records
-    }
-    record_keys = {_path_key(record.source.relative_path)[0] for record in records}
-    configured_keys = {
-        _path_key(preference.source)[0]
-        for preference in overrides.duplicate_preferences
-    }
-    # Reviewed duplicate-group winners are historical inputs. Once a winner
-    # has been moved into the managed layout, its original source path is no
-    # longer present on a same-root re-scan. Keep legacy/manual references
-    # fail-closed, but allow these session-bound, already-consumed decisions to
-    # become inactive instead of blocking every subsequent paper run.
-    stale_reviewed_keys = {
-        _path_key(preference.source)[0]
-        for preference in overrides.duplicate_preferences
-        if any(
-            reason.startswith("reviewed-duplicate-ref:")
-            for reason in preference.reasons
-        )
-        and _path_key(preference.source)[0] not in record_keys
-    }
-    if configured_keys - record_keys - stale_reviewed_keys:
-        raise PlanningConfigurationError(
-            "duplicate preference references an unknown source"
-        )
-    movable_configured_keys = configured_keys & candidate_keys
-
-    provider_collision_counts: dict[str, int] = defaultdict(int)
-    provider_collision_keys: dict[str, str] = {}
-    for record in candidate_records:
-        collision_key = _provider_episode_duplicate_collision_key(record)
-        if collision_key is not None:
-            source_key = _path_key(record.source.relative_path)[0]
-            provider_collision_counts[collision_key] += 1
-            provider_collision_keys[source_key] = collision_key
-
-    provider_duplicate_keys: set[str] = set()
-    candidates: list[DuplicateCandidate] = []
-    for record in candidate_records:
-        configured = overrides.duplicate_preference_for(record.source.relative_path)
-        preference = (
-            DuplicatePreference(
-                rank=configured.rank,
-                reasons=(
-                    f"local duplicate preference for {configured.source}",
-                    *configured.reasons,
-                ),
-            )
-            if configured is not None
-            else (
-                DuplicatePreference(
-                    rank=2_000_000,
-                    reasons=(
-                        "already-managed destination is the canonical duplicate winner",
-                    ),
-                )
-                if _path_key(record.source.relative_path)[0]
-                == _path_key(record.destination or "")[0]
-                else None
-            )
-        )
-        source_key = _path_key(record.source.relative_path)[0]
-        collision_key = provider_collision_keys.get(source_key)
-        if collision_key is not None and provider_collision_counts[collision_key] > 1:
-            provider_duplicate_keys.add(source_key)
-        else:
-            collision_key = None
-        candidates.append(
-            DuplicateCandidate(
-                operation_key=record.source.relative_path,
-                members=(
-                    record.source.relative_path,
-                    *sorted(
-                        companions_by_video.get(record.source.relative_path, ()),
-                        key=_path_key,
-                    ),
-                ),
-                destination=collision_key or cast(str, record.destination),
-                logical_identity=_logical_identity(record),
-                fingerprint=record.source.fingerprint,
-                preference=preference,
-            )
-        )
-
-    results = classify_duplicate_candidates(candidates)
-    collision_keys = {
-        _path_key(candidate.operation_key)[0]
-        for result in results
-        for candidate in result.candidates
-    }
-    if provider_duplicate_keys - collision_keys:
-        raise PlanningConfigurationError(
-            "provider-episode duplicate candidate did not form a complete collision"
-        )
-    if movable_configured_keys - collision_keys:
-        raise PlanningConfigurationError(
-            "duplicate preference source is not part of a destination collision"
-        )
-
-    by_source = {
-        record.source.relative_path: index for index, record in enumerate(records)
-    }
-    for result in results:
-        decision = result.decision
-        for candidate in result.candidates:
-            index = by_source[candidate.operation_key]
-            record = records[index]
-            if (
-                result.disposition is DuplicateDisposition.SUSPICIOUS
-                or decision.winner is None
-            ):
-                records[index] = replace(
-                    record,
-                    status=TerminalStatus.SUSPICIOUS,
-                    duplicate=decision,
-                    reason="; ".join(decision.evidence),
-                )
-            elif candidate.operation_key == decision.winner:
-                records[index] = replace(record, duplicate=decision)
-            else:
-                records[index] = replace(
-                    record,
-                    status=TerminalStatus.DUPLICATE,
-                    duplicate=decision,
-                    reason="non-destructive duplicate loser",
-                )
-    return records
-
-
-def _adjacent_record(
-    file: AdjacentFile,
-    status: CompanionStatus,
-) -> CompanionPlanRecord:
-    return CompanionPlanRecord(
-        relative_path=file.relative_path,
-        extension=file.extension,
-        fingerprint=file.fingerprint,
-        status=status,
-        reason=file.reason,
-    )
-
-
-def _show_folder_anchors(
-    records: tuple[PlanRecord, ...],
-) -> dict[str, tuple[PlanRecord, str] | str]:
-    """Pick, per top-level source folder, one moving episode and its show folder.
-
-    The value is the anchor record and destination show folder, or the reason
-    series-level files from that source folder must stay where they are.
-    """
-
-    by_folder: dict[str, list[PlanRecord]] = defaultdict(list)
-    for record in records:
-        parts = PurePosixPath(record.source.relative_path).parts
-        if len(parts) > 1:
-            by_folder[_path_key(parts[0])[0]].append(record)
-    anchors: dict[str, tuple[PlanRecord, str] | str] = {}
-    for folder, folder_records in by_folder.items():
-        moving = [
-            record
-            for record in folder_records
-            if record.status is TerminalStatus.MATCHED
-            and record.destination is not None
-            and record.operation_group_id is not None
-            and record.show is not None
-        ]
-        if not moving:
-            anchors[folder] = "show-folder-has-no-moving-episode"
-            continue
-        show_folders = {
-            PurePosixPath(cast(str, record.destination)).parts[0] for record in moving
-        }
-        identities = {
-            cast(CanonicalShow, record.show).provider_identity for record in moving
-        }
-        if len(show_folders) != 1 or len(identities) != 1:
-            anchors[folder] = "show-folder-has-several-shows"
-            continue
-        anchor = min(moving, key=lambda record: _path_key(record.source.relative_path))
-        anchors[folder] = (anchor, next(iter(show_folders)))
-    return anchors
-
-
-def _plan_show_files(
-    show_files: tuple[AdjacentFile, ...],
-    records: tuple[PlanRecord, ...],
-    destination_root: Path | None,
-) -> list[CompanionPlanRecord]:
-    """Move series-level files with one episode of their show, or leave them.
-
-    A file moves only when its source folder resolves to exactly one show with
-    a moving episode, no other source folder brings a file with the same name
-    to that show, and the organized show folder does not already have it.
-    Every other case leaves the file in place with a reason; none blocks a plan.
-    """
-
-    anchors = _show_folder_anchors(records)
-    proposals: list[tuple[AdjacentFile, PlanRecord, str]] = []
-    planned: list[CompanionPlanRecord] = []
-
-    def stay(file: AdjacentFile, reason: str) -> None:
-        planned.append(
-            CompanionPlanRecord(
-                relative_path=file.relative_path,
-                extension=file.extension,
-                fingerprint=file.fingerprint,
-                status=CompanionStatus.IGNORED,
-                reason=reason,
-            )
-        )
-
-    for file in show_files:
-        source = PurePosixPath(file.relative_path)
-        decision = anchors.get(
-            _path_key(source.parts[0])[0], "show-folder-has-no-moving-episode"
-        )
-        if isinstance(decision, str):
-            stay(file, decision)
-            continue
-        anchor, show_folder = decision
-        proposals.append((file, anchor, f"{show_folder}/{source.name.casefold()}"))
-
-    destination_counts = Counter(
-        destination.casefold() for _, _, destination in proposals
-    )
-    for file, anchor, destination in proposals:
-        if destination_counts[destination.casefold()] > 1:
-            stay(file, "show-file-collision")
-        elif destination_root is not None and os.path.lexists(
-            destination_root / destination
-        ):
-            stay(file, "destination-show-file-exists")
-        else:
-            planned.append(
-                CompanionPlanRecord(
-                    relative_path=file.relative_path,
-                    extension=file.extension,
-                    fingerprint=file.fingerprint,
-                    status=CompanionStatus.ASSOCIATED,
-                    reason="series-level-file-moves-with-show",
-                    source_video=anchor.source.relative_path,
-                    operation_group_id=anchor.operation_group_id,
-                    destination=destination,
-                    kind="show-metadata"
-                    if file.extension == ".nfo"
-                    else "show-artwork",
-                )
-            )
-    return planned
-
-
-def _plan_companions(
-    discovery: SidecarDiscovery,
-    records: tuple[PlanRecord, ...],
-    destination_root: Path | None = None,
-) -> tuple[CompanionPlanRecord, ...]:
-    by_source = {record.source.relative_path: record for record in records}
-    planned: list[CompanionPlanRecord] = []
-    for group in discovery.companions:
-        video = by_source[group.source_video]
-        group_id = video.operation_group_id or _operation_group_id(group.source_video)
-        if (
-            video.status in {TerminalStatus.MATCHED, TerminalStatus.EXTRA}
-            and video.destination is not None
-        ):
-            destinations = companion_destinations(video.destination, group)
-            for file, destination in zip(group.files, destinations, strict=True):
-                planned.append(
-                    CompanionPlanRecord(
-                        relative_path=file.relative_path,
-                        extension=file.extension,
-                        fingerprint=file.fingerprint,
-                        status=CompanionStatus.ASSOCIATED,
-                        reason=file.reason,
-                        source_video=group.source_video,
-                        operation_group_id=group_id,
-                        destination=destination,
-                        kind=group.kind.value,
-                    )
-                )
-            continue
-
-        if video.status is TerminalStatus.DUPLICATE:
-            status = CompanionStatus.DUPLICATE
-        elif video.status is TerminalStatus.HELD:
-            status = CompanionStatus.IGNORED
-        else:
-            status = CompanionStatus.UNRESOLVED
-        for file in group.files:
-            planned.append(
-                CompanionPlanRecord(
-                    relative_path=file.relative_path,
-                    extension=file.extension,
-                    fingerprint=file.fingerprint,
-                    status=status,
-                    reason=f"source-video-status:{video.status.value}",
-                    source_video=group.source_video,
-                    operation_group_id=group_id,
-                    kind=group.kind.value,
-                )
-            )
-
-    planned.extend(
-        _adjacent_record(file, CompanionStatus.UNRESOLVED)
-        for file in discovery.unresolved
-    )
-    planned.extend(
-        _adjacent_record(file, CompanionStatus.IGNORED) for file in discovery.ignored
-    )
-    planned.extend(_plan_show_files(discovery.show_files, records, destination_root))
-    return tuple(sorted(planned, key=lambda record: _path_key(record.relative_path)))
-
-
 def _cache_snapshots(
     cache: TrackingTvmazeCatalogCache | TrackingTmdbCatalogCache,
 ) -> tuple[CacheSnapshot, ...]:
@@ -1076,11 +552,11 @@ def _cache_snapshots(
 
 
 def _configured_episode_decision_keys(overrides: OverrideCatalog) -> set[str]:
-    return {_path_key(decision.source)[0] for decision in overrides.episode_decisions}
+    return {path_key(decision.source)[0] for decision in overrides.episode_decisions}
 
 
 def _configured_source_hold_keys(overrides: OverrideCatalog) -> set[str]:
-    return {_path_key(hold.source)[0] for hold in overrides.source_holds}
+    return {path_key(hold.source)[0] for hold in overrides.source_holds}
 
 
 def _validate_source_hold_sources(
@@ -1088,7 +564,7 @@ def _validate_source_hold_sources(
     overrides: OverrideCatalog,
 ) -> None:
     configured = _configured_source_hold_keys(overrides)
-    available = {_path_key(source.relative_path)[0] for source in sources}
+    available = {path_key(source.relative_path)[0] for source in sources}
     if configured - available:
         raise PlanningConfigurationError("source hold references an unknown source")
 
@@ -1098,7 +574,7 @@ def _validate_episode_decision_sources(
     overrides: OverrideCatalog,
 ) -> None:
     configured = _configured_episode_decision_keys(overrides)
-    available = {_path_key(source.relative_path)[0] for source in sources}
+    available = {path_key(source.relative_path)[0] for source in sources}
     if configured - available:
         raise PlanningConfigurationError(
             "episode decision references an unknown source"
@@ -1113,7 +589,7 @@ def _validate_episode_decision_consumption(
     if not configured:
         return
     consumed = {
-        _path_key(record.source.relative_path)[0]
+        path_key(record.source.relative_path)[0]
         for record in records
         if record.evidence is not None
         and "episode-decision-override" in record.evidence.method.split("+")
@@ -1177,7 +653,7 @@ def _build_plan(
                     status=TerminalStatus.HELD,
                     parse=classifications[source.relative_path].parse,
                     evidence=evidence,
-                    operation_group_id=_operation_group_id(source.relative_path),
+                    operation_group_id=operation_group_id(source.relative_path),
                     reason=_reason(evidence),
                 )
             )
@@ -1191,10 +667,10 @@ def _build_plan(
         max_component_length=config.max_component_length,
     )
     records: list[PlanRecord] = list(held_records)
-    ordered_groups = sorted(groups, key=_path_key)
+    ordered_groups = sorted(groups, key=path_key)
     for index, source_key in enumerate(ordered_groups, start=1):
         group = tuple(
-            sorted(groups[source_key], key=lambda item: _path_key(item.relative_path))
+            sorted(groups[source_key], key=lambda item: path_key(item.relative_path))
         )
         resolution = resolve_show_group_with_provider(
             source_key,
@@ -1219,11 +695,11 @@ def _build_plan(
         )
 
     _validate_episode_decision_consumption(records, overrides)
-    records = _apply_duplicate_decisions(records, sidecars, overrides)
+    records = apply_duplicate_decisions(records, sidecars, overrides)
     ordered_records = tuple(
-        sorted(records, key=lambda item: _path_key(item.source.relative_path))
+        sorted(records, key=lambda item: path_key(item.source.relative_path))
     )
-    companions = _plan_companions(
+    companions = plan_companions(
         sidecars,
         ordered_records,
         config.destination_root.expanduser().resolve(strict=False),
@@ -1243,93 +719,6 @@ def _build_plan(
     )
 
 
-def _numbering_identity(record: PlanRecord) -> str | None:
-    if record.provider_episodes:
-        return ",".join(
-            f"S{episode.season:02d}E{episode.number:02d}"
-            if episode.number is not None
-            else f"S{episode.season:02d}:{episode.provider_identity.key}"
-            for episode in record.provider_episodes
-        )
-    if record.extra is not None:
-        return f"extra:{record.extra.kind}"
-    return None
-
-
-def _video_preflight_status(record: PlanRecord) -> PreflightStatus:
-    if record.status is TerminalStatus.SUSPICIOUS:
-        return PreflightStatus.SUSPICIOUS
-    if record.status is TerminalStatus.UNRESOLVED:
-        return PreflightStatus.UNRESOLVED
-    if record.status in {TerminalStatus.DUPLICATE, TerminalStatus.HELD}:
-        return PreflightStatus.NON_MOVING
-    if (
-        record.destination is not None
-        and _path_key(record.destination)[0]
-        == _path_key(record.source.relative_path)[0]
-    ):
-        return PreflightStatus.NON_MOVING
-    return PreflightStatus.MATCHED
-
-
-def _preflight_records(plan: OrganizerPlan) -> tuple[PreflightRecord, ...]:
-    videos = {record.source.relative_path: record for record in plan.records}
-    records: list[PreflightRecord] = []
-    for record in plan.records:
-        records.append(
-            PreflightRecord(
-                record_id=f"video:{record.source.relative_path}",
-                source_relative_path=record.source.relative_path,
-                status=_video_preflight_status(record),
-                operation_group_id=record.operation_group_id,
-                provider_identity=(
-                    record.show.provider_identity.key
-                    if record.show is not None
-                    else None
-                ),
-                numbering_identity=_numbering_identity(record),
-                destination_relative_path=record.destination,
-                source_fingerprint=record.source.fingerprint,
-                duplicate=record.duplicate,
-            )
-        )
-
-    for companion in plan.companions:
-        video = videos.get(companion.source_video or "")
-        if companion.status is CompanionStatus.ASSOCIATED:
-            status = (
-                PreflightStatus.NON_MOVING
-                if companion.destination is not None
-                and _path_key(companion.destination)[0]
-                == _path_key(companion.relative_path)[0]
-                else PreflightStatus.MATCHED
-            )
-        elif companion.status in {CompanionStatus.DUPLICATE, CompanionStatus.IGNORED}:
-            status = PreflightStatus.NON_MOVING
-        else:
-            status = PreflightStatus.UNRESOLVED
-        records.append(
-            PreflightRecord(
-                record_id=f"companion:{companion.relative_path}",
-                source_relative_path=companion.relative_path,
-                status=status,
-                operation_group_id=companion.operation_group_id,
-                provider_identity=(
-                    video.show.provider_identity.key
-                    if video is not None and video.show is not None
-                    else None
-                ),
-                numbering_identity=(
-                    _numbering_identity(video) if video is not None else None
-                ),
-                destination_relative_path=companion.destination,
-                source_fingerprint=companion.fingerprint,
-                duplicate=video.duplicate if video is not None else None,
-            )
-        )
-    return tuple(records)
-
-
 def _is_inside(path: Path, root: Path) -> bool:
     return path == root or path.is_relative_to(root)
 
@@ -1346,11 +735,7 @@ def _external_state_path(path: Path, roots: tuple[Path, ...], label: str) -> Pat
 # rather than reaching through planner's private namespace.  The underscored
 # names remain as compatibility aliases for older local integrations/tests.
 plan_episode = _plan_episode
-path_key = _path_key
-apply_duplicate_decisions = _apply_duplicate_decisions
-plan_companions = _plan_companions
 build_plan = _build_plan
-preflight_records = _preflight_records
 external_state_path = _external_state_path
 
 
@@ -1408,7 +793,7 @@ def execute_plan(
     plan_hash = stable_plan_hash(plan)
     preflight = preflight_plan(
         plan_hash,
-        _preflight_records(plan),
+        preflight_records(plan),
         source_root=source_root,
         destination_root=destination_root,
         max_path_length=config.max_path_length,

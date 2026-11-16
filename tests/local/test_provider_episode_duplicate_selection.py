@@ -4,7 +4,13 @@ from pathlib import PurePosixPath
 
 import pytest
 
+from jellyfin_show_organizer.companion_planning import (
+    plan_companions,
+)
 from jellyfin_show_organizer.destination import DestinationPolicy
+from jellyfin_show_organizer.duplicate_planning import (
+    apply_duplicate_decisions,
+)
 from jellyfin_show_organizer.extra_classifier import (
     ExtraClassification,
     ExtraDisposition,
@@ -25,8 +31,6 @@ from jellyfin_show_organizer.overrides import (
     OverrideCatalog,
 )
 from jellyfin_show_organizer.planner import (
-    _apply_duplicate_decisions,
-    _plan_companions,
     _plan_resolved_group,
 )
 from jellyfin_show_organizer.providers import (
@@ -142,7 +146,7 @@ def _records(
         DestinationPolicy(),
         catalog,
     )
-    return _apply_duplicate_decisions(planned, EMPTY_SIDECARS, catalog)
+    return apply_duplicate_decisions(planned, EMPTY_SIDECARS, catalog)
 
 
 def _by_source(records):
@@ -345,12 +349,12 @@ def test_selected_video_sidecars_follow_winner_and_loser_states() -> None:
         DestinationPolicy(),
         OverrideCatalog(schema_version=2, shows=()),
     )
-    finalized = _apply_duplicate_decisions(
+    finalized = apply_duplicate_decisions(
         planned,
         discovery,
         OverrideCatalog(schema_version=2, shows=()),
     )
-    companions = _plan_companions(discovery, tuple(finalized))
+    companions = plan_companions(discovery, tuple(finalized))
     by_source = {record.relative_path: record for record in companions}
 
     assert (

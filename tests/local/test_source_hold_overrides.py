@@ -5,6 +5,9 @@ from pathlib import Path
 import pytest
 
 from jellyfin_show_organizer.apply_contract import _video_member
+from jellyfin_show_organizer.companion_planning import (
+    plan_companions,
+)
 from jellyfin_show_organizer.models import (
     CompanionStatus,
     MatchEvidence,
@@ -16,12 +19,13 @@ from jellyfin_show_organizer.models import (
     TerminalStatus,
 )
 from jellyfin_show_organizer.overrides import load_overrides
+from jellyfin_show_organizer.plan_preflight import (
+    preflight_records,
+    video_preflight_status,
+)
 from jellyfin_show_organizer.planner import (
     PlanningConfigurationError,
-    _plan_companions,
-    _preflight_records,
     _validate_source_hold_sources,
-    _video_preflight_status,
 )
 from jellyfin_show_organizer.preflight import PreflightStatus
 from jellyfin_show_organizer.schema import PLAN_SCHEMA_VERSION, plan_to_manifest
@@ -144,7 +148,7 @@ def test_held_record_is_first_class_plan_status_and_non_moving() -> None:
     assert PLAN_SCHEMA_VERSION == 3
     assert manifest["records"][0]["status"] == "held"
     assert manifest["records"][0]["destination"] is None
-    assert _video_preflight_status(record) is PreflightStatus.NON_MOVING
+    assert video_preflight_status(record) is PreflightStatus.NON_MOVING
     assert _video_member(manifest["records"][0], 0) is None
 
 
@@ -184,7 +188,7 @@ def test_held_video_companion_is_ignored_and_non_moving() -> None:
         ignored=(),
     )
 
-    companions = _plan_companions(discovery, (record,))
+    companions = plan_companions(discovery, (record,))
 
     assert len(companions) == 1
     companion = companions[0]
@@ -198,7 +202,7 @@ def test_held_video_companion_is_ignored_and_non_moving() -> None:
         records=(record,),
         companions=companions,
     )
-    preflight = _preflight_records(plan)
+    preflight = preflight_records(plan)
     companion_preflight = next(
         item for item in preflight if item.record_id.startswith("companion:")
     )

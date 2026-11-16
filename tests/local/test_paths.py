@@ -8,7 +8,9 @@ import pytest
 
 from jellyfin_show_organizer import paths
 from jellyfin_show_organizer.overrides import load_overrides
-from jellyfin_show_organizer.planner import path_key
+from jellyfin_show_organizer.plan_common import (
+    path_key,
+)
 
 pytestmark = pytest.mark.local
 
