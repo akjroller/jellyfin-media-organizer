@@ -67,7 +67,7 @@ def _video(relative: str) -> SourceFile:
     )
 
 
-def test_episode_files_are_matched_exactly_and_show_files_stay_ignored(
+def test_episode_files_are_matched_exactly_and_show_files_are_separate(
     tmp_path: Path,
 ) -> None:
     shows = tmp_path / "Shows"
@@ -99,13 +99,11 @@ def test_episode_files_are_matched_exactly_and_show_files_stay_ignored(
         f"{STEM}-thumb.png": CompanionKind.THUMBNAIL,
     }
     ignored = {file.relative_path.rsplit("/", 1)[1] for file in discovery.ignored}
-    assert {
-        f"{STEM}.jpg",
+    assert {f"{STEM}.jpg", "season.nfo", "Unrelated Episode.nfo"} <= ignored
+    assert {file.relative_path.rsplit("/", 1)[1] for file in discovery.show_files} == {
         "tvshow.nfo",
-        "season.nfo",
         "poster.jpg",
-        "Unrelated Episode.nfo",
-    } <= ignored
+    }
     unresolved = {
         file.relative_path.rsplit("/", 1)[1]: file.reason
         for file in discovery.unresolved
@@ -170,7 +168,16 @@ def test_plan_renames_episode_files_with_their_video(tmp_path: Path) -> None:
         for companion in outcome.plan.companions
         if companion.relative_path.endswith("tvshow.nfo")
     ]
-    assert [companion.status for companion in show_level] == [CompanionStatus.IGNORED]
+    assert [
+        (companion.status, companion.kind, companion.destination)
+        for companion in show_level
+    ] == [
+        (
+            CompanionStatus.ASSOCIATED,
+            "show-metadata",
+            f"{SERIES} (2024)/tvshow.nfo",
+        )
+    ]
 
 
 def test_apply_moves_and_rollback_restores_episode_files(tmp_path: Path) -> None:
@@ -194,7 +201,10 @@ def test_apply_moves_and_rollback_restores_episode_files(tmp_path: Path) -> None
     assert (destination / f"{NEW_STEM}.nfo").read_bytes() == b"<episodedetails/>"
     assert (destination / f"{NEW_STEM}-thumb.jpg").read_bytes() == b"jpeg"
     assert not (shows / SERIES / f"{STEM}.nfo").exists()
-    assert (shows / SERIES / "tvshow.nfo").read_bytes() == b"<tvshow/>"
+    assert (destination / f"{SERIES} (2024)" / "tvshow.nfo").read_bytes() == (
+        b"<tvshow/>"
+    )
+    assert not (shows / SERIES / "tvshow.nfo").exists()
 
     rollback = prepare_rollback(prepared, journal)
     execute_rollback(
@@ -208,3 +218,4 @@ def test_apply_moves_and_rollback_restores_episode_files(tmp_path: Path) -> None
     assert (shows / SERIES / f"{STEM}.nfo").read_bytes() == b"<episodedetails/>"
     assert (shows / SERIES / f"{STEM}-thumb.jpg").read_bytes() == b"jpeg"
     assert not (destination / f"{NEW_STEM}.nfo").exists()
+    assert (shows / SERIES / "tvshow.nfo").read_bytes() == b"<tvshow/>"

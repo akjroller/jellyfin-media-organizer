@@ -510,7 +510,11 @@ def _apply_review_extensions(
             key=lambda item: path_key(item.source.relative_path),
         )
     )
-    companions = plan_companions(sidecars, ordered_records)
+    companions = plan_companions(
+        sidecars,
+        ordered_records,
+        config.destination_root.expanduser().resolve(strict=False),
+    )
     return replace(plan, records=ordered_records, companions=companions)
 
 
@@ -691,7 +695,9 @@ def _apply_duplicate_group_contract(
     return replace(plan, records=ordered)
 
 
-def _rebuild_companions(source_root, plan: OrganizerPlan) -> OrganizerPlan:
+def _rebuild_companions(
+    source_root, plan: OrganizerPlan, config: PlanningConfig
+) -> OrganizerPlan:
     inventory = scan_videos(source_root)
     sources = tuple(
         item.to_source_file()
@@ -699,7 +705,11 @@ def _rebuild_companions(source_root, plan: OrganizerPlan) -> OrganizerPlan:
         if item.status is InventoryStatus.INCLUDED
     )
     sidecars = discover_sidecars(source_root, sources)
-    companions = plan_companions(sidecars, plan.records)
+    companions = plan_companions(
+        sidecars,
+        plan.records,
+        config.destination_root.expanduser().resolve(strict=False),
+    )
     return replace(plan, companions=companions)
 
 
@@ -826,7 +836,7 @@ def execute_plan(
             provider,
         )
         plan = _apply_duplicate_group_contract(plan, review_catalog)
-        plan = _rebuild_companions(source_root, plan)
+        plan = _rebuild_companions(source_root, plan, config)
 
     plan_hash = stable_plan_hash(plan)
     preflight = preflight_plan(

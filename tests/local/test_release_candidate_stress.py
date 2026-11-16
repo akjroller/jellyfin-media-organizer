@@ -340,8 +340,8 @@ def test_synthetic_release_candidate_accounts_for_every_video_and_replays_offlin
     companion_counts = Counter(record.status for record in first.plan.companions)
     assert companion_counts == Counter(
         {
-            CompanionStatus.ASSOCIATED: 1,
-            CompanionStatus.IGNORED: 1,
+            # tvshow.nfo now moves with its show's anchor episode.
+            CompanionStatus.ASSOCIATED: 2,
             CompanionStatus.UNRESOLVED: 1,
         }
     )

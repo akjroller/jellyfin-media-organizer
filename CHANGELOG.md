@@ -8,6 +8,13 @@ All notable public changes will be documented in this file. The project follows 
   libraries with one `POST /Library/Refresh` request. The server comes from
   `--server` or `JMO_JELLYFIN_URL`; the API key only from
   `JMO_JELLYFIN_API_KEY`, and it is never printed, logged, or stored.
+- Series-level files in a top-level show folder (`tvshow.nfo`, `poster.jpg`,
+  `fanart.jpg`, `banner.jpg`, `logo.png`, and Jellyfin's other documented
+  series image names) now move into the organized show folder together with
+  one episode of that show, and roll back with it. They stay in place, with a
+  reason, on a name collision, in a folder whose episodes do not resolve to
+  exactly one moving show, or when the organized show folder already has the
+  file; existing organized artwork is never replaced.
 - Added `jmo prune-empty-dirs` to remove the source folders a completed apply
   left empty, as a separate step with `--check-only`, an exact confirmation
   token, and its own journal. Only completely empty folders that held moved

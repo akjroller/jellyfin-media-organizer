@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import unicodedata
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
@@ -886,9 +886,119 @@ def _adjacent_record(
     )
 
 
+def _show_folder_anchors(
+    records: tuple[PlanRecord, ...],
+) -> dict[str, tuple[PlanRecord, str] | str]:
+    """Pick, per top-level source folder, one moving episode and its show folder.
+
+    The value is the anchor record and destination show folder, or the reason
+    series-level files from that source folder must stay where they are.
+    """
+
+    by_folder: dict[str, list[PlanRecord]] = defaultdict(list)
+    for record in records:
+        parts = PurePosixPath(record.source.relative_path).parts
+        if len(parts) > 1:
+            by_folder[_path_key(parts[0])[0]].append(record)
+    anchors: dict[str, tuple[PlanRecord, str] | str] = {}
+    for folder, folder_records in by_folder.items():
+        moving = [
+            record
+            for record in folder_records
+            if record.status is TerminalStatus.MATCHED
+            and record.destination is not None
+            and record.operation_group_id is not None
+            and record.show is not None
+        ]
+        if not moving:
+            anchors[folder] = "show-folder-has-no-moving-episode"
+            continue
+        show_folders = {
+            PurePosixPath(cast(str, record.destination)).parts[0] for record in moving
+        }
+        identities = {
+            cast(CanonicalShow, record.show).provider_identity for record in moving
+        }
+        if len(show_folders) != 1 or len(identities) != 1:
+            anchors[folder] = "show-folder-has-several-shows"
+            continue
+        anchor = min(moving, key=lambda record: _path_key(record.source.relative_path))
+        anchors[folder] = (anchor, next(iter(show_folders)))
+    return anchors
+
+
+def _plan_show_files(
+    show_files: tuple[AdjacentFile, ...],
+    records: tuple[PlanRecord, ...],
+    destination_root: Path | None,
+) -> list[CompanionPlanRecord]:
+    """Move series-level files with one episode of their show, or leave them.
+
+    A file moves only when its source folder resolves to exactly one show with
+    a moving episode, no other source folder brings a file with the same name
+    to that show, and the organized show folder does not already have it.
+    Every other case leaves the file in place with a reason; none blocks a plan.
+    """
+
+    anchors = _show_folder_anchors(records)
+    proposals: list[tuple[AdjacentFile, PlanRecord, str]] = []
+    planned: list[CompanionPlanRecord] = []
+
+    def stay(file: AdjacentFile, reason: str) -> None:
+        planned.append(
+            CompanionPlanRecord(
+                relative_path=file.relative_path,
+                extension=file.extension,
+                fingerprint=file.fingerprint,
+                status=CompanionStatus.IGNORED,
+                reason=reason,
+            )
+        )
+
+    for file in show_files:
+        source = PurePosixPath(file.relative_path)
+        decision = anchors.get(
+            _path_key(source.parts[0])[0], "show-folder-has-no-moving-episode"
+        )
+        if isinstance(decision, str):
+            stay(file, decision)
+            continue
+        anchor, show_folder = decision
+        proposals.append((file, anchor, f"{show_folder}/{source.name.casefold()}"))
+
+    destination_counts = Counter(
+        destination.casefold() for _, _, destination in proposals
+    )
+    for file, anchor, destination in proposals:
+        if destination_counts[destination.casefold()] > 1:
+            stay(file, "show-file-collision")
+        elif destination_root is not None and os.path.lexists(
+            destination_root / destination
+        ):
+            stay(file, "destination-show-file-exists")
+        else:
+            planned.append(
+                CompanionPlanRecord(
+                    relative_path=file.relative_path,
+                    extension=file.extension,
+                    fingerprint=file.fingerprint,
+                    status=CompanionStatus.ASSOCIATED,
+                    reason="series-level-file-moves-with-show",
+                    source_video=anchor.source.relative_path,
+                    operation_group_id=anchor.operation_group_id,
+                    destination=destination,
+                    kind="show-metadata"
+                    if file.extension == ".nfo"
+                    else "show-artwork",
+                )
+            )
+    return planned
+
+
 def _plan_companions(
     discovery: SidecarDiscovery,
     records: tuple[PlanRecord, ...],
+    destination_root: Path | None = None,
 ) -> tuple[CompanionPlanRecord, ...]:
     by_source = {record.source.relative_path: record for record in records}
     planned: list[CompanionPlanRecord] = []
@@ -943,6 +1053,7 @@ def _plan_companions(
     planned.extend(
         _adjacent_record(file, CompanionStatus.IGNORED) for file in discovery.ignored
     )
+    planned.extend(_plan_show_files(discovery.show_files, records, destination_root))
     return tuple(sorted(planned, key=lambda record: _path_key(record.relative_path)))
 
 
@@ -1112,7 +1223,11 @@ def _build_plan(
     ordered_records = tuple(
         sorted(records, key=lambda item: _path_key(item.source.relative_path))
     )
-    companions = _plan_companions(sidecars, ordered_records)
+    companions = _plan_companions(
+        sidecars,
+        ordered_records,
+        config.destination_root.expanduser().resolve(strict=False),
+    )
     provenance = PlanProvenance(
         tool_version=__version__,
         config_snapshot_id=config.snapshot_id,
