@@ -4,6 +4,10 @@ All notable public changes will be documented in this file. The project follows 
 
 ## Unreleased
 
+- Added `jmo jellyfin-refresh`, which asks your Jellyfin server to rescan its
+  libraries with one `POST /Library/Refresh` request. The server comes from
+  `--server` or `JMO_JELLYFIN_URL`; the API key only from
+  `JMO_JELLYFIN_API_KEY`, and it is never printed, logged, or stored.
 - Series-level files in a top-level show folder (`tvshow.nfo`, `poster.jpg`,
   `fanart.jpg`, `banner.jpg`, `logo.png`, and Jellyfin's other documented
   series image names) now move into the organized show folder together with

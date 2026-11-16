@@ -39,11 +39,12 @@ The current project boundary is deliberately narrow:
 - `apply_contract.py`, `apply_validation.py`, `apply_execution.py`, and `apply_scope.py` — exact approval binding, status-gated operation groups, optional canary scopes, live-state validation, atomic no-overwrite moves, durable journaling, group rollback, resume, and final verification.
 - `review_session.py`, `review_system.py`, `review_wizard.py`, `review_contract.py`, `review_overrides.py`, `review_identity.py`, and `review_execution.py` — hash-bound resumable review sessions, the interactive and answer-file review flows, compiling decisions into reviewed overrides, stable review references, and the reviewed planning path the CLI runs.
 - `rollback_execution.py`, `quarantine_contract.py`, `quarantine_execution.py`, and `prune_execution.py` — reversing a completed apply, reversible duplicate quarantine and restore, and removing (and restoring) source folders an apply left empty.
+- `jellyfin_server.py` — the single, explicitly invoked request that asks a Jellyfin server to rescan its libraries; the API key comes only from the environment and is never logged.
 - `user_commands.py`, `summary_io.py`, and `api.py` — the guided wizard, `init`, `run`, `demo`, `doctor`, `inspect`, and `report` commands, shared `summary.txt` parsing, and the small read-only API for embedding applications.
 - `data/` — versioned JSON/TOML contracts and synthetic default override examples.
 
 Command adapters (`cli.py`, `entrypoint.py`, `apply_scope_cli.py`,
-`quarantine_cli.py`, and `prune_cli.py`) sit at the outer edge of the package.
+`quarantine_cli.py`, `prune_cli.py`, and `jellyfin_cli.py`) sit at the outer edge of the package.
 `cli.build_parser` defines the core commands, and `entrypoint` passes the other
 adapters' registration functions to it. Core modules may be
 called by those adapters, but must not import them; the boundary is enforced by

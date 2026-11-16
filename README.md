@@ -96,6 +96,7 @@ JMO is intentionally conservative: planning and review remain non-mutating, whil
 - exact-hash, revision, and root-bound apply confirmation;
 - append-only durable apply journals with group rollback, resume, and verification;
 - optional, separately confirmed cleanup of source folders an apply left empty, with a restore step for rollback;
+- an explicit `jmo jellyfin-refresh` command that asks your Jellyfin server to rescan after a move;
 - synthetic regression fixtures for ambiguous and adversarial cases.
 
 `jmo plan` is operational and remains strictly non-mutating. It inventories one explicit Shows root, resolves each show through the persistent provider cache, constructs destinations, classifies duplicates and companions, runs preflight, and writes an immutable audit bundle. It never moves, copies, renames, overwrites, or deletes media.
