@@ -6,15 +6,19 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
+from jellyfin_show_organizer.audit_commands import (
+    run_inspect,
+    run_report,
+    run_review_status,
+)
 from jellyfin_show_organizer.user_commands import (
     run_demo,
     run_doctor,
     run_init,
-    run_inspect,
-    run_report,
-    run_review_status,
-    run_wizard,
     write_example,
+)
+from jellyfin_show_organizer.wizard import (
+    run_wizard,
 )
 
 
@@ -212,7 +216,7 @@ def test_review_status_reports_percentages_and_safe_movement_boundary(
         approved_partial=False,
     )
     monkeypatch.setattr(
-        "jellyfin_show_organizer.user_commands.load_review_session",
+        "jellyfin_show_organizer.audit_commands.load_review_session",
         lambda _payload: fake_session,
     )
 
@@ -252,7 +256,7 @@ def test_review_status_requires_export_inputs(tmp_path: Path, monkeypatch) -> No
         approved_partial=False,
     )
     monkeypatch.setattr(
-        "jellyfin_show_organizer.user_commands.load_review_session",
+        "jellyfin_show_organizer.audit_commands.load_review_session",
         lambda _payload: fake_session,
     )
 
@@ -294,7 +298,7 @@ def test_review_status_can_include_plan_totals_without_private_paths(
         approved_partial=False,
     )
     monkeypatch.setattr(
-        "jellyfin_show_organizer.user_commands.load_review_session",
+        "jellyfin_show_organizer.audit_commands.load_review_session",
         lambda _payload: fake_session,
     )
 
@@ -360,7 +364,7 @@ def test_review_status_exports_path_free_evidence_snapshot(
         approved_partial=False,
     )
     monkeypatch.setattr(
-        "jellyfin_show_organizer.user_commands.load_review_session",
+        "jellyfin_show_organizer.audit_commands.load_review_session",
         lambda _payload: fake_session,
     )
 
@@ -423,7 +427,7 @@ def test_wizard_ready_path_stops_after_check_only(tmp_path: Path, monkeypatch) -
     import jellyfin_show_organizer.apply_execution as apply_execution
     import jellyfin_show_organizer.review_contract as review_contract
     import jellyfin_show_organizer.review_system as review_system
-    import jellyfin_show_organizer.user_commands as commands
+    import jellyfin_show_organizer.wizard as commands
 
     def fake_outcome():
         return SimpleNamespace(

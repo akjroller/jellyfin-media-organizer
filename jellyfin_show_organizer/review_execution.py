@@ -7,12 +7,14 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
+from .companion_planning import plan_companions
 from .destination import (
     DestinationPolicy,
     DestinationStatus,
     build_episode_destination,
     build_extra_destination,
 )
+from .duplicate_planning import apply_duplicate_decisions
 from .episode_assignment_strict import AssignmentStatus, SourceEpisodeAssignment
 from .extra_naming import derive_extra_display_identity
 from .inventory import (
@@ -29,20 +31,17 @@ from .models import (
     PlanRecord,
     TerminalStatus,
 )
+from .plan_common import PlanningConfigurationError, path_key
+from .plan_preflight import preflight_records
 from .planner import (
     PlanningConfig,
-    PlanningConfigurationError,
     PlanningOutcome,
     TrackingTmdbCatalogCache,
     TrackingTvmazeCatalogCache,
-    apply_duplicate_decisions,
     build_plan,
     external_state_path,
     http_json_getter,
-    path_key,
-    plan_companions,
     plan_episode,
-    preflight_records,
 )
 from .preflight import authorize_destination_root, preflight_plan
 from .provider_aliases import TvmazeAliasProviderAdapter

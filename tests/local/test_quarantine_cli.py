@@ -18,8 +18,10 @@ from jellyfin_show_organizer.quarantine_contract import (
 )
 from jellyfin_show_organizer.quarantine_execution import (
     PreparedQuarantine,
-    PreparedQuarantineRestore,
     QuarantineExecutionResult,
+)
+from jellyfin_show_organizer.quarantine_restore import (
+    PreparedQuarantineRestore,
     QuarantineRestoreResult,
 )
 

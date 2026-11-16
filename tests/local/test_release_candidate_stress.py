@@ -8,7 +8,10 @@ from typing import cast
 import pytest
 
 from jellyfin_show_organizer.models import CompanionStatus, TerminalStatus
-from jellyfin_show_organizer.planner import PlanningConfig, execute_plan
+from jellyfin_show_organizer.planner import (
+    PlanningConfig,
+    execute_plan,
+)
 from jellyfin_show_organizer.provider_http import ProviderHttpError
 from jellyfin_show_organizer.tvmaze_cache import (
     TVMAZE_EPISODES_URL,

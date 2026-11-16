@@ -9,7 +9,9 @@ from jellyfin_show_organizer.cli import (
     build_parser,
     main,
 )
-from jellyfin_show_organizer.planner import PlanningConfig
+from jellyfin_show_organizer.planner import (
+    PlanningConfig,
+)
 
 pytestmark = pytest.mark.local
 

@@ -2,6 +2,12 @@ from pathlib import Path
 
 import pytest
 
+from jellyfin_show_organizer.companion_planning import (
+    plan_companions,
+)
+from jellyfin_show_organizer.duplicate_planning import (
+    apply_duplicate_decisions,
+)
 from jellyfin_show_organizer.models import (
     CanonicalShow,
     CompanionStatus,
@@ -21,8 +27,6 @@ from jellyfin_show_organizer.overrides import (
 )
 from jellyfin_show_organizer.planner import (
     PlanningConfigurationError,
-    _apply_duplicate_decisions,
-    _plan_companions,
 )
 from jellyfin_show_organizer.sidecars import (
     AdjacentDisposition,
@@ -108,7 +112,7 @@ def test_single_explicit_source_preference_selects_winner_and_keeps_sidecar_grou
         )
     )
 
-    planned = _apply_duplicate_decisions(records, discovery, overrides)
+    planned = apply_duplicate_decisions(records, discovery, overrides)
     by_source = {record.source.relative_path: record for record in planned}
 
     assert by_source[second].status is TerminalStatus.MATCHED
@@ -117,7 +121,7 @@ def test_single_explicit_source_preference_selects_winner_and_keeps_sidecar_grou
     assert "reviewed preferred source" in by_source[second].duplicate.evidence
     assert by_source[first].status is TerminalStatus.DUPLICATE
 
-    companions = _plan_companions(discovery, tuple(planned))
+    companions = plan_companions(discovery, tuple(planned))
     assert len(companions) == 1
     assert companions[0].status is CompanionStatus.DUPLICATE
     assert companions[0].source_video == first
@@ -132,7 +136,7 @@ def test_equal_explicit_ranks_remain_suspicious():
         DuplicatePreferenceOverride(source=second, rank=10),
     )
 
-    planned = _apply_duplicate_decisions(
+    planned = apply_duplicate_decisions(
         records,
         SidecarDiscovery(companions=(), unresolved=(), ignored=()),
         overrides,
@@ -158,7 +162,7 @@ def test_unknown_duplicate_preference_reference_fails_closed():
     )
 
     with pytest.raises(PlanningConfigurationError, match="unknown source"):
-        _apply_duplicate_decisions(
+        apply_duplicate_decisions(
             records,
             SidecarDiscovery(companions=(), unresolved=(), ignored=()),
             overrides,
@@ -178,7 +182,7 @@ def test_consumed_reviewed_duplicate_winner_is_ignored_after_same_root_move():
         )
     )
 
-    planned = _apply_duplicate_decisions(
+    planned = apply_duplicate_decisions(
         records,
         SidecarDiscovery(companions=(), unresolved=(), ignored=()),
         overrides,
@@ -192,7 +196,7 @@ def test_existing_managed_destination_wins_against_old_duplicate_release():
         "Example Series (2024)/Season 01/Example Series (2024) S01E01 - Pilot.mkv"
     )
     release = _record("Example Series/release-a.mkv")
-    planned = _apply_duplicate_decisions(
+    planned = apply_duplicate_decisions(
         [managed, release],
         SidecarDiscovery(companions=(), unresolved=(), ignored=()),
         _catalog(),
@@ -221,7 +225,7 @@ def test_preference_for_present_blocked_source_does_not_hide_plan_findings():
     )
     overrides = _catalog(DuplicatePreferenceOverride(source=source, rank=100))
 
-    planned = _apply_duplicate_decisions(
+    planned = apply_duplicate_decisions(
         [blocked],
         SidecarDiscovery(companions=(), unresolved=(), ignored=()),
         overrides,
@@ -237,7 +241,7 @@ def test_preference_for_non_collision_source_fails_closed():
     with pytest.raises(
         PlanningConfigurationError, match="not part of a destination collision"
     ):
-        _apply_duplicate_decisions(
+        apply_duplicate_decisions(
             [_record(source)],
             SidecarDiscovery(companions=(), unresolved=(), ignored=()),
             overrides,

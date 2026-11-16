@@ -192,7 +192,9 @@ season_map = { "1" = 24, "2" = 25 }
 
 def test_provider_season_remap_changes_only_catalog_coordinate():
     from jellyfin_show_organizer.models import ParseResult
-    from jellyfin_show_organizer.planner import _provider_season_parse
+    from jellyfin_show_organizer.planner import (
+        _provider_season_parse,
+    )
 
     original = ParseResult(series_hint="Example", season=1, episodes=(3,))
     remapped, reasons = _provider_season_parse(original, {1: 24})

@@ -20,7 +20,9 @@ from jellyfin_show_organizer.models import (
     SourceFingerprint,
     TerminalStatus,
 )
-from jellyfin_show_organizer.planner import PlanningConfigurationError
+from jellyfin_show_organizer.planner import (
+    PlanningConfigurationError,
+)
 from jellyfin_show_organizer.review_contract import (
     DuplicateGroupAction,
     DuplicateGroupDecision,

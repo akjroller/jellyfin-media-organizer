@@ -23,7 +23,9 @@ from .rollback_execution import (
     total_rollback_members,
 )
 from .run_provenance import detect_source_revision
-from .user_commands import run_wizard
+from .wizard import (
+    run_wizard,
+)
 
 CommandHandler = Callable[[argparse.Namespace], int]
 ROLLBACK_FAILED_EXIT = 31

@@ -12,6 +12,10 @@ import pytest
 
 from jellyfin_show_organizer import review_execution
 from jellyfin_show_organizer.api import inspect_audit
+from jellyfin_show_organizer.audit_commands import (
+    run_inspect,
+    run_report,
+)
 from jellyfin_show_organizer.cli import PLAN_SUCCESS_EXIT, main
 from jellyfin_show_organizer.inventory import (
     UNSUPPORTED_VIDEO_EXTENSIONS,
@@ -27,7 +31,6 @@ from jellyfin_show_organizer.planner import (
     PlanningOutcome,
     execute_plan,
 )
-from jellyfin_show_organizer.user_commands import run_inspect, run_report
 
 pytestmark = pytest.mark.local
 

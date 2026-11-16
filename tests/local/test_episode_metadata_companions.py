@@ -19,7 +19,10 @@ from jellyfin_show_organizer.models import (
     SourceFile,
     SourceFingerprint,
 )
-from jellyfin_show_organizer.planner import PlanningConfig, execute_plan
+from jellyfin_show_organizer.planner import (
+    PlanningConfig,
+    execute_plan,
+)
 from jellyfin_show_organizer.rollback_execution import (
     execute_rollback,
     prepare_rollback,

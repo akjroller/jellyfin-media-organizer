@@ -11,7 +11,10 @@ from typing import cast
 import pytest
 
 from jellyfin_show_organizer.models import CompanionStatus, TerminalStatus
-from jellyfin_show_organizer.planner import PlanningConfig, execute_plan
+from jellyfin_show_organizer.planner import (
+    PlanningConfig,
+    execute_plan,
+)
 from jellyfin_show_organizer.schema import PLAN_SCHEMA_VERSION
 from jellyfin_show_organizer.tvmaze_cache import JsonGetter
 

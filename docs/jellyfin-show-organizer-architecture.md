@@ -22,7 +22,8 @@ The current project boundary is deliberately narrow:
 ## Package layout
 
 - `cli.py` — plan, review, and explicitly gated apply command surfaces.
-- `planner.py` — end-to-end inventory, resolution, assignment, duplicate, companion, provenance, preflight, and audit orchestration.
+- `planner.py` — end-to-end orchestration: inventory, show-group resolution and assignment, provenance, preflight, and the audit bundle.
+- `plan_common.py`, `duplicate_planning.py`, `companion_planning.py`, and `plan_preflight.py` — the planning stages the planner calls: shared path keys and errors, duplicate recovery and decisions, companion and series-file planning, and preflight records.
 - `inventory.py` and `sidecars.py` — authorized-root scanning, deterministic read-only video inventory, and adjacent companion discovery.
 - `paths.py` — the single fail-closed symlink/junction check shared by inventory, sidecar discovery, preflight, apply, rollback, and quarantine.
 - `filename_parser.py`, `extra_classifier.py`, and `extra_naming.py` — pure filename/path evidence, fail-closed extra classification, and extra display identity.
@@ -38,9 +39,9 @@ The current project boundary is deliberately narrow:
 - `preflight.py` — whole-plan safety validation before review or mutation.
 - `apply_contract.py`, `apply_validation.py`, `apply_execution.py`, and `apply_scope.py` — exact approval binding, status-gated operation groups, optional canary scopes, live-state validation, atomic no-overwrite moves, durable journaling, group rollback, resume, and final verification.
 - `review_session.py`, `review_system.py`, `review_wizard.py`, `review_contract.py`, `review_overrides.py`, `review_identity.py`, and `review_execution.py` — hash-bound resumable review sessions, the interactive and answer-file review flows, compiling decisions into reviewed overrides, stable review references, and the reviewed planning path the CLI runs.
-- `rollback_execution.py`, `quarantine_contract.py`, `quarantine_execution.py`, and `prune_execution.py` — reversing a completed apply, reversible duplicate quarantine and restore, and removing (and restoring) source folders an apply left empty.
+- `rollback_execution.py`, `quarantine_contract.py`, `quarantine_execution.py`, `quarantine_restore.py`, and `prune_execution.py` — reversing a completed apply, reversible duplicate quarantine and restore, and removing (and restoring) source folders an apply left empty.
 - `jellyfin_server.py` — the single, explicitly invoked request that asks a Jellyfin server to rescan its libraries; the API key comes only from the environment and is never logged.
-- `user_commands.py`, `summary_io.py`, and `api.py` — the guided wizard, `init`, `run`, `demo`, `doctor`, `inspect`, and `report` commands, shared `summary.txt` parsing, and the small read-only API for embedding applications.
+- `wizard.py`, `user_commands.py`, `audit_commands.py`, `summary_io.py`, and `api.py` — the guided wizard; the `init`, `demo`, and `doctor` commands; the read-only `inspect`, `review-status`, and `report` commands; shared `summary.txt` parsing; and the small read-only API for embedding applications.
 - `data/` — versioned JSON/TOML contracts and synthetic default override examples.
 
 Command adapters (`cli.py`, `entrypoint.py`, `apply_scope_cli.py`,

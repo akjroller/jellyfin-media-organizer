@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from jellyfin_show_organizer.companion_planning import (
+    plan_show_files,
+)
 from jellyfin_show_organizer.models import (
     CanonicalShow,
     CompanionStatus,
@@ -20,7 +23,6 @@ from jellyfin_show_organizer.models import (
 from jellyfin_show_organizer.planner import (
     PlanningConfig,
     PlanningOutcome,
-    _plan_show_files,
     execute_plan,
 )
 from jellyfin_show_organizer.sidecars import AdjacentDisposition, AdjacentFile
@@ -208,7 +210,7 @@ def test_a_folder_whose_episodes_resolve_to_two_shows_keeps_its_files() -> None:
         "show-level-file",
     )
 
-    (planned,) = _plan_show_files(
+    (planned,) = plan_show_files(
         (poster,),
         (matched("Mixed/a.mkv", 11, "Alpha"), matched("Mixed/b.mkv", 22, "Beta")),
         None,

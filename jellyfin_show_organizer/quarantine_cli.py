@@ -15,11 +15,13 @@ from .quarantine_contract import (
 from .quarantine_execution import (
     QuarantineExecutionError,
     execute_quarantine,
-    execute_quarantine_restore,
     prepare_quarantine,
+    quarantine_token,
+)
+from .quarantine_restore import (
+    execute_quarantine_restore,
     prepare_quarantine_restore,
     quarantine_restore_token,
-    quarantine_token,
 )
 from .review_session import atomic_write_new
 from .run_provenance import detect_source_revision

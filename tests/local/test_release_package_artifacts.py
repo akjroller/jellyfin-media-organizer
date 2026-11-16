@@ -13,7 +13,10 @@ from jellyfin_show_organizer.inventory import (
     scan_videos,
 )
 from jellyfin_show_organizer.models import CompanionStatus
-from jellyfin_show_organizer.planner import PlanningConfig, execute_plan
+from jellyfin_show_organizer.planner import (
+    PlanningConfig,
+    execute_plan,
+)
 from jellyfin_show_organizer.sidecars import (
     AdjacentDisposition,
     CompanionKind,

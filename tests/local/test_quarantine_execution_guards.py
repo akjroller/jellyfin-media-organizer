@@ -20,10 +20,12 @@ from jellyfin_show_organizer.quarantine_execution import (
     PreparedQuarantine,
     QuarantineExecutionError,
     execute_quarantine,
+    quarantine_token,
+)
+from jellyfin_show_organizer.quarantine_restore import (
     execute_quarantine_restore,
     prepare_quarantine_restore,
     quarantine_restore_token,
-    quarantine_token,
 )
 
 pytestmark = pytest.mark.local
