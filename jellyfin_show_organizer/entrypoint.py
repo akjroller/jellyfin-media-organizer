@@ -12,6 +12,7 @@ from .apply_execution import ApplyExecutionError, prepare_apply
 from .apply_scope import ApplyScopeError
 from .apply_scope_cli import bind_optional_scope, register_apply_scope_commands
 from .apply_validation import ApplyFilesystemError, validate_apply_roots
+from .jellyfin_cli import register_jellyfin_commands
 from .prune_cli import register_prune_commands
 from .quarantine_cli import register_quarantine_commands
 from .rollback_execution import (
@@ -37,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
             _register_rollback_command,
             register_quarantine_commands,
             register_prune_commands,
+            register_jellyfin_commands,
         )
     )
 

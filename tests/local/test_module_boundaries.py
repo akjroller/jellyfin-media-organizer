@@ -16,6 +16,7 @@ COMMAND_ADAPTERS = {
     "apply_scope_cli",
     "quarantine_cli",
     "prune_cli",
+    "jellyfin_cli",
     "__main__",
 }
 
