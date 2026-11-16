@@ -314,3 +314,83 @@ def test_public_parser_has_explicit_scope_controls_only():
     assert args.group_ids == ["op-a"]
     assert not hasattr(args, "limit")
     assert not hasattr(args, "first")
+
+
+_VALID_SCOPE = {
+    "schema_version": 1,
+    "plan_sha256": "a" * 64,
+    "review_session_sha256": "b" * 64,
+    "source_revision": "c" * 40,
+    "group_ids": ["op-a"],
+}
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"schema_version": 2}, "unsupported apply scope schema"),
+        ({"schema_version": True}, "schema_version must be an integer"),
+        ({"plan_sha256": 7}, "plan_sha256 must be a string"),
+        ({"plan_sha256": "A" * 64}, "plan_sha256 must be a SHA-256"),
+        ({"review_session_sha256": 7}, "review_session_sha256 must be a string"),
+        ({"review_session_sha256": "x"}, "review_session_sha256 must be a SHA-256"),
+        ({"source_revision": 7}, "source_revision must be a string"),
+        ({"source_revision": "abc"}, "source_revision must be a Git commit"),
+        ({"group_ids": "op-a"}, "group_ids must be strings"),
+        ({"group_ids": []}, "at least one operation group"),
+        ({"group_ids": [""]}, "group IDs cannot be empty"),
+        ({"group_ids": ["op-a", "op-a"]}, "group IDs must be unique"),
+        ({"extra": True}, "unexpected fields"),
+    ],
+)
+def test_malformed_scope_artifacts_are_refused(
+    change: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ApplyScopeError, match=message):
+        load_apply_scope(json.dumps({**_VALID_SCOPE, **change}).encode())
+
+
+def test_unparseable_scope_artifacts_are_refused() -> None:
+    for payload in (b"\xff", b"{nope", b"[]"):
+        with pytest.raises(ApplyScopeError):
+            load_apply_scope(payload)
+
+
+def test_scope_binding_guards(tmp_path: Path) -> None:
+    prepared, _source, _destination = _prepared(tmp_path)
+    scope = create_apply_scope(prepared, ("op-a",))
+    payload = render_apply_scope(scope)
+
+    with pytest.raises(ApplyScopeError, match="empty"):
+        create_apply_scope(prepared, ("",))
+    with pytest.raises(ApplyScopeError, match="invalid format"):
+        prepare_scoped_apply(prepared, payload, approved_scope_sha256="nope")
+
+    scoped = prepare_scoped_apply(prepared, payload, approved_scope_sha256=scope.sha256)
+    with pytest.raises(ApplyScopeError, match="already scoped"):
+        create_apply_scope(scoped, ("op-a",))
+    with pytest.raises(ApplyScopeError, match="already bound"):
+        prepare_scoped_apply(scoped, payload, approved_scope_sha256=scope.sha256)
+
+    for other, message in (
+        (replace(prepared, review_session_sha256="d" * 64), "another review session"),
+        (replace(prepared, source_revision="e" * 40), "another source revision"),
+    ):
+        with pytest.raises(ApplyScopeError, match=message):
+            prepare_scoped_apply(other, payload, approved_scope_sha256=scope.sha256)
+
+    unknown = {**_VALID_SCOPE, "group_ids": ["op-z"]}
+    unknown_payload = json.dumps(
+        unknown, sort_keys=True, separators=(",", ":")
+    ).encode()
+    unknown_sha = load_apply_scope(unknown_payload).sha256
+    with pytest.raises(ApplyScopeError, match="unavailable operation group"):
+        prepare_scoped_apply(
+            prepared, unknown_payload, approved_scope_sha256=unknown_sha
+        )
+
+    everything = {**_VALID_SCOPE, "group_ids": ["op-a", "op-b"]}
+    full_payload = json.dumps(everything).encode()
+    full_sha = load_apply_scope(full_payload).sha256
+    with pytest.raises(ApplyScopeError, match="proper subset"):
+        prepare_scoped_apply(prepared, full_payload, approved_scope_sha256=full_sha)
