@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from jellyfin_show_organizer import quarantine_execution
+from jellyfin_show_organizer import quarantine_execution, quarantine_restore
 from jellyfin_show_organizer.apply_contract import ApplyContract
 from jellyfin_show_organizer.apply_execution import (
     ApplyExecutionError,
@@ -22,6 +22,8 @@ from jellyfin_show_organizer.quarantine_execution import (
     PreparedQuarantine,
     QuarantineExecutionError,
     execute_quarantine,
+)
+from jellyfin_show_organizer.quarantine_restore import (
     execute_quarantine_restore,
     prepare_quarantine_restore,
 )
@@ -315,7 +317,7 @@ def test_restore_crash_after_atomic_move_is_adopted_on_resume(
     )
     restore = prepare_quarantine_restore(prepared, quarantine_journal)
     restore_journal = tmp_path / "restore.jsonl"
-    original = quarantine_execution._atomic_rename_no_replace
+    original = quarantine_restore._atomic_rename_no_replace
     crashed = False
 
     def crash_after_first_restore(src: Path, dst: Path) -> None:
@@ -326,7 +328,7 @@ def test_restore_crash_after_atomic_move_is_adopted_on_resume(
             raise KeyboardInterrupt
 
     monkeypatch.setattr(
-        quarantine_execution, "_atomic_rename_no_replace", crash_after_first_restore
+        quarantine_restore, "_atomic_rename_no_replace", crash_after_first_restore
     )
     with pytest.raises(QuarantineExecutionError, match="interrupted safely"):
         execute_quarantine_restore(
@@ -337,7 +339,7 @@ def test_restore_crash_after_atomic_move_is_adopted_on_resume(
             restore_journal_path=restore_journal,
         )
 
-    monkeypatch.setattr(quarantine_execution, "_atomic_rename_no_replace", original)
+    monkeypatch.setattr(quarantine_restore, "_atomic_rename_no_replace", original)
     resumed = execute_quarantine_restore(
         restore,
         source,

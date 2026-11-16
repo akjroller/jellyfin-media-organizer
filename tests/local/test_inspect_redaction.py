@@ -2,7 +2,10 @@ import json
 
 import pytest
 
-from jellyfin_show_organizer.user_commands import run_inspect, run_report
+from jellyfin_show_organizer.audit_commands import (
+    run_inspect,
+    run_report,
+)
 
 pytestmark = pytest.mark.local
 

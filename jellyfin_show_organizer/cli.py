@@ -20,6 +20,11 @@ from .apply_execution import (
     total_moving_members,
 )
 from .apply_validation import ApplyFilesystemError, validate_apply_roots
+from .audit_commands import (
+    run_inspect,
+    run_report,
+    run_review_status,
+)
 from .inventory import InventoryStatus
 from .models import TerminalStatus
 from .provider_aliases import TvmazeAliasProviderAdapter
@@ -47,11 +52,10 @@ from .user_commands import (
     run_demo,
     run_doctor,
     run_init,
-    run_inspect,
-    run_report,
-    run_review_status,
-    run_wizard,
     write_example,
+)
+from .wizard import (
+    run_wizard,
 )
 
 CommandHandler = Callable[[argparse.Namespace], int]
